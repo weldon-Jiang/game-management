@@ -1,0 +1,35 @@
+-- 任务表
+-- 用于存储和管理自动化任务
+
+CREATE TABLE IF NOT EXISTS `task` (
+    `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
+    `name` VARCHAR(128) NOT NULL COMMENT '任务名称',
+    `description` VARCHAR(512) DEFAULT NULL COMMENT '任务描述',
+    `type` VARCHAR(32) NOT NULL COMMENT '任务类型：template_match,input_sequence,scene_detection,account_switch,stream_control,custom',
+    `target_agent_id` VARCHAR(64) DEFAULT NULL COMMENT '目标Agent ID',
+    `streaming_account_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的流媒体账号ID',
+    `game_account_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的游戏账号ID',
+    `status` VARCHAR(16) DEFAULT 'pending' COMMENT '状态：pending,running,completed,failed,cancelled',
+    `priority` INT DEFAULT 0 COMMENT '优先级',
+    `params` TEXT COMMENT '任务参数JSON（包含账号信息等）',
+    `result` TEXT COMMENT '任务结果JSON',
+    `error_message` VARCHAR(512) DEFAULT NULL COMMENT '错误信息',
+    `created_by` VARCHAR(64) DEFAULT NULL COMMENT '创建人',
+    `assigned_at` DATETIME DEFAULT NULL COMMENT '分配时间',
+    `started_at` DATETIME DEFAULT NULL COMMENT '开始执行时间',
+    `completed_at` DATETIME DEFAULT NULL COMMENT '完成时间',
+    `expire_at` DATETIME DEFAULT NULL COMMENT '过期时间',
+    `retry_count` INT DEFAULT 0 COMMENT '重试次数',
+    `max_retries` INT DEFAULT 3 COMMENT '最大重试次数',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
+    PRIMARY KEY (`id`),
+    KEY `idx_target_agent` (`target_agent_id`),
+    KEY `idx_streaming_account` (`streaming_account_id`),
+    KEY `idx_game_account` (`game_account_id`),
+    KEY `idx_status` (`status`),
+    KEY `idx_type` (`type`),
+    KEY `idx_created_at` (`created_at`),
+    KEY `idx_deleted` (`deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务表';

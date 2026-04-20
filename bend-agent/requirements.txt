@@ -1,0 +1,37 @@
+# Bend Agent Dependencies
+# Python 3.8+
+
+# HTTP & WebSocket
+aiohttp>=3.8.0
+websockets>=10.0
+
+# Computer Vision & Image Processing
+opencv-python>=4.5.0
+numpy>=1.21.0
+Pillow>=9.0.0
+
+# Template Matching
+scikit-image>=0.19.0
+
+# OCR (Optional - for text recognition)
+easyocr>=1.4.0
+# paddleocr>=2.6.0
+
+# Input Control
+pyautogui>=0.9.54
+pydirectinput>=1.0.4
+# pywin32 for Windows API
+pywin32>=302
+
+# Gamepad (Xbox Controller)
+inputs>=0.5
+xlib>=0.21
+
+# Configuration
+PyYAML>=6.0
+
+# Logging
+python-json-logger>=2.0.0
+
+# Utils
+asyncio-throttle>=1.0.0

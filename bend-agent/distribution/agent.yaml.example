@@ -1,0 +1,101 @@
+# Bend Agent 配置文件
+# 请根据你的平台服务器地址修改以下配置
+
+# 后端服务器配置
+backend:
+  # 你的平台服务器地址（HTTP）
+  base_url: "http://你的服务器IP或域名:8080"
+
+  # 你的平台WebSocket地址
+  ws_url: "ws://你的服务器IP或域名:8080"
+
+# Agent 设置
+agent:
+  # 心跳间隔（秒），默认30秒
+  heartbeat_interval: 30
+
+  # 断线重连延迟（秒）
+  reconnect_delay: 5
+
+  # 最大重连次数
+  max_reconnect_attempts: 10
+
+# 视频捕获设置
+video:
+  # 每秒捕获帧数
+  fps: 10
+
+  # 捕获间隔（秒）
+  capture_interval: 0.1
+
+  # 最大帧缓冲区大小
+  max_frame_buffer: 5
+
+# 模板匹配设置
+template:
+  # 匹配阈值 (0.0-1.0)，越高越严格
+  threshold: 0.8
+
+  # 模板图片目录
+  template_dir: "./templates"
+
+  # 是否启用模板缓存
+  cache_enabled: true
+
+# 场景检测设置
+scene:
+  # 检测间隔（秒）
+  detection_interval: 0.5
+
+  # 置信度阈值
+  confidence_threshold: 0.7
+
+# 输入控制设置
+input:
+  # 点击延迟（秒）
+  click_delay: 0.1
+
+  # 按键延迟（秒）
+  key_press_delay: 0.05
+
+  # 移动持续时间（秒）
+  move_duration: 0.2
+
+# 自动化设置
+automation:
+  # 最大重试次数
+  max_retries: 3
+
+  # 重试延迟（秒）
+  retry_delay: 2
+
+  # 操作冷却时间（秒）
+  action_cooldown: 1
+
+# 日志设置
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+
+  # 日志文件路径
+  file: "./logs/agent.log"
+
+  # 日志文件最大大小（MB）
+  max_size: 10
+
+  # 保留的日志备份数量
+  backup_count: 5
+
+# 窗口设置
+window:
+  # 默认窗口宽度
+  default_width: 1280
+
+  # 默认窗口高度
+  default_height: 720
+
+  # 最小宽度
+  min_width: 800
+
+  # 最小高度
+  min_height: 600

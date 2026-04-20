@@ -1,0 +1,725 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Bend Platform API",
+    "description": "Bend平台后端API，支持商户管理、流媒体账号管理、Xbox主机管理、VIP配置和激活码管理",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8090",
+      "description": "本地开发环境"
+    }
+  ],
+  "paths": {
+    "/api/auth/login": {
+      "post": {
+        "tags": ["认证"],
+        "summary": "用户登录",
+        "description": "用户登录接口。平台管理员只校验密码；商户用户需要校验商户状态和有效期后再校验密码。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {"type": "string", "description": "用户名"},
+                  "password": {"type": "string", "description": "密码"}
+                },
+                "required": ["username", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "登录成功",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/LoginResponse"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "tags": ["认证"],
+        "summary": "用户注册",
+        "description": "创建新商户和新用户，自动分配owner角色。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {"type": "string", "description": "用户名"},
+                  "password": {"type": "string", "description": "密码"},
+                  "phone": {"type": "string", "description": "手机号"},
+                  "merchantName": {"type": "string", "description": "商户名称"}
+                },
+                "required": ["username", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "注册成功", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LoginResponse"}}}}
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": ["认证"],
+        "summary": "获取当前用户信息",
+        "security": [{"BearerAuth": []}],
+        "responses": {"200": {"description": "成功", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MerchantUser"}}}}}
+      }
+    },
+    "/api/merchants": {
+      "get": {
+        "tags": ["商户"],
+        "summary": "获取商户列表",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "pageNum", "in": "query", "schema": {"type": "integer", "default": 1}},
+          {"name": "pageSize", "in": "query", "schema": {"type": "integer", "default": 10}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      },
+      "post": {
+        "tags": ["商户"],
+        "summary": "创建商户",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "name", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "phone", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/merchants/{id}": {
+      "get": {
+        "tags": ["商户"],
+        "summary": "获取商户详情",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      },
+      "delete": {
+        "tags": ["商户"],
+        "summary": "删除商户",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/merchants/{id}/status": {
+      "put": {
+        "tags": ["商户"],
+        "summary": "更新商户状态",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "status", "in": "query", "required": true, "schema": {"type": "string", "enum": ["active", "expired", "suspended"]}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/users": {
+      "get": {
+        "tags": ["商户用户"],
+        "summary": "获取用户列表",
+        "security": [{"BearerAuth": []}],
+        "description": "平台管理员可查看所有用户，其他角色只能查看本商户用户。",
+        "parameters": [
+          {"name": "pageNum", "in": "query", "schema": {"type": "integer", "default": 1}},
+          {"name": "pageSize", "in": "query", "schema": {"type": "integer", "default": 10}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/users/{id}": {
+      "get": {
+        "tags": ["商户用户"],
+        "summary": "获取用户详情",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      },
+      "put": {
+        "tags": ["商户用户"],
+        "summary": "更新用户信息",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "phone", "in": "query", "schema": {"type": "string"}},
+          {"name": "role", "in": "query", "schema": {"type": "string"}},
+          {"name": "status", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      },
+      "delete": {
+        "tags": ["商户用户"],
+        "summary": "删除用户",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/users/{id}/password": {
+      "put": {
+        "tags": ["商户用户"],
+        "summary": "重置用户密码",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "newPassword", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/streaming-accounts": {
+      "get": {
+        "tags": ["流媒体账号"],
+        "summary": "获取流媒体账号列表",
+        "security": [{"BearerAuth": []}],
+        "description": "平台管理员可查看所有账号，其他角色只能查看本商户账号。",
+        "parameters": [
+          {"name": "pageNum", "in": "query", "schema": {"type": "integer", "default": 1}},
+          {"name": "pageSize", "in": "query", "schema": {"type": "integer", "default": 10}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      },
+      "post": {
+        "tags": ["流媒体账号"],
+        "summary": "创建流媒体账号",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string", "description": "账号名称"},
+                  "email": {"type": "string", "description": "邮箱"},
+                  "authCode": {"type": "string", "description": "认证码"}
+                },
+                "required": ["name", "email"]
+              }
+            }
+          }
+        },
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/streaming-accounts/{id}": {
+      "get": {
+        "tags": ["流媒体账号"],
+        "summary": "获取流媒体账号详情",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      },
+      "put": {
+        "tags": ["流媒体账号"],
+        "summary": "更新流媒体账号",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string"},
+                  "authCode": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {"200": {"description": "成功"}}
+      },
+      "delete": {
+        "tags": ["流媒体账号"],
+        "summary": "删除流媒体账号",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/streaming-accounts/{id}/xbox-hosts": {
+      "get": {
+        "tags": ["流媒体账号"],
+        "summary": "获取已登录的Xbox主机列表",
+        "security": [{"BearerAuth": []}],
+        "description": "获取该流媒体账号在哪些Xbox主机上登录过（登录记录）",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/xbox-hosts": {
+      "get": {
+        "tags": ["Xbox主机"],
+        "summary": "获取Xbox主机列表",
+        "security": [{"BearerAuth": []}],
+        "description": "平台管理员可查看所有主机，其他角色只能查看本商户主机。",
+        "responses": {"200": {"description": "成功"}}
+      },
+      "post": {
+        "tags": ["Xbox主机"],
+        "summary": "创建Xbox主机",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "xboxId": {"type": "string", "description": "Xbox ID"},
+                  "name": {"type": "string", "description": "主机名称"},
+                  "ipAddress": {"type": "string", "description": "IP地址"}
+                },
+                "required": ["xboxId"]
+              }
+            }
+          }
+        },
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/xbox-hosts/page": {
+      "get": {
+        "tags": ["Xbox主机"],
+        "summary": "分页获取Xbox主机列表",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "pageNum", "in": "query", "schema": {"type": "integer", "default": 1}},
+          {"name": "pageSize", "in": "query", "schema": {"type": "integer", "default": 10}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/xbox-hosts/{id}": {
+      "get": {
+        "tags": ["Xbox主机"],
+        "summary": "获取Xbox主机详情",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      },
+      "put": {
+        "tags": ["Xbox主机"],
+        "summary": "更新Xbox主机",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string"},
+                  "ipAddress": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {"200": {"description": "成功"}}
+      },
+      "delete": {
+        "tags": ["Xbox主机"],
+        "summary": "删除Xbox主机",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/xbox-hosts/{id}/bind": {
+      "put": {
+        "tags": ["Xbox主机"],
+        "summary": "绑定流媒体账号",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "streamingAccountId", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "gamertag", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/xbox-hosts/{id}/unbind": {
+      "put": {
+        "tags": ["Xbox主机"],
+        "summary": "解绑流媒体账号",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/xbox-hosts/{id}/available-streaming-accounts": {
+      "get": {
+        "tags": ["Xbox主机"],
+        "summary": "获取Xbox主机可用的流媒体账号",
+        "security": [{"BearerAuth": []}],
+        "description": "获取在该Xbox主机上登录过的流媒体账号列表",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/vip-configs": {
+      "get": {
+        "tags": ["VIP配置"],
+        "summary": "获取VIP配置列表",
+        "security": [{"BearerAuth": []}],
+        "description": "平台管理员可查看所有配置，其他角色只能查看本商户配置。",
+        "responses": {"200": {"description": "成功"}}
+      },
+      "post": {
+        "tags": ["VIP配置"],
+        "summary": "创建VIP配置",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vipType": {"type": "string", "description": "VIP类型: monthly/yearly/quarterly"},
+                  "vipName": {"type": "string", "description": "VIP名称"},
+                  "price": {"type": "number", "description": "价格"},
+                  "durationDays": {"type": "integer", "description": "时长(天)"},
+                  "features": {"type": "string", "description": "功能描述"},
+                  "isDefault": {"type": "boolean", "description": "是否默认"}
+                },
+                "required": ["vipType", "vipName", "price", "durationDays"]
+              }
+            }
+          }
+        },
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/vip-configs/page": {
+      "get": {
+        "tags": ["VIP配置"],
+        "summary": "分页获取VIP配置列表",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "pageNum", "in": "query", "schema": {"type": "integer", "default": 1}},
+          {"name": "pageSize", "in": "query", "schema": {"type": "integer", "default": 10}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/vip-configs/{id}": {
+      "get": {
+        "tags": ["VIP配置"],
+        "summary": "获取VIP配置详情",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      },
+      "put": {
+        "tags": ["VIP配置"],
+        "summary": "更新VIP配置",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vipName": {"type": "string"},
+                  "price": {"type": "number"},
+                  "durationDays": {"type": "integer"},
+                  "features": {"type": "string"},
+                  "isDefault": {"type": "boolean"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {"200": {"description": "成功"}}
+      },
+      "delete": {
+        "tags": ["VIP配置"],
+        "summary": "删除VIP配置",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/vip-configs/{id}/status": {
+      "put": {
+        "tags": ["VIP配置"],
+        "summary": "更新VIP配置状态",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "status", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/activation-codes/batch": {
+      "post": {
+        "tags": ["激活码"],
+        "summary": "生成激活码批次",
+        "security": [{"BearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "batchName": {"type": "string", "description": "批次名称"},
+                  "vipType": {"type": "string", "description": "VIP类型"},
+                  "count": {"type": "integer", "description": "生成数量"},
+                  "expireTime": {"type": "string", "format": "date-time", "description": "过期时间"}
+                },
+                "required": ["batchName", "vipType", "count"]
+              }
+            }
+          }
+        },
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/activation-codes/batches": {
+      "get": {
+        "tags": ["激活码"],
+        "summary": "获取激活码批次列表",
+        "security": [{"BearerAuth": []}],
+        "description": "平台管理员可查看所有批次，其他角色只能查看本商户批次。",
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/activation-codes/batches/page": {
+      "get": {
+        "tags": ["激活码"],
+        "summary": "分页获取激活码批次列表",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "pageNum", "in": "query", "schema": {"type": "integer", "default": 1}},
+          {"name": "pageSize", "in": "query", "schema": {"type": "integer", "default": 10}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/activation-codes/batch/{batchId}": {
+      "get": {
+        "tags": ["激活码"],
+        "summary": "获取批次详情",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "batchId", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/activation-codes/batch/{batchId}/codes": {
+      "get": {
+        "tags": ["激活码"],
+        "summary": "获取批次下的激活码列表",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {"name": "batchId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "pageNum", "in": "query", "schema": {"type": "integer", "default": 1}},
+          {"name": "pageSize", "in": "query", "schema": {"type": "integer", "default": 10}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/activation-codes/use": {
+      "post": {
+        "tags": ["激活码"],
+        "summary": "使用激活码",
+        "security": [{"BearerAuth": []}],
+        "parameters": [{"name": "code", "in": "query", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/merchant-subscription/activate": {
+      "post": {
+        "tags": ["商户订阅"],
+        "summary": "使用激活码激活/续费商户",
+        "security": [{"BearerAuth": []}],
+        "description": "商户用户使用激活码激活或续费商户，会根据激活码关联的VIP配置更新商户的有效期。",
+        "parameters": [{"name": "code", "in": "query", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/merchant-subscription/status": {
+      "get": {
+        "tags": ["商户订阅"],
+        "summary": "获取商户订阅状态",
+        "security": [{"BearerAuth": []}],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/agent-callback/streaming-login-success": {
+      "post": {
+        "tags": ["Agent回调"],
+        "summary": "记录流媒体账号登录成功",
+        "description": "Agent在Xbox主机上登录流媒体账号成功后调用此接口记录登录历史。",
+        "parameters": [
+          {"name": "streamingAccountId", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "xboxHostId", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "gamertag", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    },
+    "/api/agent-callback/xbox-status": {
+      "post": {
+        "tags": ["Agent回调"],
+        "summary": "更新Xbox主机状态",
+        "description": "Agent定期上报Xbox主机状态。",
+        "parameters": [
+          {"name": "xboxHostId", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "status", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "成功"}}
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+    },
+    "schemas": {
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "code": {"type": "integer"},
+          "message": {"type": "string"},
+          "data": {
+            "type": "object",
+            "properties": {
+              "token": {"type": "string"},
+              "userId": {"type": "string"},
+              "username": {"type": "string"},
+              "merchantId": {"type": "string"},
+              "role": {"type": "string"}
+            }
+          }
+        }
+      },
+      "MerchantUser": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "merchantId": {"type": "string"},
+          "username": {"type": "string"},
+          "phone": {"type": "string"},
+          "role": {"type": "string"},
+          "status": {"type": "string"},
+          "lastLoginAt": {"type": "string", "format": "date-time"},
+          "createdAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "Merchant": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "phone": {"type": "string"},
+          "status": {"type": "string"},
+          "expireTime": {"type": "string", "format": "date-time"},
+          "createdAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "StreamingAccount": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "merchantId": {"type": "string"},
+          "name": {"type": "string"},
+          "email": {"type": "string"},
+          "authCode": {"type": "string"},
+          "status": {"type": "string"},
+          "lastHeartbeat": {"type": "string", "format": "date-time"},
+          "createdAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "XboxHost": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "merchantId": {"type": "string"},
+          "xboxId": {"type": "string"},
+          "name": {"type": "string"},
+          "ipAddress": {"type": "string"},
+          "boundStreamingAccountId": {"type": "string"},
+          "boundGamertag": {"type": "string"},
+          "status": {"type": "string"},
+          "lastSeenAt": {"type": "string", "format": "date-time"},
+          "createdAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "VipConfig": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "merchantId": {"type": "string"},
+          "vipType": {"type": "string"},
+          "vipName": {"type": "string"},
+          "price": {"type": "number"},
+          "durationDays": {"type": "integer"},
+          "features": {"type": "string"},
+          "isDefault": {"type": "boolean"},
+          "status": {"type": "string"},
+          "sortOrder": {"type": "integer"},
+          "createdAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ActivationCode": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "merchantId": {"type": "string"},
+          "batchId": {"type": "string"},
+          "code": {"type": "string"},
+          "vipType": {"type": "string"},
+          "status": {"type": "string"},
+          "usedBy": {"type": "string"},
+          "usedAt": {"type": "string", "format": "date-time"},
+          "expireTime": {"type": "string", "format": "date-time"},
+          "createdAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ActivationCodeBatch": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "merchantId": {"type": "string"},
+          "batchName": {"type": "string"},
+          "totalCount": {"type": "integer"},
+          "usedCount": {"type": "integer"},
+          "remainingCount": {"type": "integer"},
+          "vipType": {"type": "string"},
+          "expireTime": {"type": "string", "format": "date-time"},
+          "status": {"type": "string"},
+          "createdAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "ApiResponse": {
+        "type": "object",
+        "properties": {
+          "code": {"type": "integer"},
+          "message": {"type": "string"},
+          "data": {"type": "object"}
+        }
+      }
+    }
+  }
+}

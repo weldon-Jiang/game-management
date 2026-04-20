@@ -1,0 +1,97 @@
+# ================================================
+# Bend Platform 后端服务配置文件
+# ================================================
+# 本文件包含Spring Boot应用的所有配置项
+# 修改后需要重启应用生效
+
+# ----------------------------------------------
+# 服务器配置
+# ----------------------------------------------
+server:
+  port: 8090  # 服务端口号，Agent连接此端口
+
+# ----------------------------------------------
+# Spring框架配置
+# ----------------------------------------------
+spring:
+  application:
+    name: bend-platform  # 应用名称，用于服务注册和发现
+
+  # ----------------------------------------------
+  # Redis配置
+  # ----------------------------------------------
+  redis:
+    # 地址
+    host: 127.0.0.1
+    # 端口，默认为6379
+    port: 6379
+    # 数据库索引
+    database: 0
+    # 密码(如没有密码请注释掉)
+    password: D$U@GAMECeKfi
+    # 连接超时时间
+    timeout: 6000
+    # 是否开启ssl
+    # ssl: false
+    lettuce:
+      pool:
+        max-active: 10 # 连接池最大连接数（使用负值表示没有限制）,如果赋值为-1，则表示不限制；如果pool已经分配了maxActive个jedis实例，则此时pool的状态为exhausted(耗尽)
+        max-idle: 8   # 连接池中的最大空闲连接 ，默认值也是8
+        max-wait: 100 # # 等待可用连接的最大时间，单位毫秒，默认值为-1，表示永不超时。如果超过等待时间，则直接抛出JedisConnectionException
+        min-idle: 2    # 连接池中的最小空闲连接 ，默认值也是0
+      shutdown-timeout: 100ms
+
+  # ----------------------------------------------
+  # 数据库配置
+  # ----------------------------------------------
+  datasource:
+    # 数据库连接URL
+    # 参数说明：
+    # - useUnicode=true: 使用Unicode字符集
+    # - characterEncoding=utf8: UTF-8编码
+    # - useSSL=false: 禁用SSL连接
+    # - serverTimezone=Asia/Shanghai: 使用上海时区
+    # - allowPublicKeyRetrieval=true: 允许公钥检索
+    url: jdbc:mysql://localhost:3306/bend_platform?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root    # 数据库用户名
+    password: D$U@GAMECeKfidb  # 数据库密码
+    driver-class-name: com.mysql.cj.jdbc.Driver  # MySQL驱动类名
+    hikari:
+      pool-name: HikariCP-Postgres
+      minimum-idle: 5              # 最小空闲连接数（可调低，根据实际负载）
+      maximum-pool-size: 20        # 最大连接数（建议根据并发请求数、DB max_connections 调整）
+      idle-timeout: 600000         # 10分钟（空闲连接超时，合理）
+      max-lifetime: 1800000        # 30分钟（连接最大生命周期，建议小于数据库的 idle_in_transaction_session_timeout）
+      connection-timeout: 3000     # 3秒（获取连接的超时时间，建议更短，快速失败）
+      validation-timeout: 5000     # 5秒（连接验证超时时间）
+  # ----------------------------------------------
+  # JSON序列化配置
+  # ----------------------------------------------
+  jackson:
+    time-zone: GMT+8          # 时区设置为东八区（北京时间）
+    date-format: yyyy-MM-dd HH:mm:ss  # 日期时间格式
+
+# ----------------------------------------------
+# MyBatis-Plus ORM框架配置
+# ----------------------------------------------
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml  # Mapper XML文件路径
+  type-aliases-package: com.bend.platform.entity   # 实体类包路径
+  configuration:
+    map-underscore-to-camel-case: true  # 开启下划线转驼峰命名
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl  # SQL日志输出
+
+# ----------------------------------------------
+# JWT（JSON Web Token）认证配置
+# ----------------------------------------------
+# JWT用于API接口的身份验证
+jwt:
+  secret: bend-platform-secret-key-2024  # JWT签名密钥（生产环境应使用复杂密钥）
+  expiration: 86400000  # Token有效期：24小时（毫秒）
+
+# ----------------------------------------------
+# AES对称加密配置
+# ----------------------------------------------
+# AES用于敏感数据的加密存储，如账号密码等
+aes:
+  secret: bend-platform-se  # AES加密密钥（生产环境应使用16/24/32字节密钥）
