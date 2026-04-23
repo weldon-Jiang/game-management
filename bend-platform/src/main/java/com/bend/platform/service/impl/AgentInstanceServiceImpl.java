@@ -81,7 +81,7 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     public List<AgentInstance> findAll() {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getDeleted, false);
-        wrapper.orderByDesc(AgentInstance::getCreatedAt);
+        wrapper.orderByDesc(AgentInstance::getCreatedTime);
         return agentInstanceMapper.selectList(wrapper);
     }
 
@@ -89,7 +89,7 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     public IPage<AgentInstance> findAll(AgentInstancePageRequest request) {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getDeleted, false);
-        wrapper.orderByDesc(AgentInstance::getCreatedAt);
+        wrapper.orderByDesc(AgentInstance::getCreatedTime);
         Page<AgentInstance> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return agentInstanceMapper.selectPage(page, wrapper);
     }
@@ -99,7 +99,7 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getMerchantId, merchantId);
         wrapper.eq(AgentInstance::getDeleted, false);
-        wrapper.orderByDesc(AgentInstance::getCreatedAt);
+        wrapper.orderByDesc(AgentInstance::getCreatedTime);
         return agentInstanceMapper.selectList(wrapper);
     }
 
@@ -108,7 +108,7 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getMerchantId, merchantId);
         wrapper.eq(AgentInstance::getDeleted, false);
-        wrapper.orderByDesc(AgentInstance::getCreatedAt);
+        wrapper.orderByDesc(AgentInstance::getCreatedTime);
         Page<AgentInstance> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return agentInstanceMapper.selectPage(page, wrapper);
     }

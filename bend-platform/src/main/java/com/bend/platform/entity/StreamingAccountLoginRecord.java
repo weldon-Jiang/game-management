@@ -17,9 +17,9 @@ public class StreamingAccountLoginRecord {
     private String streamingAccountId;
     private String xboxHostId;
     private String loggedGamertag;
-    private LocalDateTime loggedAt;
-    private LocalDateTime lastUsedAt;
+    private LocalDateTime loggedTime;
+    private LocalDateTime lastUsedTime;
     private Integer useCount;
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private LocalDateTime createdTime;
 }

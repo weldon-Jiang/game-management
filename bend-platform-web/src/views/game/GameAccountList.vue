@@ -35,9 +35,9 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" width="170">
+        <el-table-column prop="createdTime" label="创建时间" width="170">
           <template #default="{ row }">
-            {{ formatDate(row.createdAt) }}
+            {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right" align="center">
@@ -69,21 +69,36 @@
     <el-dialog
       v-model="dialogVisible"
       :title="dialogType === 'add' ? '新增游戏账号' : '编辑游戏账号'"
-      width="500px"
+      width="600px"
       :close-on-click-modal="false"
     >
       <el-form
         ref="formRef"
         :model="formData"
         :rules="formRules"
-        label-width="100px"
+        label-width="110px"
         class="dialog-form"
       >
+        <el-form-item label="所属串流账号" prop="streamingId">
+          <el-select
+            v-model="formData.streamingId"
+            placeholder="请选择串流账号"
+            style="width: 100%"
+            filterable
+          >
+            <el-option
+              v-for="sa in streamingList"
+              :key="sa.id"
+              :label="sa.name + ' (' + sa.email + ')'"
+              :value="sa.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="账号名称" prop="name">
           <el-input v-model="formData.name" placeholder="请输入账号名称" />
         </el-form-item>
-        <el-form-item label="Gamertag" prop="xboxGamertag">
-          <el-input v-model="formData.xboxGamertag" placeholder="请输入Gamertag" />
+        <el-form-item label="Xbox玩家名" prop="xboxGamertag">
+          <el-input v-model="formData.xboxGamertag" placeholder="请输入Xbox玩家名" />
         </el-form-item>
         <el-form-item label="Xbox邮箱" prop="xboxLiveEmail">
           <el-input v-model="formData.xboxLiveEmail" placeholder="请输入Xbox邮箱" />
@@ -111,7 +126,7 @@
 import { ref, reactive, onMounted, onErrorCaptured } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { gameAccountApi } from '@/api'
+import { gameAccountApi, streamingApi } from '@/api'
 
 // 捕获组件内子组件的错误
 onErrorCaptured((err, instance, info) => {
@@ -157,12 +172,14 @@ const pagination = reactive({
 const dialogVisible = ref(false)
 const dialogType = ref('add')
 const formRef = ref(null)
+const streamingList = ref([])
 
 /**
  * 表单数据
  */
 const formData = reactive({
   id: '',
+  streamingId: '',
   name: '',
   xboxGamertag: '',
   xboxLiveEmail: '',
@@ -175,6 +192,9 @@ const formData = reactive({
 const formRules = {
   name: [
     { required: true, message: '请输入账号名称', trigger: 'blur' }
+  ],
+  streamingId: [
+    { required: true, message: '请选择所属串流账号', trigger: 'change' }
   ],
   xboxGamertag: [
     { required: true, message: '请输入Gamertag', trigger: 'blur' }
@@ -222,10 +242,12 @@ const loadData = async () => {
 const showAddDialog = () => {
   dialogType.value = 'add'
   formData.id = ''
+  formData.streamingId = ''
   formData.name = ''
   formData.xboxGamertag = ''
   formData.xboxLiveEmail = ''
   formData.xboxLivePassword = ''
+  loadStreamingList()
   dialogVisible.value = true
 }
 
@@ -236,11 +258,26 @@ const showAddDialog = () => {
 const showEditDialog = (row) => {
   dialogType.value = 'edit'
   formData.id = row.id
+  formData.streamingId = row.streamingId || ''
   formData.name = row.name
   formData.xboxGamertag = row.xboxGamertag
   formData.xboxLiveEmail = row.xboxLiveEmail
   formData.xboxLivePassword = ''
+  loadStreamingList()
   dialogVisible.value = true
+}
+
+/**
+ * 加载串流账号列表
+ */
+const loadStreamingList = async () => {
+  try {
+    const res = await streamingApi.listAll()
+    streamingList.value = res.data || []
+  } catch (error) {
+    console.error('Failed to load streaming accounts:', error)
+    streamingList.value = []
+  }
 }
 
 /**
@@ -254,6 +291,7 @@ const handleSubmit = async () => {
   try {
     if (dialogType.value === 'add') {
       await gameAccountApi.create({
+        streamingId: formData.streamingId,
         name: formData.name,
         xboxGamertag: formData.xboxGamertag,
         xboxLiveEmail: formData.xboxLiveEmail,
@@ -261,11 +299,15 @@ const handleSubmit = async () => {
       })
       ElMessage.success('创建成功')
     } else {
-      await gameAccountApi.update(formData.id, {
+      const updateData = {
         name: formData.name,
         xboxLiveEmail: formData.xboxLiveEmail,
         xboxLivePassword: formData.xboxLivePassword || undefined
-      })
+      }
+      if (formData.streamingId) {
+        updateData.streamingId = formData.streamingId
+      }
+      await gameAccountApi.update(formData.id, updateData)
       ElMessage.success('更新成功')
     }
     dialogVisible.value = false

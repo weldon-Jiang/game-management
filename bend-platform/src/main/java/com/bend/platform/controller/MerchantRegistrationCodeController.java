@@ -205,9 +205,9 @@ public class MerchantRegistrationCodeController {
             dto.setStatus(code.getStatus());
             dto.setUsedByAgentId(code.getUsedByAgentId());
             dto.setAgentId(code.getAgentId());
-            dto.setCreatedAt(code.getCreatedAt());
+            dto.setCreatedTime(code.getCreatedTime());
             dto.setExpireTime(code.getExpireTime());
-            dto.setUsedAt(code.getUsedAt());
+            dto.setUsedTime(code.getUsedTime());
             return dto;
         }).collect(Collectors.toList());
 

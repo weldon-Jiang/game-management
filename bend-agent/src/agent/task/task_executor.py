@@ -203,7 +203,7 @@ class XboxSessionManager:
         self._ip_to_key: Dict[str, str] = {}         # IP -> key 映射
         self._session_semaphore = asyncio.Semaphore(max_sessions)  # 并发控制信号量
 
-    async def get_session(self, xbox_ip: str, xbox_port: int = 5050) -> Optional[XboxSession]:
+    async def get_session(self, xbox_ip: str, xbox_port: int = 5050, timeout: float = 30.0) -> Optional[XboxSession]:
         """
         获取或创建 Xbox 会话
 
@@ -216,15 +216,19 @@ class XboxSessionManager:
         参数：
         - xbox_ip: Xbox 主机 IP
         - xbox_port: SmartGlass 端口
+        - timeout: 获取会话超时时间（秒），默认30秒
 
         返回：
         - XboxSession: 会话实例
-        - None: 获取失败（连接数满或连接失败）
+        - None: 获取失败（超时或连接失败）
         """
         key = f"{xbox_ip}:{xbox_port}"
 
-        # 获取信号量许可（阻塞直到获得或超时）
-        await self._session_semaphore.acquire()
+        try:
+            await asyncio.wait_for(self._session_semaphore.acquire(), timeout=timeout)
+        except asyncio.TimeoutError:
+            self.logger.warning(f"获取Xbox会话信号量超时 - IP: {xbox_ip}, timeout: {timeout}s")
+            return None
 
         async with self._session_lock:
             if key in self._sessions:
@@ -665,72 +669,46 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
     Xbox 流控制任务处理器
 
     功能：
-    - 通过 SmartGlass 协议控制 Xbox
+    - 多线程并发处理多个流媒体账号
+    - 微软账号登录 -> Xbox 绑定
     - 自动遍历并切换游戏账号
 
     参数说明：
     - streaming_account: 流媒体账号信息（包含 Xbox IP 等）
     - gameAccounts: 游戏账号列表
 
+    流程：
+    1. 登录模块：调用微软登录接口获取 Refresh Token
+    2. 串流模块：使用 Refresh Token 获取 Access Token，绑定 Xbox 主机
+    3. 执行游戏账号自动化操作
+
     注意：
     - 无需 Xbox App 窗口，纯协议控制
     - 每个游戏账号会依次登录验证
     """
+    from ..task.stream_control_task import StreamControlTaskHandler
+
     streaming_account = params.get('streamingAccount', {})
-    game_accounts = params.get('gameAccounts', [])
 
     if not streaming_account:
         raise Exception("缺少流媒体账号信息")
 
-    if not game_accounts:
-        raise Exception("缺少游戏账号信息")
-
-    xbox_session = params.get('_xbox_session')
-    if not xbox_session or not xbox_session.is_connected:
-        raise Exception("未连接到 Xbox")
-
     if check_cancel():
         raise asyncio.CancelledError()
 
+    # 创建流控制任务处理器
+    handler = StreamControlTaskHandler()
+
     try:
-        from ..xbox.stream_controller import XboxStreamController
-        from ..input.input_controller import InputController
-
-        stream_ctrl = xbox_session.stream_ctrl or XboxStreamController()
-        input_ctrl = InputController()
-
-        results = {
-            'connected': True,
-            'xboxIp': xbox_session.xbox_ip,
-            'gameAccountsProcessed': 0,
-            'automationSteps': []  # 记录每步执行详情
-        }
-
-        for game_account in game_accounts:
-            if check_cancel():
-                raise asyncio.CancelledError()
-
-            email = game_account.get('xboxLiveEmail')
-            password = game_account.get('xboxLivePasswordEncrypted')
-
-            step_result = {
-                'accountName': game_account.get('name'),
-                'processed': False
-            }
-
-            if email and password:
-                results['gameAccountsProcessed'] += 1
-                step_result['processed'] = True
-
-            results['automationSteps'].append(step_result)
-            await asyncio.sleep(1)  # 每步间隔
-
-        return results
+        # 执行流控制任务
+        result = handler.handle_batch_tasks(params, check_cancel)
+        return result
 
     except asyncio.CancelledError:
         raise
+
     except Exception as e:
-        raise Exception(f"流控制失败: {e}")
+        raise Exception(f"流控制任务执行失败: {e}")
 
 
 async def handle_template_match(params: Dict[str, Any], check_cancel: Callable) -> Dict[str, Any]:

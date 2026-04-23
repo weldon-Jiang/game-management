@@ -88,6 +88,10 @@ public class SystemMonitorService {
                 .freeMemory(formatBytes(freeMemory))
                 .usedMemory(formatBytes(usedMemory))
                 .maxMemory(formatBytes(maxMemory))
+                .totalMemoryBytes(totalMemory)
+                .freeMemoryBytes(freeMemory)
+                .usedMemoryBytes(usedMemory)
+                .maxMemoryBytes(maxMemory)
                 .memoryUsagePercent((double) usedMemory / totalMemory * 100)
                 .availableProcessors(runtime.availableProcessors())
                 .systemLoadAverage(osBean.getSystemLoadAverage())
@@ -127,6 +131,8 @@ public class SystemMonitorService {
                     .cpuCoreCount(osBean.getAvailableProcessors())
                     .totalMemory(formatBytes(totalMemory))
                     .freeMemory(formatBytes(freeMemory))
+                    .totalMemoryBytes(totalMemory)
+                    .freeMemoryBytes(freeMemory)
                     .memoryUsagePercent((double)(totalMemory - freeMemory) / totalMemory * 100)
                     .osName(System.getProperty("os.name"))
                     .osVersion(System.getProperty("os.version"))
@@ -173,9 +179,9 @@ public class SystemMonitorService {
             SystemInfo systemInfo = getSystemInfo();
 
             // 保存JVM内存指标
-            saveMetric("jvm", "memory_used", Double.parseDouble(jvmInfo.getUsedMemory()),
+            saveMetric("jvm", "memory_used", (double) jvmInfo.getUsedMemoryBytes(),
                     "bytes", getHostName(), "JVM已使用内存");
-            saveMetric("jvm", "memory_free", Double.parseDouble(jvmInfo.getFreeMemory()),
+            saveMetric("jvm", "memory_free", (double) jvmInfo.getFreeMemoryBytes(),
                     "bytes", getHostName(), "JVM空闲内存");
             saveMetric("jvm", "memory_usage_percent", jvmInfo.getMemoryUsagePercent(),
                     "%", getHostName(), "JVM内存使用率");
@@ -210,7 +216,7 @@ public class SystemMonitorService {
             metric.setUnit(unit);
             metric.setHostName(host);
             metric.setDescription(desc);
-            metric.setRecordedAt(LocalDateTime.now());
+            metric.setRecordedTime(LocalDateTime.now());
             metricsMapper.insert(metric);
         } catch (Exception e) {
             log.error("保存指标失败: {} - {}", name, e.getMessage());
@@ -273,6 +279,10 @@ public class SystemMonitorService {
         private String freeMemory;
         private String usedMemory;
         private String maxMemory;
+        private long totalMemoryBytes;
+        private long freeMemoryBytes;
+        private long usedMemoryBytes;
+        private long maxMemoryBytes;
         private double memoryUsagePercent;
         private int availableProcessors;
         private double systemLoadAverage;
@@ -294,6 +304,8 @@ public class SystemMonitorService {
         private int cpuCoreCount;
         private String totalMemory;
         private String freeMemory;
+        private long totalMemoryBytes;
+        private long freeMemoryBytes;
         private double memoryUsagePercent;
         private String osName;
         private String osVersion;

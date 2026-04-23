@@ -17,6 +17,6 @@ public class XboxHostItemDto {
     private String boundStreamingAccountId;
     private String boundGamertag;
     private String status;
-    private LocalDateTime lastSeenAt;
-    private LocalDateTime createdAt;
+    private LocalDateTime lastSeenTime;
+    private LocalDateTime createdTime;
 }

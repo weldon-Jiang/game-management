@@ -465,26 +465,50 @@ class ApiClient:
             self.logger.debug(f"No pending task: {e}")
             return None
 
-    async def complete_task(self, task_id: str, result: Dict) -> Dict[str, Any]:
+    async def complete_task(self, task_id: str, result: Dict, idempotent: bool = True) -> Dict[str, Any]:
         """
         标记任务为已完成
 
         参数说明：
         - task_id: 任务ID
         - result: 任务执行结果
+        - idempotent: 是否使用幂等性模式（默认True）
 
         返回值：后端响应数据
         """
-        return await self.post(f'/tasks/{task_id}/complete', result)
+        payload = {**result, 'idempotent': str(idempotent).lower()}
+        return await self.post(f'/tasks/{task_id}/complete', payload)
 
-    async def fail_task(self, task_id: str, error: str) -> Dict[str, Any]:
+    async def fail_task(self, task_id: str, error: str, idempotent: bool = True) -> Dict[str, Any]:
         """
         标记任务为失败
 
         参数说明：
         - task_id: 任务ID
         - error: 错误信息
+        - idempotent: 是否使用幂等性模式（默认True）
 
         返回值：后端响应数据
         """
-        return await self.post(f'/tasks/{task_id}/fail', {'error': error})
+        payload = {'error': error, 'idempotent': str(idempotent).lower()}
+        return await self.post(f'/tasks/{task_id}/fail', payload)
+
+    async def exchange_credential_token(self, token: str) -> Optional[str]:
+        """
+        兑换凭证令牌获取实际密码
+
+        参数说明：
+        - token: 凭证令牌
+
+        返回值：
+        - 实际密码字符串
+        - None: 兑换失败
+        """
+        try:
+            result = await self.post('/agent/credentials/exchange', {'token': token})
+            if result.get('code') == 0 and result.get('data'):
+                return result['data']
+            return None
+        except Exception as e:
+            self.logger.error(f"Failed to exchange credential token: {e}")
+            return None

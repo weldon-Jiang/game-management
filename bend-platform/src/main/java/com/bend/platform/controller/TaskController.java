@@ -149,7 +149,8 @@ public class TaskController {
     @PostMapping("/{id}/complete")
     public ApiResponse<Task> complete(@PathVariable String id, @RequestBody Map<String, String> body) {
         String result = body.get("result");
-        Task task = taskService.complete(id, result);
+        boolean idempotent = Boolean.parseBoolean(body.getOrDefault("idempotent", "false"));
+        Task task = taskService.complete(id, result, idempotent);
         return ApiResponse.success("任务完成", task);
     }
 
@@ -163,7 +164,8 @@ public class TaskController {
     @PostMapping("/{id}/fail")
     public ApiResponse<Task> fail(@PathVariable String id, @RequestBody Map<String, String> body) {
         String errorMessage = body.get("errorMessage");
-        Task task = taskService.fail(id, errorMessage);
+        boolean idempotent = Boolean.parseBoolean(body.getOrDefault("idempotent", "false"));
+        Task task = taskService.fail(id, errorMessage, idempotent);
         return ApiResponse.success("标记失败", task);
     }
 

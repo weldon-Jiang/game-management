@@ -159,7 +159,7 @@ public class MerchantUserServiceImpl implements MerchantUserService {
         if (merchantId != null) {
             wrapper.eq(MerchantUser::getMerchantId, merchantId);
         }
-        wrapper.orderByDesc(MerchantUser::getCreatedAt);
+        wrapper.orderByDesc(MerchantUser::getCreatedTime);
 
         Page<MerchantUser> page = new Page<>(request.getPageNum(), request.getPageSize());
         return merchantUserMapper.selectPage(page, wrapper);
@@ -227,7 +227,7 @@ public class MerchantUserServiceImpl implements MerchantUserService {
     private void updateLastLoginTime(String userId) {
         LambdaUpdateWrapper<MerchantUser> wrapper = new LambdaUpdateWrapper<>();
         wrapper.eq(MerchantUser::getId, userId)
-               .set(MerchantUser::getLastLoginAt, LocalDateTime.now());
+               .set(MerchantUser::getLastLoginTime, LocalDateTime.now());
         merchantUserMapper.update(null, wrapper);
     }
 

@@ -5,6 +5,13 @@
 # 修改后需要重启 Agent 生效
 
 # ----------------------------------------------
+# AES加密配置（必须与平台侧 bend-platform/.env 中的 AES_SECRET 一致）
+# PowerShell 生成随机密钥: $bytes = New-Object byte[] 16; $random = [System.Security.Cryptography.RandomNumberGenerator]::Create(); $random.GetBytes($bytes); [Convert]::ToBase64String($bytes)
+# ----------------------------------------------
+aes:
+  secret: "0sedzo/xcWVHjwKvJAk4lg=="
+
+# ----------------------------------------------
 # 后端服务器配置
 # ----------------------------------------------
 backend:

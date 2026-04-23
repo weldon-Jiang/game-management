@@ -1,12 +1,14 @@
 package com.bend.platform.util;
 
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
@@ -26,60 +28,39 @@ public class JwtUtil {
     @Value("${jwt.expiration}")
     private Long expiration;
 
-    /**
-     * 获取签名密钥
-     * 使用HS256算法，密钥固定为32字节
-     */
     private SecretKey getSigningKey() {
         byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
         byte[] paddedKey = new byte[32];
         System.arraycopy(keyBytes, 0, paddedKey, 0, Math.min(keyBytes.length, 32));
-        return new SecretKeySpec(paddedKey, "HmacSHA256");
+        return Keys.hmacShaKeyFor(paddedKey);
     }
 
-    /**
-     * 生成JWT token
-     *
-     * @param userId     用户ID
-     * @param username   用户名
-     * @param merchantId  商户ID
-     * @param role       角色
-     * @return JWT token字符串
-     */
     public String generateToken(String userId, String username, String merchantId, String role) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
         claims.put("merchantId", merchantId);
         claims.put("role", role);
+
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + expiration);
+
         return Jwts.builder()
-                .setClaims(claims)
-                .setSubject(username)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + expiration))
-                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .claims(claims)
+                .subject(username)
+                .issuedAt(now)
+                .expiration(expiryDate)
+                .signWith(getSigningKey())
                 .compact();
     }
 
-    /**
-     * 解析JWT token
-     *
-     * @param token JWT token字符串
-     * @return Claims对象
-     */
     public Claims parseToken(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
+        return Jwts.parser()
+                .verifyWith(getSigningKey())
                 .build()
-                .parseClaimsJws(token)
-                .getBody();
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
-    /**
-     * 验证token是否有效
-     *
-     * @param token JWT token字符串
-     * @return 是否有效
-     */
     public boolean validateToken(String token) {
         try {
             parseToken(token);
@@ -90,24 +71,31 @@ public class JwtUtil {
         }
     }
 
-    /**
-     * 从token中获取用户ID
-     *
-     * @param token JWT token字符串
-     * @return 用户ID
-     */
     public String getUserIdFromToken(String token) {
         Claims claims = parseToken(token);
         return claims.get("userId", String.class);
     }
 
-    /**
-     * 从token中获取用户名
-     *
-     * @param token JWT token字符串
-     * @return 用户名
-     */
     public String getUsernameFromToken(String token) {
         return parseToken(token).getSubject();
+    }
+
+    public String getMerchantIdFromToken(String token) {
+        Claims claims = parseToken(token);
+        return claims.get("merchantId", String.class);
+    }
+
+    public String getRoleFromToken(String token) {
+        Claims claims = parseToken(token);
+        return claims.get("role", String.class);
+    }
+
+    public String refreshToken(String token) {
+        Claims claims = parseToken(token);
+        String userId = claims.get("userId", String.class);
+        String merchantId = claims.get("merchantId", String.class);
+        String role = claims.get("role", String.class);
+        String username = claims.getSubject();
+        return generateToken(userId, username, merchantId, role);
     }
 }

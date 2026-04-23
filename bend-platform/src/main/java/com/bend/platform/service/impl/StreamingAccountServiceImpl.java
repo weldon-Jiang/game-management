@@ -89,7 +89,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         if (merchantId != null) {
             wrapper.eq(StreamingAccount::getMerchantId, merchantId);
         }
-        wrapper.orderByDesc(StreamingAccount::getCreatedAt);
+        wrapper.orderByDesc(StreamingAccount::getCreatedTime);
         Page<StreamingAccount> page = new Page<>(request.getPageNum(), request.getPageSize());
         return streamingAccountMapper.selectPage(page, wrapper);
     }
@@ -100,7 +100,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         if (merchantId != null) {
             wrapper.eq(StreamingAccount::getMerchantId, merchantId);
         }
-        wrapper.orderByDesc(StreamingAccount::getCreatedAt);
+        wrapper.orderByDesc(StreamingAccount::getCreatedTime);
         return streamingAccountMapper.selectList(wrapper);
     }
 
@@ -154,7 +154,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         account.setStatus("error");
         account.setLastErrorCode(errorCode);
         account.setLastErrorMessage(errorMessage);
-        account.setLastErrorAt(LocalDateTime.now());
+        account.setLastErrorTime(LocalDateTime.now());
         account.setErrorRetryCount(account.getErrorRetryCount() == null ? 1 : account.getErrorRetryCount() + 1);
 
         streamingAccountMapper.updateById(account);

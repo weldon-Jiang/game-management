@@ -5,10 +5,12 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.TaskPageRequest;
 import com.bend.platform.entity.Task;
+import com.bend.platform.enums.TaskStatus;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.service.TaskService;
+import com.bend.platform.service.TaskStateMachine;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,6 +48,7 @@ import java.util.Map;
 public class TaskServiceImpl implements TaskService {
 
     private final TaskMapper taskMapper;
+    private final TaskStateMachine stateMachine;
 
     /**
      * 创建任务
@@ -108,7 +111,7 @@ public class TaskServiceImpl implements TaskService {
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Task::getTargetAgentId, agentId);  // 指定Agent
         wrapper.eq(Task::getDeleted, false);          // 未删除
-        wrapper.orderByDesc(Task::getCreatedAt);      // 按创建时间倒序
+        wrapper.orderByDesc(Task::getCreatedTime);      // 按创建时间倒序
         return taskMapper.selectList(wrapper);
     }
 
@@ -132,7 +135,7 @@ public class TaskServiceImpl implements TaskService {
         wrapper.eq(Task::getStatus, "pending");           // 待执行状态
         wrapper.eq(Task::getDeleted, false);              // 未删除
         wrapper.orderByAsc(Task::getPriority);            // 按优先级升序
-        wrapper.orderByAsc(Task::getCreatedAt);           // 按创建时间升序
+        wrapper.orderByAsc(Task::getCreatedTime);           // 按创建时间升序
         return taskMapper.selectList(wrapper);
     }
 
@@ -162,7 +165,7 @@ public class TaskServiceImpl implements TaskService {
         if (StringUtils.hasText(request.getType())) {
             wrapper.eq(Task::getType, request.getType());
         }
-        wrapper.orderByDesc(Task::getCreatedAt);
+        wrapper.orderByDesc(Task::getCreatedTime);
         Page<Task> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return taskMapper.selectPage(page, wrapper);
     }
@@ -194,7 +197,7 @@ public class TaskServiceImpl implements TaskService {
         }
 
         task.setTargetAgentId(agentId);           // 设置目标Agent
-        task.setAssignedAt(LocalDateTime.now());  // 记录分配时间
+        task.setAssignedTime(LocalDateTime.now());  // 记录分配时间
         taskMapper.updateById(task);
 
         // 构建任务数据并发送到Agent
@@ -233,7 +236,7 @@ public class TaskServiceImpl implements TaskService {
         }
 
         task.setStatus("running");                      // 状态改为执行中
-        task.setStartedAt(LocalDateTime.now());         // 记录开始时间
+        task.setStartedTime(LocalDateTime.now());         // 记录开始时间
         taskMapper.updateById(task);
 
         log.info("任务开始执行 - TaskID: {}", taskId);
@@ -264,11 +267,26 @@ public class TaskServiceImpl implements TaskService {
 
         task.setStatus("completed");                     // 状态改为已完成
         task.setResult(result);                         // 存储结果
-        task.setCompletedAt(LocalDateTime.now());       // 记录完成时间
+        task.setCompletedTime(LocalDateTime.now());       // 记录完成时间
         taskMapper.updateById(task);
 
         log.info("任务完成 - TaskID: {}", taskId);
         return task;
+    }
+
+    @Override
+    public Task complete(String taskId, String result, boolean idempotent) {
+        if (idempotent) {
+            Task existingTask = taskMapper.selectById(taskId);
+            if (existingTask == null) {
+                throw new BusinessException(ResultCode.Task.NOT_FOUND, "任务不存在");
+            }
+            if (!"running".equals(existingTask.getStatus())) {
+                log.info("任务状态不是running，跳过完成处理 - taskId: {}, status: {}", taskId, existingTask.getStatus());
+                return existingTask;
+            }
+        }
+        return complete(taskId, result);
     }
 
     /**
@@ -311,6 +329,21 @@ public class TaskServiceImpl implements TaskService {
 
         taskMapper.updateById(task);
         return task;
+    }
+
+    @Override
+    public Task fail(String taskId, String errorMessage, boolean idempotent) {
+        if (idempotent) {
+            Task existingTask = taskMapper.selectById(taskId);
+            if (existingTask == null) {
+                throw new BusinessException(ResultCode.Task.NOT_FOUND, "任务不存在");
+            }
+            if (!"running".equals(existingTask.getStatus())) {
+                log.info("任务状态不是running，跳过失败处理 - taskId: {}, status: {}", taskId, existingTask.getStatus());
+                return existingTask;
+            }
+        }
+        return fail(taskId, errorMessage);
     }
 
     /**
@@ -426,7 +459,7 @@ public class TaskServiceImpl implements TaskService {
         for (Task task : runningTasks) {
             task.setStatus("cancelled");
             task.setErrorMessage("被管理员停止");
-            task.setCompletedAt(LocalDateTime.now());
+            task.setCompletedTime(LocalDateTime.now());
             taskMapper.updateById(task);
             log.info("取消流媒体账号任务 - TaskID: {}, StreamingAccountID: {}", task.getId(), streamingAccountId);
         }
@@ -445,7 +478,7 @@ public class TaskServiceImpl implements TaskService {
     public List<Task> findByStreamingAccountId(String streamingAccountId) {
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Task::getStreamingAccountId, streamingAccountId)
-               .orderByDesc(Task::getCreatedAt);
+               .orderByDesc(Task::getCreatedTime);
         return taskMapper.selectList(wrapper);
     }
 
@@ -471,6 +504,38 @@ public class TaskServiceImpl implements TaskService {
         } catch (Exception e) {
             log.error("解析任务参数失败: {}", paramsJson);
             return new HashMap<>();
+        }
+    }
+
+    @Override
+    public List<Task> findStuckRunningTasks(int timeoutMinutes) {
+        LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Task::getStatus, "running")
+               .eq(Task::getDeleted, false)
+               .lt(Task::getUpdatedTime, LocalDateTime.now().minusMinutes(timeoutMinutes));
+        return taskMapper.selectList(wrapper);
+    }
+
+    @Override
+    public void reassignTasksFromOfflineAgent(String agentId) {
+        LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Task::getTargetAgentId, agentId)
+               .eq(Task::getStatus, "running")
+               .eq(Task::getDeleted, false);
+        List<Task> runningTasks = taskMapper.selectList(wrapper);
+
+        for (Task task : runningTasks) {
+            stateMachine.validateTransition(task, TaskStatus.PENDING);
+            task.setStatus("pending");
+            task.setTargetAgentId(null);
+            task.setAssignedTime(null);
+            task.setErrorMessage("Agent离线，任务自动重置");
+            taskMapper.updateById(task);
+            log.warn("任务因Agent离线被重置 - taskId: {}, agentId: {}", task.getId(), agentId);
+        }
+
+        if (!runningTasks.isEmpty()) {
+            log.info("Agent {} 离线，重置了 {} 个任务", agentId, runningTasks.size());
         }
     }
 }

@@ -36,9 +36,9 @@
             <span v-else class="text-muted">未绑定</span>
           </template>
         </el-table-column>
-        <el-table-column prop="lastSeenAt" label="最后在线" width="170">
+        <el-table-column prop="lastSeenTime" label="最后在线" width="170">
           <template #default="{ row }">
-            {{ row.lastSeenAt ? formatDate(row.lastSeenAt) : '-' }}
+            {{ row.lastSeenTime ? formatDate(row.lastSeenTime) : '-' }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="280" fixed="right" align="center">

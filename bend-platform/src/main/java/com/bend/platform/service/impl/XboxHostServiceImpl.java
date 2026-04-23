@@ -93,7 +93,7 @@ public class XboxHostServiceImpl implements XboxHostService {
         if (merchantId != null) {
             wrapper.eq(XboxHost::getMerchantId, merchantId);
         }
-        wrapper.orderByDesc(XboxHost::getCreatedAt);
+        wrapper.orderByDesc(XboxHost::getCreatedTime);
         Page<XboxHost> page = new Page<>(request.getPageNum(), request.getPageSize());
         return xboxHostMapper.selectPage(page, wrapper);
     }
@@ -104,7 +104,7 @@ public class XboxHostServiceImpl implements XboxHostService {
         if (merchantId != null) {
             wrapper.eq(XboxHost::getMerchantId, merchantId);
         }
-        wrapper.orderByDesc(XboxHost::getCreatedAt);
+        wrapper.orderByDesc(XboxHost::getCreatedTime);
         return xboxHostMapper.selectList(wrapper);
     }
 
@@ -143,7 +143,7 @@ public class XboxHostServiceImpl implements XboxHostService {
         }
 
         host.setStatus(status);
-        host.setLastSeenAt(LocalDateTime.now());
+        host.setLastSeenTime(LocalDateTime.now());
         xboxHostMapper.updateById(host);
         log.info("更新Xbox主机状态 - ID: {}, 新状态: {}", id, status);
     }
@@ -198,8 +198,8 @@ public class XboxHostServiceImpl implements XboxHostService {
         merchantService.validateMerchantActive(host.getMerchantId());
 
         host.setLockedByAgentId(agentId);
-        host.setLockExpiresAt(expireTime);
-        host.setLockedAt(LocalDateTime.now());
+        host.setLockExpiresTime(expireTime);
+        host.setLockedTime(LocalDateTime.now());
         xboxHostMapper.updateById(host);
         log.info("锁定Xbox主机 - ID: {}, AgentID: {}", id, agentId);
     }
@@ -216,8 +216,8 @@ public class XboxHostServiceImpl implements XboxHostService {
         merchantService.validateMerchantActive(host.getMerchantId());
 
         host.setLockedByAgentId(null);
-        host.setLockExpiresAt(null);
-        host.setLockedAt(null);
+        host.setLockExpiresTime(null);
+        host.setLockedTime(null);
         xboxHostMapper.updateById(host);
         log.info("解锁Xbox主机 - ID: {}", id);
     }

@@ -67,7 +67,7 @@ public class TemplateServiceImpl implements TemplateService {
         LambdaQueryWrapper<Template> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Template::getDeleted, false);
         wrapper.eq(Template::getStatus, 1);
-        wrapper.orderByDesc(Template::getCreatedAt);
+        wrapper.orderByDesc(Template::getCreatedTime);
         return templateMapper.selectList(wrapper);
     }
 
@@ -105,7 +105,7 @@ public class TemplateServiceImpl implements TemplateService {
         if (StringUtils.hasText(request.getGame())) {
             wrapper.eq(Template::getGame, request.getGame());
         }
-        wrapper.orderByDesc(Template::getCreatedAt);
+        wrapper.orderByDesc(Template::getCreatedTime);
         Page<Template> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return templateMapper.selectPage(page, wrapper);
     }

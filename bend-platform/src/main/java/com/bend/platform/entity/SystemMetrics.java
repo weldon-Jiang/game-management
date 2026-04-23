@@ -69,5 +69,5 @@ public class SystemMetrics {
      * 记录时间
      */
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime recordedAt;
+    private LocalDateTime recordedTime;
 }

@@ -93,6 +93,23 @@ export const XBOX_HOST_STATUS_TYPE_MAP = {
   error: 'danger'
 }
 
+export const TASK_STATUS_MAP = {
+  pending: { text: '待执行', type: 'warning' },
+  running: { text: '执行中', type: 'primary' },
+  completed: { text: '已完成', type: 'success' },
+  failed: { text: '已失败', type: 'danger' },
+  cancelled: { text: '已取消', type: 'info' }
+}
+
+export const TASK_TYPE_MAP = {
+  template_match: '模板匹配',
+  input_sequence: '输入序列',
+  scene_detection: '场景检测',
+  account_switch: '账号切换',
+  stream_control: '串流控制',
+  custom: '自定义'
+}
+
 export const GAME_ACCOUNT_STATUS_MAP = {
   active: '正常',
   locked: '已锁定',
@@ -229,4 +246,19 @@ export const getRoleText = (role) => {
 export const getRoleType = (role) => {
   if (!role) return 'info'
   return ROLE_TYPE_MAP[role] || 'info'
+}
+
+export const getTaskStatusText = (status) => {
+  if (!status) return '-'
+  return TASK_STATUS_MAP[status]?.text || status
+}
+
+export const getTaskStatusType = (status) => {
+  if (!status) return 'info'
+  return TASK_STATUS_MAP[status]?.type || 'info'
+}
+
+export const getTaskTypeText = (type) => {
+  if (!type) return '-'
+  return TASK_TYPE_MAP[type] || type
 }

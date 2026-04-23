@@ -118,14 +118,14 @@ public class AgentInstance {
      * Agent首次注册到系统的时间
      */
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private LocalDateTime createdTime;
 
     /**
      * 更新时间
      * Agent信息最后修改的时间
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updatedAt;
+    private LocalDateTime updatedTime;
 
     /**
      * 软删除标记

@@ -156,7 +156,7 @@ class AlertServiceTest {
         verify(alertMapper, times(1)).updateById(argThat(alert ->
             "ACKNOWLEDGED".equals(alert.getStatus()) &&
             "user-001".equals(alert.getAcknowledgedBy()) &&
-            alert.getAcknowledgedAt() != null
+            alert.getAcknowledgedTime() != null
         ));
     }
 
@@ -194,7 +194,7 @@ class AlertServiceTest {
             "RESOLVED".equals(alert.getStatus()) &&
             "user-001".equals(alert.getResolvedBy()) &&
             "问题已修复".equals(alert.getResolutionNote()) &&
-            alert.getResolvedAt() != null
+            alert.getResolvedTime() != null
         ));
     }
 

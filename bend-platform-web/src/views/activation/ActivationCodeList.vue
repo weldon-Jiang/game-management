@@ -94,9 +94,9 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="usedAt" label="使用时间" width="170">
+        <el-table-column prop="usedTime" label="使用时间" width="170">
           <template #default="{ row }">
-            {{ row.usedAt ? formatDate(row.usedAt) : '-' }}
+            {{ row.usedTime ? formatDate(row.usedTime) : '-' }}
           </template>
         </el-table-column>
         <el-table-column prop="expireTime" label="过期时间" width="170">
@@ -104,9 +104,9 @@
             {{ row.expireTime ? formatDate(row.expireTime) : '永不过期' }}
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" width="170">
+        <el-table-column prop="createdTime" label="创建时间" width="170">
           <template #default="{ row }">
-            {{ formatDate(row.createdAt) }}
+            {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="80" fixed="right" align="center">

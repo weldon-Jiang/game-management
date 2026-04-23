@@ -10,15 +10,19 @@ import { ElMessage } from 'element-plus'
 
 // 全局错误捕获
 onErrorCaptured((err, instance, info) => {
+  const errorMsg = typeof err === 'string' ? err : err?.message
+  if (errorMsg === 'cancel' || errorMsg === 'ESC') {
+    return false
+  }
   console.error('=== Vue Error Captured ===')
   console.error('Error:', err)
-  console.error('Error Message:', err.message)
-  console.error('Error Name:', err.name)
+  console.error('Error Message:', err?.message)
+  console.error('Error Name:', err?.name)
   console.error('Component:', instance)
   console.error('Info:', info)
-  console.error('Stack:', err.stack)
-  ElMessage.error('页面加载出错: ' + err.message)
-  return false // 阻止错误继续传播
+  console.error('Stack:', err?.stack)
+  ElMessage.error('页面加载出错: ' + (err?.message || err))
+  return false
 })
 </script>
 

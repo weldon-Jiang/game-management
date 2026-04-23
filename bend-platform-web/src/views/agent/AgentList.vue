@@ -53,15 +53,11 @@
             {{ row.lastHeartbeat ? formatDate(row.lastHeartbeat) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="uninstallReason" label="卸载原因" width="150" show-overflow-tooltip>
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
-            <span v-if="row.uninstallReason" class="text-muted">{{ row.uninstallReason }}</span>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="createdAt" label="注册时间" width="170">
-          <template #default="{ row }">
-            {{ row.createdAt ? formatDate(row.createdAt) : '-' }}
+            <el-button type="primary" link size="small" @click="showTaskDialog(row)">
+              查看任务
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -78,6 +74,11 @@
         />
       </div>
     </div>
+
+    <AgentTaskDialog
+      v-model:visible="taskDialogVisible"
+      :agent="selectedAgent"
+    />
   </div>
 </template>
 
@@ -86,6 +87,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { agentApi } from '@/api'
 import { getAgentStatusText, getAgentStatusType } from '@/utils/constants'
+import AgentTaskDialog from './AgentTaskDialog.vue'
 
 const filterStatus = ref('')
 
@@ -97,6 +99,9 @@ const pagination = reactive({
   pageSize: 10,
   total: 0
 })
+
+const taskDialogVisible = ref(false)
+const selectedAgent = ref(null)
 
 const handleSearch = () => {
   pagination.pageNum = 1
@@ -123,6 +128,11 @@ const loadData = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const showTaskDialog = (agent) => {
+  selectedAgent.value = agent
+  taskDialogVisible.value = true
 }
 
 const formatDate = (dateStr) => {

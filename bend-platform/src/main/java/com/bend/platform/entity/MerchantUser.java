@@ -20,7 +20,7 @@ public class MerchantUser {
     private String passwordHash;
     private String role;
     private String status;
-    private LocalDateTime lastLoginAt;
+    private LocalDateTime lastLoginTime;
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private LocalDateTime createdTime;
 }

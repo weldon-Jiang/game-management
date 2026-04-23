@@ -70,18 +70,6 @@ public class GameAccount {
     private String xboxLivePasswordEncrypted;
 
     /**
-     * 锁定的Xbox主机ID
-     * 账号当前绑定的主机序列号
-     */
-    private String lockedXboxId;
-
-    /**
-     * 当前绑定的Agent ID
-     * 账号当前由哪个Agent控制
-     */
-    private String agentId;
-
-    /**
      * 是否为主账号
      * true-主账号 false-备选账号
      * 主账号优先使用
@@ -122,17 +110,17 @@ public class GameAccount {
      * 最后使用时间
      * 账号最后一次被使用的时间
      */
-    private LocalDateTime lastUsedAt;
+    private LocalDateTime lastUsedTime;
 
     /**
      * 创建时间
      */
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private LocalDateTime createdTime;
 
     /**
      * 更新时间
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updatedAt;
+    private LocalDateTime updatedTime;
 }

@@ -17,15 +17,13 @@ public class ActivationCode {
     private String merchantId;
     private String batchId;
     private String code;
-    private String vipType;
-    private String vipConfigId;
     private String status;
     private String usedBy;
-    private LocalDateTime usedAt;
+    private LocalDateTime usedTime;
     private LocalDateTime expireTime;
-    private LocalDateTime generatedAt;
+    private LocalDateTime generatedTime;
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private LocalDateTime createdTime;
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updatedAt;
+    private LocalDateTime updatedTime;
 }

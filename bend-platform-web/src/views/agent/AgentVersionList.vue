@@ -47,9 +47,9 @@
             </el-link>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="发布时间" width="170">
+        <el-table-column prop="createdTime" label="发布时间" width="170">
           <template #default="{ row }">
-            {{ formatDate(row.createdAt) }}
+            {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="280" fixed="right" align="center">

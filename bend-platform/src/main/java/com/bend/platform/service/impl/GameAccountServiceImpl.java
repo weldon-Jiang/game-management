@@ -67,8 +67,8 @@ public class GameAccountServiceImpl implements GameAccountService {
         entity.setXboxLivePasswordEncrypted(account.getXboxLivePasswordEncrypted());
         entity.setIsActive(true);
         entity.setIsPrimary(false);
-        entity.setCreatedAt(LocalDateTime.now());
-        entity.setUpdatedAt(LocalDateTime.now());
+        entity.setCreatedTime(LocalDateTime.now());
+        entity.setUpdatedTime(LocalDateTime.now());
 
         gameAccountMapper.insert(entity);
         log.info("创建游戏账号成功 - ID: {}, 名称: {}", entity.getId(), entity.getName());
@@ -101,7 +101,7 @@ public class GameAccountServiceImpl implements GameAccountService {
 
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.in(GameAccount::getStreamingId, streamingIds)
-               .orderByDesc(GameAccount::getCreatedAt);
+               .orderByDesc(GameAccount::getCreatedTime);
         Page<GameAccount> page = new Page<>(request.getPageNum(), request.getPageSize());
         return gameAccountMapper.selectPage(page, wrapper);
     }
@@ -110,7 +110,7 @@ public class GameAccountServiceImpl implements GameAccountService {
     public IPage<GameAccount> findByStreamingId(String streamingId, GameAccountPageRequest request) {
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(GameAccount::getStreamingId, streamingId)
-               .orderByDesc(GameAccount::getCreatedAt);
+               .orderByDesc(GameAccount::getCreatedTime);
         Page<GameAccount> page = new Page<>(request.getPageNum(), request.getPageSize());
         return gameAccountMapper.selectPage(page, wrapper);
     }
@@ -119,14 +119,14 @@ public class GameAccountServiceImpl implements GameAccountService {
     public List<GameAccount> findAllByStreamingId(String streamingId) {
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(GameAccount::getStreamingId, streamingId)
-               .orderByDesc(GameAccount::getCreatedAt);
+               .orderByDesc(GameAccount::getCreatedTime);
         return gameAccountMapper.selectList(wrapper);
     }
 
     @Override
     public IPage<GameAccount> findAll(GameAccountPageRequest request) {
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
-        wrapper.orderByDesc(GameAccount::getCreatedAt);
+        wrapper.orderByDesc(GameAccount::getCreatedTime);
         Page<GameAccount> page = new Page<>(request.getPageNum(), request.getPageSize());
         return gameAccountMapper.selectPage(page, wrapper);
     }
@@ -151,7 +151,7 @@ public class GameAccountServiceImpl implements GameAccountService {
         if (account.getIsActive() != null) {
             existing.setIsActive(account.getIsActive());
         }
-        existing.setUpdatedAt(LocalDateTime.now());
+        existing.setUpdatedTime(LocalDateTime.now());
 
         gameAccountMapper.updateById(existing);
         log.info("更新游戏账号 - ID: {}", id);
@@ -166,8 +166,8 @@ public class GameAccountServiceImpl implements GameAccountService {
         }
 
         account.setIsActive(false);
-        account.setLockedXboxId(xboxHostId);
-        account.setUpdatedAt(LocalDateTime.now());
+        
+        account.setUpdatedTime(LocalDateTime.now());
 
         gameAccountMapper.updateById(account);
         log.info("锁定游戏账号 - ID: {}, XboxHost: {}", id, xboxHostId);
@@ -182,8 +182,8 @@ public class GameAccountServiceImpl implements GameAccountService {
         }
 
         account.setIsActive(true);
-        account.setLockedXboxId(null);
-        account.setUpdatedAt(LocalDateTime.now());
+        
+        account.setUpdatedTime(LocalDateTime.now());
 
         gameAccountMapper.updateById(account);
         log.info("解锁游戏账号 - ID: {}", id);
@@ -198,7 +198,7 @@ public class GameAccountServiceImpl implements GameAccountService {
         }
 
         account.setIsPrimary(primary);
-        account.setUpdatedAt(LocalDateTime.now());
+        account.setUpdatedTime(LocalDateTime.now());
 
         gameAccountMapper.updateById(account);
         log.info("设置游戏账号为主账号 - ID: {}, Primary: {}", id, primary);
@@ -219,8 +219,8 @@ public class GameAccountServiceImpl implements GameAccountService {
             throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
         }
 
-        account.setAgentId(agentId);
-        account.setUpdatedAt(LocalDateTime.now());
+        
+        account.setUpdatedTime(LocalDateTime.now());
         gameAccountMapper.updateById(account);
         log.info("更新游戏账号Agent绑定 - ID: {}, AgentID: {}", id, agentId);
     }
@@ -229,7 +229,7 @@ public class GameAccountServiceImpl implements GameAccountService {
     public List<GameAccount> findByStreamingId(String streamingId) {
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(GameAccount::getStreamingId, streamingId)
-               .orderByDesc(GameAccount::getCreatedAt);
+               .orderByDesc(GameAccount::getCreatedTime);
         return gameAccountMapper.selectList(wrapper);
     }
 }

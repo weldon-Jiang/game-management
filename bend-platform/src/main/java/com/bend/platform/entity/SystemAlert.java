@@ -101,12 +101,12 @@ public class SystemAlert {
     /**
      * 触发时间
      */
-    private LocalDateTime triggeredAt;
+    private LocalDateTime triggeredTime;
 
     /**
      * 确认时间
      */
-    private LocalDateTime acknowledgedAt;
+    private LocalDateTime acknowledgedTime;
 
     /**
      * 确认人ID
@@ -116,7 +116,7 @@ public class SystemAlert {
     /**
      * 解决时间
      */
-    private LocalDateTime resolvedAt;
+    private LocalDateTime resolvedTime;
 
     /**
      * 解决人ID
@@ -137,11 +137,11 @@ public class SystemAlert {
      * 创建时间
      */
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private LocalDateTime createdTime;
 
     /**
      * 更新时间
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updatedAt;
+    private LocalDateTime updatedTime;
 }

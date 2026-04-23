@@ -15,5 +15,5 @@ public class StreamingAccountItemDto {
     private String email;
     private String status;
     private LocalDateTime lastHeartbeat;
-    private LocalDateTime createdAt;
+    private LocalDateTime createdTime;
 }

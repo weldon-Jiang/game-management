@@ -3,8 +3,10 @@ package com.bend.platform.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.ActivationCode;
+import com.bend.platform.entity.ActivationCodeBatch;
 import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.VipConfig;
+import com.bend.platform.repository.ActivationCodeBatchMapper;
 import com.bend.platform.repository.ActivationCodeMapper;
 import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.repository.VipConfigMapper;
@@ -44,6 +46,7 @@ public class MerchantSubscriptionController {
     private final MerchantSubscriptionService subscriptionService;
     private final MerchantMapper merchantMapper;
     private final ActivationCodeMapper activationCodeMapper;
+    private final ActivationCodeBatchMapper activationCodeBatchMapper;
     private final VipConfigMapper vipConfigMapper;
     private final VipConfigService vipConfigService;
 
@@ -103,21 +106,22 @@ public class MerchantSubscriptionController {
         LambdaQueryWrapper<ActivationCode> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ActivationCode::getMerchantId, merchantId)
                .eq(ActivationCode::getStatus, "used")
-               .orderByDesc(ActivationCode::getUsedAt)
+               .orderByDesc(ActivationCode::getUsedTime)
                .last("LIMIT 1");
         ActivationCode lastUsedCode = activationCodeMapper.selectOne(wrapper);
         if (lastUsedCode != null) {
-            if (lastUsedCode.getVipConfigId() != null) {
-                VipConfig vipConfig = vipConfigMapper.selectById(lastUsedCode.getVipConfigId());
+            ActivationCodeBatch batch = activationCodeBatchMapper.selectById(lastUsedCode.getBatchId());
+            if (batch != null && batch.getVipConfigId() != null) {
+                VipConfig vipConfig = vipConfigMapper.selectById(batch.getVipConfigId());
                 if (vipConfig != null) {
                     status.put("vipType", vipConfig.getVipType());
                     status.put("vipName", vipConfig.getVipName());
                     status.put("durationDays", vipConfig.getDurationDays());
                 }
-            } else {
-                status.put("vipType", lastUsedCode.getVipType());
+            } else if (batch != null) {
+                status.put("vipType", batch.getVipType());
             }
-            status.put("lastActivatedAt", lastUsedCode.getUsedAt());
+            status.put("lastActivatedTime", lastUsedCode.getUsedTime());
             status.put("lastUsedCode", lastUsedCode.getCode());
         }
 
@@ -155,11 +159,27 @@ public class MerchantSubscriptionController {
         wrapper.eq(ActivationCode::getMerchantId, merchantId)
                .eq(ActivationCode::getStatus, "used")
                .gt(ActivationCode::getExpireTime, LocalDateTime.now())
-               .orderByAsc(ActivationCode::getUsedAt);
+               .orderByAsc(ActivationCode::getUsedTime);
         List<ActivationCode> codes = activationCodeMapper.selectList(wrapper);
 
-        List<String> vipConfigIds = codes.stream()
-                .map(ActivationCode::getVipConfigId)
+        // 获取所有批次ID
+        List<String> batchIds = codes.stream()
+                .map(ActivationCode::getBatchId)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.toList());
+
+        // 查询所有相关批次
+        Map<String, ActivationCodeBatch> batchMap = new HashMap<>();
+        if (!CollectionUtils.isEmpty(batchIds)) {
+            LambdaQueryWrapper<ActivationCodeBatch> batchWrapper = new LambdaQueryWrapper<>();
+            batchWrapper.in(ActivationCodeBatch::getId, batchIds);
+            activationCodeBatchMapper.selectList(batchWrapper).forEach(b -> batchMap.put(b.getId(), b));
+        }
+
+        // 收集所有 vipConfigId
+        List<String> vipConfigIds = batchMap.values().stream()
+                .map(ActivationCodeBatch::getVipConfigId)
                 .filter(StringUtils::hasText)
                 .distinct()
                 .collect(Collectors.toList());
@@ -175,20 +195,21 @@ public class MerchantSubscriptionController {
         for (ActivationCode code : codes) {
             Map<String, Object> item = new HashMap<>();
             item.put("code", code.getCode());
-            item.put("usedAt", code.getUsedAt());
+            item.put("usedTime", code.getUsedTime());
             item.put("expireTime", code.getExpireTime());
             item.put("usedBy", code.getUsedBy());
 
-            if (code.getVipConfigId() != null && vipConfigMap.containsKey(code.getVipConfigId())) {
-                VipConfig vipConfig = vipConfigMap.get(code.getVipConfigId());
+            ActivationCodeBatch batch = batchMap.get(code.getBatchId());
+            if (batch != null && batch.getVipConfigId() != null && vipConfigMap.containsKey(batch.getVipConfigId())) {
+                VipConfig vipConfig = vipConfigMap.get(batch.getVipConfigId());
                 item.put("vipName", vipConfig.getVipName());
                 item.put("vipType", vipConfig.getVipType());
                 item.put("vipTypeText", getVipTypeText(vipConfig.getVipType()));
                 item.put("durationDays", vipConfig.getDurationDays());
                 item.put("price", vipConfig.getPrice());
-            } else {
-                item.put("vipType", code.getVipType());
-                item.put("vipTypeText", getVipTypeText(code.getVipType()));
+            } else if (batch != null) {
+                item.put("vipType", batch.getVipType());
+                item.put("vipTypeText", getVipTypeText(batch.getVipType()));
             }
             result.add(item);
         }

@@ -86,7 +86,7 @@ public class MonitoringController {
         List<Map<String, Object>> result = new ArrayList<>();
         for (SystemMetrics metric : metrics) {
             Map<String, Object> dataPoint = new HashMap<>();
-            dataPoint.put("time", metric.getRecordedAt().toString());
+            dataPoint.put("time", metric.getRecordedTime().toString());
             dataPoint.put("value", metric.getValue());
             result.add(dataPoint);
         }

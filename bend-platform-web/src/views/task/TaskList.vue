@@ -84,14 +84,14 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" width="170">
+        <el-table-column prop="createdTime" label="创建时间" width="170">
           <template #default="{ row }">
-            {{ row.createdAt ? formatDate(row.createdAt) : '-' }}
+            {{ row.createdTime ? formatDate(row.createdTime) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="assignedAt" label="分配时间" width="170">
+        <el-table-column prop="assignedTime" label="分配时间" width="170">
           <template #default="{ row }">
-            {{ row.assignedAt ? formatDate(row.assignedAt) : '-' }}
+            {{ row.assignedTime ? formatDate(row.assignedTime) : '-' }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
@@ -225,6 +225,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { taskApi, agentApi } from '@/api'
+import { getTaskTypeText, getTaskStatusText, getTaskStatusType } from '@/utils/constants'
 
 const filterStatus = ref('')
 const filterType = ref('')
@@ -251,37 +252,6 @@ const createForm = reactive({
 })
 
 const createFormRef = ref(null)
-
-const taskTypeMap = {
-  template_match: '模板匹配',
-  input_sequence: '输入序列',
-  scene_detection: '场景检测',
-  account_switch: '账号切换',
-  stream_control: '串流控制',
-  custom: '自定义'
-}
-
-const taskStatusMap = {
-  pending: '待执行',
-  running: '执行中',
-  completed: '已完成',
-  failed: '已失败',
-  cancelled: '已取消'
-}
-
-const getTaskTypeText = (type) => taskTypeMap[type] || type
-const getTaskStatusText = (status) => taskStatusMap[status] || status
-
-const getTaskStatusType = (status) => {
-  const typeMap = {
-    pending: 'warning',
-    running: 'primary',
-    completed: 'success',
-    failed: 'danger',
-    cancelled: 'info'
-  }
-  return typeMap[status] || 'info'
-}
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'

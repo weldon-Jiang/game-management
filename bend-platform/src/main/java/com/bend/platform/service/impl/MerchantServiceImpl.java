@@ -93,7 +93,7 @@ public class MerchantServiceImpl implements MerchantService {
     @Override
     public IPage<Merchant> findAll(MerchantPageRequest request) {
         LambdaQueryWrapper<Merchant> wrapper = new LambdaQueryWrapper<>();
-        wrapper.orderByDesc(Merchant::getCreatedAt);
+        wrapper.orderByDesc(Merchant::getCreatedTime);
         Page<Merchant> page = new Page<>(request.getPageNum(), request.getPageSize());
         return merchantMapper.selectPage(page, wrapper);
     }

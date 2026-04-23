@@ -1,26 +1,63 @@
 package com.bend.platform.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
 
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
 /**
  * 跨域配置
- * 允许所有来源、所有请求头、所有方法的跨域请求
  */
 @Configuration
 public class CorsConfig {
 
+    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3090}")
+    private String allowedOrigins;
+
+    @Value("${cors.allowed-methods:GET,POST,PUT,DELETE,OPTIONS}")
+    private String allowedMethods;
+
+    @Value("${cors.allowed-headers:*}")
+    private String allowedHeaders;
+
+    @Value("${cors.allow-credentials:true}")
+    private boolean allowCredentials;
+
+    @Value("${cors.max-age:3600}")
+    private long maxAge;
+
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowCredentials(true);
-        config.addAllowedOriginPattern("*");
-        config.addAllowedHeader("*");
-        config.addAllowedMethod("*");
-        config.setMaxAge(3600L);
+
+        config.setAllowedOrigins(Arrays.asList(allowedOrigins.split(","))
+                .stream()
+                .map(String::trim)
+                .collect(Collectors.toList()));
+
+        config.setAllowedMethods(Arrays.asList(allowedMethods.split(","))
+                .stream()
+                .map(String::trim)
+                .collect(Collectors.toList()));
+
+        if ("*".equals(allowedHeaders)) {
+            config.setAllowedHeaders(Arrays.asList("*"));
+        } else {
+            config.setAllowedHeaders(Arrays.asList(allowedHeaders.split(","))
+                    .stream()
+                    .map(String::trim)
+                    .collect(Collectors.toList()));
+        }
+
+        config.setAllowCredentials(allowCredentials);
+        config.setMaxAge(maxAge);
+
+        config.setExposedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Requested-With"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

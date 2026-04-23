@@ -86,9 +86,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="durationDays" label="时长(天)" width="100" align="center" />
-        <el-table-column prop="usedAt" label="开始时间" width="170">
+        <el-table-column prop="usedTime" label="开始时间" width="170">
           <template #default="{ row }">
-            {{ row.usedAt ? formatDate(row.usedAt) : '-' }}
+            {{ row.usedTime ? formatDate(row.usedTime) : '-' }}
           </template>
         </el-table-column>
         <el-table-column prop="expireTime" label="结束时间" width="170">

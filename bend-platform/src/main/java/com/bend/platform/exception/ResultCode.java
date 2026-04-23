@@ -398,9 +398,10 @@ public interface ResultCode {
     enum Task implements ResultCode {
         NOT_FOUND(19001, "任务不存在"),
         INVALID_STATUS(19002, "任务状态无效"),
-        NOT_PENDING(19003, "任务不在待执行状态"),
-        NOT_RUNNING(19004, "任务不在运行中状态"),
-        ALREADY_COMPLETED(19005, "任务已完成的");
+        INVALID_STATUS_TRANSITION(19003, "非法状态转换"),
+        NOT_PENDING(19004, "任务不在待执行状态"),
+        NOT_RUNNING(19005, "任务不在运行中状态"),
+        ALREADY_COMPLETED(19006, "任务已完成的");
 
         private final int code;
         private final String message;

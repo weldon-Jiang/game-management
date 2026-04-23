@@ -14,28 +14,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 系统告警服务
- *
- * 功能说明：
- * - 生成和管理系统告警
- * - 告警级别分类和通知
- * - 告警确认和处理流程
- *
- * 告警类型：
- * - AGENT_OFFLINE: Agent离线超过阈值
- * - TASK_FAILED: 任务连续失败
- * - HIGH_ERROR_RATE: 错误率过高
- * - HIGH_CPU: CPU使用率过高
- * - HIGH_MEMORY: 内存使用率过高
- * - XBOX_CONNECTION_FAILED: Xbox连接失败
- * - AUTH_FAILURE: 认证失败
- *
- * 通知方式：
- * - 日志记录（INFO/WARN/ERROR级别）
- * - 邮件通知（可扩展）
- * - WebHook通知（可扩展）
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -44,19 +22,14 @@ public class AlertService {
     private final SystemAlertMapper alertMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    // 告警阈值配置
     private static final int AGENT_OFFLINE_THRESHOLD_MINUTES = 5;
     private static final int TASK_FAILURE_THRESHOLD = 3;
     private static final double CPU_USAGE_THRESHOLD = 90.0;
     private static final double MEMORY_USAGE_THRESHOLD = 90.0;
     private static final double ERROR_RATE_THRESHOLD = 10.0;
 
-    // 最近任务失败计数
     private int recentTaskFailures = 0;
 
-    /**
-     * 触发Agent离线告警
-     */
     public void triggerAgentOfflineAlert(String agentId, String merchantId) {
         if (hasUnresolvedAlert(agentId, "AGENT_OFFLINE")) {
             return;
@@ -78,7 +51,7 @@ public class AlertService {
             alert.setAgentId(agentId);
             alert.setMerchantId(merchantId);
             alert.setStatus("TRIGGERED");
-            alert.setTriggeredAt(LocalDateTime.now());
+            alert.setTriggeredTime(LocalDateTime.now());
 
             alertMapper.insert(alert);
             log.warn("【告警】Agent离线 - AgentID: {}, 商户: {}", agentId, merchantId);
@@ -90,9 +63,6 @@ public class AlertService {
         }
     }
 
-    /**
-     * 触发任务失败告警
-     */
     public void triggerTaskFailedAlert(String taskId, String errorMessage) {
         recentTaskFailures++;
 
@@ -114,7 +84,7 @@ public class AlertService {
 
                     alert.setTaskId(taskId);
                     alert.setStatus("TRIGGERED");
-                    alert.setTriggeredAt(LocalDateTime.now());
+                    alert.setTriggeredTime(LocalDateTime.now());
 
                     alertMapper.insert(alert);
                     log.warn("【告警】任务连续失败 - 次数: {}, 最后错误: {}", recentTaskFailures, errorMessage);
@@ -130,9 +100,6 @@ public class AlertService {
         }
     }
 
-    /**
-     * 触发系统资源告警
-     */
     public void triggerResourceAlert(String alertType, double currentValue, double threshold) {
         if (hasUnresolvedAlert(null, alertType)) {
             return;
@@ -155,7 +122,7 @@ public class AlertService {
             alert.setDetails(objectMapper.writeValueAsString(detailsMap));
 
             alert.setStatus("TRIGGERED");
-            alert.setTriggeredAt(LocalDateTime.now());
+            alert.setTriggeredTime(LocalDateTime.now());
 
             alertMapper.insert(alert);
             log.warn("【告警】{}", message);
@@ -167,9 +134,6 @@ public class AlertService {
         }
     }
 
-    /**
-     * 触发Xbox连接失败告警
-     */
     public void triggerXboxConnectionAlert(String xboxId, String merchantId, String errorMessage) {
         if (hasUnresolvedAlert(xboxId, "XBOX_CONNECTION_FAILED")) {
             return;
@@ -190,7 +154,7 @@ public class AlertService {
 
             alert.setMerchantId(merchantId);
             alert.setStatus("TRIGGERED");
-            alert.setTriggeredAt(LocalDateTime.now());
+            alert.setTriggeredTime(LocalDateTime.now());
 
             alertMapper.insert(alert);
             log.error("【告警】Xbox连接失败 - XboxID: {}, 错误: {}", xboxId, errorMessage);
@@ -202,28 +166,22 @@ public class AlertService {
         }
     }
 
-    /**
-     * 确认告警
-     */
     public void acknowledgeAlert(String alertId, String acknowledgedBy) {
         SystemAlert alert = alertMapper.selectById(alertId);
         if (alert != null && "TRIGGERED".equals(alert.getStatus())) {
             alert.setStatus("ACKNOWLEDGED");
-            alert.setAcknowledgedAt(LocalDateTime.now());
+            alert.setAcknowledgedTime(LocalDateTime.now());
             alert.setAcknowledgedBy(acknowledgedBy);
             alertMapper.updateById(alert);
             log.info("告警已确认 - AlertID: {}, 确认人: {}", alertId, acknowledgedBy);
         }
     }
 
-    /**
-     * 解决告警
-     */
     public void resolveAlert(String alertId, String resolvedBy, String note) {
         SystemAlert alert = alertMapper.selectById(alertId);
         if (alert != null && !"RESOLVED".equals(alert.getStatus())) {
             alert.setStatus("RESOLVED");
-            alert.setResolvedAt(LocalDateTime.now());
+            alert.setResolvedTime(LocalDateTime.now());
             alert.setResolvedBy(resolvedBy);
             alert.setResolutionNote(note);
             alertMapper.updateById(alert);
@@ -231,9 +189,6 @@ public class AlertService {
         }
     }
 
-    /**
-     * 忽略告警
-     */
     public void ignoreAlert(String alertId) {
         SystemAlert alert = alertMapper.selectById(alertId);
         if (alert != null) {
@@ -243,32 +198,23 @@ public class AlertService {
         }
     }
 
-    /**
-     * 获取未解决的告警列表
-     */
     public List<SystemAlert> getUnresolvedAlerts() {
         LambdaQueryWrapper<SystemAlert> wrapper = new LambdaQueryWrapper<>();
         wrapper.in(SystemAlert::getStatus, "TRIGGERED", "ACKNOWLEDGED");
-        wrapper.orderByDesc(SystemAlert::getTriggeredAt);
+        wrapper.orderByDesc(SystemAlert::getTriggeredTime);
         return alertMapper.selectList(wrapper);
     }
 
-    /**
-     * 获取商户的告警列表
-     */
     public List<SystemAlert> getMerchantAlerts(String merchantId, boolean includeResolved) {
         LambdaQueryWrapper<SystemAlert> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SystemAlert::getMerchantId, merchantId);
         if (!includeResolved) {
             wrapper.in(SystemAlert::getStatus, "TRIGGERED", "ACKNOWLEDGED");
         }
-        wrapper.orderByDesc(SystemAlert::getTriggeredAt);
+        wrapper.orderByDesc(SystemAlert::getTriggeredTime);
         return alertMapper.selectList(wrapper);
     }
 
-    /**
-     * 获取告警统计
-     */
     public Map<String, Long> getAlertStats() {
         List<SystemAlert> alerts = alertMapper.selectList(null);
         long total = alerts.size();
@@ -295,9 +241,6 @@ public class AlertService {
         return stats;
     }
 
-    /**
-     * 检查是否存在未解决的告警
-     */
     private boolean hasUnresolvedAlert(String targetId, String alertType) {
         LambdaQueryWrapper<SystemAlert> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SystemAlert::getAlertType, alertType);
@@ -308,9 +251,6 @@ public class AlertService {
         return alertMapper.selectCount(wrapper) > 0;
     }
 
-    /**
-     * 发送告警通知
-     */
     private void sendAlertNotification(SystemAlert alert) {
         String message = String.format("[%s][%s] %s - %s",
                 alert.getSeverity(), alert.getAlertName(), alert.getMessage(), alert.getAlertCode());
@@ -326,15 +266,12 @@ public class AlertService {
         }
     }
 
-    /**
-     * 定时清理过期告警
-     */
     @Scheduled(cron = "0 0 3 * * ?")
     public void cleanupOldAlerts() {
         try {
             LocalDateTime threshold = LocalDateTime.now().minusDays(30);
             LambdaQueryWrapper<SystemAlert> wrapper = new LambdaQueryWrapper<>();
-            wrapper.le(SystemAlert::getResolvedAt, threshold);
+            wrapper.le(SystemAlert::getResolvedTime, threshold);
             wrapper.eq(SystemAlert::getStatus, "RESOLVED");
 
             int deleted = alertMapper.delete(wrapper);
@@ -346,9 +283,6 @@ public class AlertService {
         }
     }
 
-    /**
-     * 定时检查Agent离线状态
-     */
     @Scheduled(fixedRate = 60000)
     public void checkAgentOfflineStatus() {
         log.debug("检查Agent离线状态");

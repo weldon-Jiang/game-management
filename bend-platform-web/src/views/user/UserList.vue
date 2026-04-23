@@ -37,14 +37,14 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="lastLoginAt" label="最后登录" width="170">
+        <el-table-column prop="lastLoginTime" label="最后登录" width="170">
           <template #default="{ row }">
-            {{ row.lastLoginAt ? formatDate(row.lastLoginAt) : '从未登录' }}
+            {{ row.lastLoginTime ? formatDate(row.lastLoginTime) : '从未登录' }}
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" width="170">
+        <el-table-column prop="createdTime" label="创建时间" width="170">
           <template #default="{ row }">
-            {{ formatDate(row.createdAt) }}
+            {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right" align="center">

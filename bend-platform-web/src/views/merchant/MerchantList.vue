@@ -36,9 +36,9 @@
             {{ row.expireTime ? formatDate(row.expireTime) : '永久' }}
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" width="170">
+        <el-table-column prop="createdTime" label="创建时间" width="170">
           <template #default="{ row }">
-            {{ formatDate(row.createdAt) }}
+            {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right" align="center">
@@ -289,7 +289,7 @@ const handleStatus = async (row) => {
  */
 const isExpired = (row) => {
   if (!row.expireTime) return false
-  return new Date(row.expireTime) > new Date()
+  return new Date(row.expireTime) < new Date()
 }
 
 /**
@@ -353,16 +353,12 @@ const handleDelete = async (row) => {
  */
 const getStatusType = (row) => {
   const { status, expireTime } = row
-  // 已过期（expireTime > 当前时间）
-  if (expireTime && new Date(expireTime) > new Date()) return 'warning'
+  if (expireTime && new Date(expireTime) < new Date()) return 'warning'
 
-  // 正常（status=active且未过期）
-  if (status === 'active' && new Date(expireTime) <= new Date()) return 'success'
-  
-  // 已停用
+  if (status === 'active' && (!expireTime || new Date(expireTime) >= new Date())) return 'success'
+
   if (status === 'suspended') return 'danger'
 
-  // 其他状态
   return 'info'
 }
 
@@ -373,16 +369,12 @@ const getStatusType = (row) => {
  */
 const getStatusText = (row) => {
   const { status, expireTime } = row
-    // 已过期（status=active但expireTime > 当前时间）
-  if (expireTime && new Date(expireTime) > new Date()) return '已过期'
+  if (expireTime && new Date(expireTime) < new Date()) return '已过期'
 
-  // 正常（status=active且未过期）
-  if (status === 'active' && new Date(expireTime) <= new Date()) return '正常'
+  if (status === 'active' && (!expireTime || new Date(expireTime) >= new Date())) return '正常'
 
-  // 已停用
   if (status === 'suspended') return '已停用'
 
-  // 其他状态
   return status
 }
 

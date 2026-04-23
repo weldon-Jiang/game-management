@@ -409,6 +409,149 @@ class XboxStreamController:
         """
         await self.send_input("stick", {"stick": stick, "x": x, "y": y})
 
+    async def connect_with_token(
+        self,
+        xbox_ip: str,
+        xbox_token: str,
+        user_hash: str,
+        port: int = None
+    ) -> bool:
+        """
+        使用 Xbox Live Token 连接到 Xbox 主机
+
+        Args:
+            xbox_ip: Xbox IP 地址
+            xbox_token: Xbox Live Token
+            user_hash: 用户哈希 (uhs)
+            port: SmartGlass 端口（可选，默认5050）
+
+        Returns:
+            True: 连接成功
+            False: 连接失败
+        """
+        if self.is_connected:
+            if self._current_xbox == xbox_ip:
+                return True
+            await self.disconnect()
+
+        port = port or self.SMARTGLASS_PORT
+        self._state = StreamState.CONNECTING
+        self._current_xbox = xbox_ip
+
+        try:
+            self.logger.info(f"Connecting to Xbox with token: {xbox_ip}:{port}")
+
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(xbox_ip, port),
+                timeout=10
+            )
+
+            # 使用 token 进行握手
+            if await self._token_handshake(xbox_token, user_hash):
+                self._state = StreamState.CONNECTED
+                self.logger.info(f"Connected to Xbox with token: {xbox_ip}")
+                return True
+            else:
+                raise Exception("Token handshake failed")
+
+        except asyncio.TimeoutError:
+            self.logger.error(f"Connection timeout: {xbox_ip}")
+            self._state = StreamState.ERROR
+        except Exception as e:
+            self.logger.error(f"Failed to connect with token: {e}")
+            self._state = StreamState.ERROR
+            self._reader = None
+            self._writer = None
+
+        return False
+
+    async def _token_handshake(self, xbox_token: str, user_hash: str) -> bool:
+        """
+        使用 Xbox Live Token 执行握手
+
+        Args:
+            xbox_token: Xbox Live Token
+            user_hash: 用户哈希
+
+        Returns:
+            True: 握手成功
+            False: 握手失败
+        """
+        try:
+            handshake_request = self._build_token_handshake_request(xbox_token, user_hash)
+            self._writer.write(handshake_request)
+            await asyncio.wait_for(self._writer.drain(), timeout=5)
+
+            response = await asyncio.wait_for(self._reader.read(1024), timeout=10)
+            if response:
+                self.logger.debug(f"Token handshake response: {len(response)} bytes")
+                return True
+
+        except Exception as e:
+            self.logger.error(f"Token handshake error: {e}")
+
+        return False
+
+    def _build_token_handshake_request(self, xbox_token: str, user_hash: str) -> bytes:
+        """
+        构建带 Token 的握手请求
+
+        Args:
+            xbox_token: Xbox Live Token
+            user_hash: 用户哈希
+
+        Returns:
+            握手请求字节数据
+        """
+        content = json.dumps({
+            "protocol": "xbox.smartglass",
+            "version": self.PROTOCOL_VERSION,
+            "transport": "ws",
+            "auth": {
+                "token": xbox_token,
+                "uhs": user_hash
+            }
+        })
+
+        header = struct.pack('>I', len(content))
+        return header + content.encode('utf-8')
+
+    async def bind_streaming_account(
+        self,
+        streaming_account_id: str,
+        email: str
+    ) -> bool:
+        """
+        绑定流媒体账号到当前 Xbox 会话
+
+        Args:
+            streaming_account_id: 流媒体账号ID
+            email: 微软账号邮箱
+
+        Returns:
+            True: 绑定成功
+            False: 绑定失败
+        """
+        if not self.is_connected:
+            self.logger.error("Not connected, cannot bind streaming account")
+            return False
+
+        try:
+            command = {
+                "type": "bind_account",
+                "account": {
+                    "streaming_id": streaming_account_id,
+                    "email": email
+                }
+            }
+            await self._send_command(command)
+            self.logger.info(f"Streaming account bound: {streaming_account_id}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to bind streaming account: {e}")
+            return False
+
     async def get_xbox_status(self) -> Optional[Dict[str, Any]]:
         """
         获取Xbox状态信息

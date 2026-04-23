@@ -78,6 +78,7 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
         batch.setMerchantId(merchantId);
         batch.setBatchName(batchName);
         batch.setVipType(vipType);
+        batch.setVipConfigId(vipConfig.getId());
         batch.setTotalCount(count);
         batch.setUsedCount(0);
         batch.setRemainingCount(count);
@@ -96,8 +97,6 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
             code.setMerchantId(merchantId);
             code.setBatchId(batch.getId());
             code.setCode(generateCode(prefix, formatter));
-            code.setVipType(vipType);
-            code.setVipConfigId(vipConfig != null ? vipConfig.getId() : null);
             code.setStatus("unused");
             code.setExpireTime(expireTime);
             codes.add(code);
@@ -143,10 +142,13 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
         // 计算新的到期时间：商户当前到期时间 + VIP配置的天数
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime newExpireTime = now;
-        LocalDateTime usedAt = now;
+        LocalDateTime usedTime = now;
 
-        if (code.getVipConfigId() != null) {
-            VipConfig vipConfig = vipConfigMapper.selectById(code.getVipConfigId());
+        // 获取批次信息
+        ActivationCodeBatch batch = activationCodeBatchMapper.selectById(code.getBatchId());
+
+        if (batch != null && batch.getVipConfigId() != null) {
+            VipConfig vipConfig = vipConfigMapper.selectById(batch.getVipConfigId());
             if (vipConfig != null && vipConfig.getDurationDays() != null) {
                 // 获取商户信息
                 Merchant merchant = merchantMapper.selectById(code.getMerchantId());
@@ -156,18 +158,17 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
                     baseTime = merchant.getExpireTime();
                 }
                 newExpireTime = baseTime.plusDays(vipConfig.getDurationDays());
-                usedAt = baseTime;
+                usedTime = baseTime;
             }
         }
 
         code.setStatus("used");
         code.setUsedBy(userId);
-        code.setUsedAt(usedAt);
+        code.setUsedTime(usedTime);
         code.setExpireTime(newExpireTime);
         activationCodeMapper.updateById(code);
 
         // 更新批次统计
-        ActivationCodeBatch batch = activationCodeBatchMapper.selectById(code.getBatchId());
         if (batch != null) {
             batch.setUsedCount(batch.getUsedCount() + 1);
             batch.setRemainingCount(batch.getRemainingCount() - 1);
@@ -185,7 +186,7 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
     public IPage<ActivationCode> findByBatchId(String batchId, ActivationCodeBatchCodesPageRequest request) {
         LambdaQueryWrapper<ActivationCode> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ActivationCode::getBatchId, batchId)
-               .orderByDesc(ActivationCode::getCreatedAt);
+               .orderByDesc(ActivationCode::getCreatedTime);
         Page<ActivationCode> page = new Page<>(request.getPageNum(), request.getPageSize());
         return activationCodeMapper.selectPage(page, wrapper);
     }
@@ -196,7 +197,7 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
         if (merchantId != null) {
             wrapper.eq(ActivationCodeBatch::getMerchantId, merchantId);
         }
-        wrapper.orderByDesc(ActivationCodeBatch::getCreatedAt);
+        wrapper.orderByDesc(ActivationCodeBatch::getCreatedTime);
         return activationCodeBatchMapper.selectList(wrapper);
     }
 
@@ -206,7 +207,7 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
         if (merchantId != null) {
             wrapper.eq(ActivationCodeBatch::getMerchantId, merchantId);
         }
-        wrapper.orderByDesc(ActivationCodeBatch::getCreatedAt);
+        wrapper.orderByDesc(ActivationCodeBatch::getCreatedTime);
         Page<ActivationCodeBatch> page = new Page<>(request.getPageNum(), request.getPageSize());
         return activationCodeBatchMapper.selectPage(page, wrapper);
     }
@@ -230,7 +231,7 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
         if (StringUtils.hasText(keyword)) {
             wrapper.like(ActivationCode::getCode, keyword);
         }
-        wrapper.orderByDesc(ActivationCode::getCreatedAt);
+        wrapper.orderByDesc(ActivationCode::getCreatedTime);
         Page<ActivationCode> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return activationCodeMapper.selectPage(page, wrapper);
     }

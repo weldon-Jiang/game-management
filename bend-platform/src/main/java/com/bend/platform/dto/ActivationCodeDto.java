@@ -15,9 +15,9 @@ public class ActivationCodeDto {
     private String status;
     private String usedBy;
     private String usedByName;
-    private LocalDateTime usedAt;
+    private LocalDateTime usedTime;
     private LocalDateTime expireTime;
-    private LocalDateTime generatedAt;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
+    private LocalDateTime generatedTime;
+    private LocalDateTime createdTime;
+    private LocalDateTime updatedTime;
 }

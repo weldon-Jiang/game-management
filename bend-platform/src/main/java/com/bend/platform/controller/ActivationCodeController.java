@@ -15,6 +15,7 @@ import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.MerchantUser;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
+import com.bend.platform.repository.ActivationCodeBatchMapper;
 import com.bend.platform.repository.ActivationCodeMapper;
 import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.repository.MerchantUserMapper;
@@ -26,7 +27,7 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
-import javax.validation.Valid;
+import jakarta.validation.Valid;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +54,7 @@ public class ActivationCodeController {
 
     private final ActivationCodeService activationCodeService;
     private final ActivationCodeMapper activationCodeMapper;
+    private final ActivationCodeBatchMapper activationCodeBatchMapper;
     private final MerchantMapper merchantMapper;
     private final MerchantUserMapper merchantUserMapper;
 
@@ -277,23 +279,39 @@ public class ActivationCodeController {
             merchantUserMapper.selectList(wrapper).forEach(u -> userNameMap.put(u.getId(), u.getUsername()));
         }
 
+        List<String> batchIds = records.stream()
+                .map(ActivationCode::getBatchId)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.toList());
+
+        Map<String, ActivationCodeBatch> batchMap = new HashMap<>();
+        if (!CollectionUtils.isEmpty(batchIds)) {
+            LambdaQueryWrapper<ActivationCodeBatch> batchWrapper = new LambdaQueryWrapper<>();
+            batchWrapper.in(ActivationCodeBatch::getId, batchIds);
+            activationCodeBatchMapper.selectList(batchWrapper).forEach(b -> batchMap.put(b.getId(), b));
+        }
+
         List<ActivationCodeDto> dtos = records.stream().map(code -> {
             ActivationCodeDto dto = new ActivationCodeDto();
             dto.setId(code.getId());
             dto.setMerchantId(code.getMerchantId());
             dto.setBatchId(code.getBatchId());
             dto.setCode(code.getCode());
-            dto.setVipType(code.getVipType());
-            dto.setVipConfigId(code.getVipConfigId());
             dto.setStatus(code.getStatus());
             dto.setUsedBy(code.getUsedBy());
-            dto.setUsedAt(code.getUsedAt());
+            dto.setUsedTime(code.getUsedTime());
             dto.setExpireTime(code.getExpireTime());
-            dto.setGeneratedAt(code.getGeneratedAt());
-            dto.setCreatedAt(code.getCreatedAt());
-            dto.setUpdatedAt(code.getUpdatedAt());
+            dto.setGeneratedTime(code.getGeneratedTime());
+            dto.setCreatedTime(code.getCreatedTime());
+            dto.setUpdatedTime(code.getUpdatedTime());
             dto.setMerchantName(merchantNameMap.get(code.getMerchantId()));
             dto.setUsedByName(userNameMap.get(code.getUsedBy()));
+
+            ActivationCodeBatch batch = batchMap.get(code.getBatchId());
+            if (batch != null) {
+                dto.setVipType(batch.getVipType());
+            }
             return dto;
         }).collect(Collectors.toList());
 

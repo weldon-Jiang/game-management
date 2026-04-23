@@ -67,7 +67,7 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
             registrationCode.setMerchantId(merchantId);
             registrationCode.setCode(generateUniqueCode());
             registrationCode.setStatus("unused");
-            registrationCode.setCreatedAt(LocalDateTime.now());
+            registrationCode.setCreatedTime(LocalDateTime.now());
 
             registrationCodeMapper.insert(registrationCode);
             codes.add(registrationCode.getCode());
@@ -102,7 +102,7 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
 
         String merchantId = registrationCode.getMerchantId();
         registrationCode.setStatus("used");
-        registrationCode.setUsedAt(LocalDateTime.now());
+        registrationCode.setUsedTime(LocalDateTime.now());
         registrationCode.setUsedByAgentId(agentId);
         registrationCode.setAgentId(agentId);
         registrationCodeMapper.updateById(registrationCode);
@@ -146,7 +146,7 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
         if (StringUtils.hasText(keyword)) {
             wrapper.like(MerchantRegistrationCode::getCode, keyword);
         }
-        wrapper.orderByDesc(MerchantRegistrationCode::getCreatedAt);
+        wrapper.orderByDesc(MerchantRegistrationCode::getCreatedTime);
         Page<MerchantRegistrationCode> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return registrationCodeMapper.selectPage(page, wrapper);
     }
@@ -182,7 +182,7 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
             code.setStatus("unused");
             code.setUsedByAgentId(null);
             code.setAgentId(null);
-            code.setUsedAt(null);
+            code.setUsedTime(null);
             registrationCodeMapper.updateById(code);
             log.info("注册码解绑 - ID: {}, 注册码: {}, AgentID: {}", code.getId(), code.getCode(), agentId);
         }
@@ -198,7 +198,7 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
         code.setStatus("unused");
         code.setUsedByAgentId(null);
         code.setAgentId(null);
-        code.setUsedAt(null);
+        code.setUsedTime(null);
         registrationCodeMapper.updateById(code);
         log.info("注册码重置成功 - ID: {}, 注册码: {}", id, code.getCode());
     }

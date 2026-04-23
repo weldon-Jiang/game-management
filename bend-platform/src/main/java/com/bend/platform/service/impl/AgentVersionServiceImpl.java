@@ -70,7 +70,7 @@ public class AgentVersionServiceImpl implements AgentVersionService {
     public List<AgentVersion> findAll() {
         LambdaQueryWrapper<AgentVersion> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentVersion::getDeleted, false);
-        wrapper.orderByDesc(AgentVersion::getCreatedAt);
+        wrapper.orderByDesc(AgentVersion::getCreatedTime);
         return agentVersionMapper.selectList(wrapper);
     }
 
@@ -79,7 +79,7 @@ public class AgentVersionServiceImpl implements AgentVersionService {
         LambdaQueryWrapper<AgentVersion> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentVersion::getDeleted, false);
         wrapper.eq(AgentVersion::getStatus, 1);
-        wrapper.orderByDesc(AgentVersion::getCreatedAt);
+        wrapper.orderByDesc(AgentVersion::getCreatedTime);
         return agentVersionMapper.selectList(wrapper);
     }
 
@@ -87,7 +87,7 @@ public class AgentVersionServiceImpl implements AgentVersionService {
     public IPage<AgentVersion> findPage(AgentVersionPageRequest request) {
         LambdaQueryWrapper<AgentVersion> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentVersion::getDeleted, false);
-        wrapper.orderByDesc(AgentVersion::getCreatedAt);
+        wrapper.orderByDesc(AgentVersion::getCreatedTime);
         Page<AgentVersion> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return agentVersionMapper.selectPage(page, wrapper);
     }
@@ -97,7 +97,7 @@ public class AgentVersionServiceImpl implements AgentVersionService {
         LambdaQueryWrapper<AgentVersion> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentVersion::getDeleted, false);
         wrapper.eq(AgentVersion::getStatus, 1);
-        wrapper.orderByDesc(AgentVersion::getCreatedAt);
+        wrapper.orderByDesc(AgentVersion::getCreatedTime);
         wrapper.last("LIMIT 1");
         return agentVersionMapper.selectOne(wrapper);
     }
@@ -108,7 +108,7 @@ public class AgentVersionServiceImpl implements AgentVersionService {
         wrapper.eq(AgentVersion::getDeleted, false);
         wrapper.eq(AgentVersion::getStatus, 1);
         wrapper.eq(AgentVersion::getMandatory, 1);
-        wrapper.orderByDesc(AgentVersion::getCreatedAt);
+        wrapper.orderByDesc(AgentVersion::getCreatedTime);
         wrapper.last("LIMIT 1");
         return agentVersionMapper.selectOne(wrapper);
     }

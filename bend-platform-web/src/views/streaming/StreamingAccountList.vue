@@ -51,9 +51,9 @@
           </template>
         </el-table-column>
         <!-- 创建时间 -->
-        <el-table-column prop="createdAt" label="创建时间" width="170">
+        <el-table-column prop="createdTime" label="创建时间" width="170">
           <template #default="{ row }">
-            {{ formatDate(row.createdAt) }}
+            {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
         <!-- 操作列 -->

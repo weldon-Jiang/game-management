@@ -2,10 +2,12 @@ package com.bend.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bend.platform.entity.ActivationCode;
+import com.bend.platform.entity.ActivationCodeBatch;
 import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.VipConfig;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
+import com.bend.platform.repository.ActivationCodeBatchMapper;
 import com.bend.platform.repository.ActivationCodeMapper;
 import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.repository.VipConfigMapper;
@@ -40,6 +42,7 @@ public class MerchantSubscriptionServiceImpl implements MerchantSubscriptionServ
 
     private final MerchantMapper merchantMapper;
     private final ActivationCodeMapper activationCodeMapper;
+    private final ActivationCodeBatchMapper activationCodeBatchMapper;
     private final VipConfigMapper vipConfigMapper;
 
     /**
@@ -83,11 +86,14 @@ public class MerchantSubscriptionServiceImpl implements MerchantSubscriptionServ
         }
 
         // 查询VIP配置获取时长
-        int durationDays = 30; // 默认30天
-        if (code.getVipConfigId() != null) {
-            VipConfig vipConfig = vipConfigMapper.selectById(code.getVipConfigId());
-            if (vipConfig != null && vipConfig.getDurationDays() != null) {
-                durationDays = vipConfig.getDurationDays();
+        int durationDays = 30;
+        if (code.getBatchId() != null) {
+            ActivationCodeBatch batch = activationCodeBatchMapper.selectById(code.getBatchId());
+            if (batch != null && batch.getVipConfigId() != null) {
+                VipConfig vipConfig = vipConfigMapper.selectById(batch.getVipConfigId());
+                if (vipConfig != null && vipConfig.getDurationDays() != null) {
+                    durationDays = vipConfig.getDurationDays();
+                }
             }
         }
 
@@ -112,7 +118,7 @@ public class MerchantSubscriptionServiceImpl implements MerchantSubscriptionServ
         // 标记激活码已使用，used_by存储用户ID
         code.setStatus("used");
         code.setUsedBy(userId);
-        code.setUsedAt(now);
+        code.setUsedTime(now);
         code.setExpireTime(newExpireTime);
         activationCodeMapper.updateById(code);
 

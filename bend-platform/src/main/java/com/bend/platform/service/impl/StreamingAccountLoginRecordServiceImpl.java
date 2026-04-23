@@ -49,14 +49,14 @@ public class StreamingAccountLoginRecordServiceImpl implements StreamingAccountL
             record.setStreamingAccountId(streamingAccountId);
             record.setXboxHostId(xboxHostId);
             record.setLoggedGamertag(gamertag);
-            record.setLoggedAt(LocalDateTime.now());
+            record.setLoggedTime(LocalDateTime.now());
             record.setUseCount(1);
             loginRecordMapper.insert(record);
             log.info("记录流媒体账号登录 - StreamingAccountID: {}, XboxHostID: {}, Gamertag: {}",
                     streamingAccountId, xboxHostId, gamertag);
         } else {
             record.setLoggedGamertag(gamertag);
-            record.setLastUsedAt(LocalDateTime.now());
+            record.setLastUsedTime(LocalDateTime.now());
             record.setUseCount(record.getUseCount() == null ? 1 : record.getUseCount() + 1);
             loginRecordMapper.updateById(record);
             log.info("更新流媒体账号登录记录 - StreamingAccountID: {}, XboxHostID: {}, 使用次数: {}",
@@ -76,7 +76,7 @@ public class StreamingAccountLoginRecordServiceImpl implements StreamingAccountL
     public List<StreamingAccountLoginRecord> findByStreamingAccountId(String streamingAccountId) {
         LambdaQueryWrapper<StreamingAccountLoginRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StreamingAccountLoginRecord::getStreamingAccountId, streamingAccountId)
-               .orderByDesc(StreamingAccountLoginRecord::getLastUsedAt);
+               .orderByDesc(StreamingAccountLoginRecord::getLastUsedTime);
         return loginRecordMapper.selectList(wrapper);
     }
 
@@ -84,7 +84,7 @@ public class StreamingAccountLoginRecordServiceImpl implements StreamingAccountL
     public List<StreamingAccountLoginRecord> findByXboxHostId(String xboxHostId) {
         LambdaQueryWrapper<StreamingAccountLoginRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StreamingAccountLoginRecord::getXboxHostId, xboxHostId)
-               .orderByDesc(StreamingAccountLoginRecord::getLastUsedAt);
+               .orderByDesc(StreamingAccountLoginRecord::getLastUsedTime);
         return loginRecordMapper.selectList(wrapper);
     }
 

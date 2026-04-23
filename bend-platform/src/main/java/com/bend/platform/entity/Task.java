@@ -114,25 +114,25 @@ public class Task {
      * 分配时间
      * 任务分配给Agent的时间
      */
-    private LocalDateTime assignedAt;
+    private LocalDateTime assignedTime;
 
     /**
      * 开始执行时间
      * Agent实际开始执行任务的时间
      */
-    private LocalDateTime startedAt;
+    private LocalDateTime startedTime;
 
     /**
      * 完成时间
      * 任务执行完成的时间
      */
-    private LocalDateTime completedAt;
+    private LocalDateTime completedTime;
 
     /**
      * 过期时间
      * 任务过期自动取消的时间点
      */
-    private LocalDateTime expireAt;
+    private LocalDateTime expireTime;
 
     /**
      * 当前重试次数
@@ -151,14 +151,14 @@ public class Task {
      * 记录插入数据库的时间
      */
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private LocalDateTime createdTime;
 
     /**
      * 更新时间
      * 记录最后修改数据库的时间
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updatedAt;
+    private LocalDateTime updatedTime;
 
     /**
      * 软删除标记

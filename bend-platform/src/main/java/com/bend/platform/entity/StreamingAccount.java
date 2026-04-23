@@ -93,7 +93,7 @@ public class StreamingAccount {
      * 最近错误发生时间
      * 记录最近错误的时间戳
      */
-    private LocalDateTime lastErrorAt;
+    private LocalDateTime lastErrorTime;
 
     /**
      * 错误重试次数
@@ -114,12 +114,12 @@ public class StreamingAccount {
      * 记录账号首次添加到系统的时间
      */
     @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
+    private LocalDateTime createdTime;
 
     /**
      * 更新时间
      * 记录账号信息最后修改的时间
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updatedAt;
+    private LocalDateTime updatedTime;
 }
