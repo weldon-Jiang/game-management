@@ -158,10 +158,12 @@ public class MerchantUserServiceImpl implements MerchantUserService {
         LambdaQueryWrapper<MerchantUser> wrapper = new LambdaQueryWrapper<>();
         if (merchantId != null) {
             wrapper.eq(MerchantUser::getMerchantId, merchantId);
+        } else {
+            wrapper.ne(MerchantUser::getRole, "platform_admin");
         }
         wrapper.orderByDesc(MerchantUser::getCreatedTime);
 
-        Page<MerchantUser> page = new Page<>(request.getPageNum(), request.getPageSize());
+        Page<MerchantUser> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return merchantUserMapper.selectPage(page, wrapper);
     }
 

@@ -2,6 +2,10 @@ package com.bend.platform.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.bend.platform.dto.ApiResponse;
+import com.bend.platform.dto.GameAccountPageRequest;
+import com.bend.platform.dto.ImportResultDto;
+import com.bend.platform.dto.StreamingAccountBatchImportRequest;
+import com.bend.platform.dto.StreamingAccountImportDto;
 import com.bend.platform.dto.StreamingAccountItemDto;
 import com.bend.platform.dto.StreamingAccountPageRequest;
 import com.bend.platform.dto.StreamingAccountRequest;
@@ -9,15 +13,16 @@ import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.StreamingAccount;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
+import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountLoginRecordService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.util.UserContext;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
 
-import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -45,6 +50,7 @@ public class StreamingAccountController {
     private final StreamingAccountService streamingAccountService;
     private final StreamingAccountLoginRecordService loginRecordService;
     private final MerchantService merchantService;
+    private final GameAccountService gameAccountService;
 
     /**
      * 创建流媒体账号
@@ -57,7 +63,11 @@ public class StreamingAccountController {
     public ApiResponse<StreamingAccount> create(@Valid @RequestBody StreamingAccountRequest request) {
         String merchantId;
         if (UserContext.isPlatformAdmin()) {
-            merchantId = request.getMerchantId();
+            if (request.getMerchantId() == null || request.getMerchantId().isEmpty()) {
+                merchantId = UserContext.getMerchantId();
+            } else {
+                merchantId = request.getMerchantId();
+            }
         } else {
             merchantId = UserContext.getMerchantId();
         }
@@ -65,6 +75,28 @@ public class StreamingAccountController {
         StreamingAccount account = streamingAccountService.create(
                 merchantId, request.getName(), request.getEmail(), request.getPassword(), request.getAuthCode());
         return ApiResponse.success("创建成功", account);
+    }
+
+    @GetMapping("/template")
+    public ApiResponse<String> downloadTemplate() {
+        String template = "账号名称,邮箱,密码,认证码\n测试账号1,test1@email.com,password1,authcode1\n测试账号2,test2@email.com,password2,authcode2";
+        return ApiResponse.success(template);
+    }
+
+    @PostMapping("/batch")
+    public ApiResponse<ImportResultDto> batchImport(@Valid @RequestBody StreamingAccountBatchImportRequest request) {
+        String merchantId;
+        if (UserContext.isPlatformAdmin()) {
+            if (request.getMerchantId() == null || request.getMerchantId().isEmpty()) {
+                merchantId = UserContext.getMerchantId();
+            } else {
+                merchantId = request.getMerchantId();
+            }
+        } else {
+            merchantId = UserContext.getMerchantId();
+        }
+        ImportResultDto result = streamingAccountService.batchImport(merchantId, request.getAccounts());
+        return ApiResponse.success(result);
     }
 
     /**
@@ -131,7 +163,11 @@ public class StreamingAccountController {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
 
-        streamingAccountService.update(id, request.getName(), request.getAuthCode());
+        if (UserContext.isPlatformAdmin()) {
+            streamingAccountService.update(id, request.getMerchantId(), request.getName(), request.getAuthCode());
+        } else {
+            streamingAccountService.update(id, request.getName(), request.getAuthCode());
+        }
         return ApiResponse.success("更新成功", null);
     }
 
@@ -152,6 +188,14 @@ public class StreamingAccountController {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
 
+        GameAccountPageRequest request = new GameAccountPageRequest();
+        request.setPageNum(1);
+        request.setPageSize(1);
+        IPage<?> boundGames = gameAccountService.findByStreamingId(id, request);
+        if (boundGames.getTotal() > 0) {
+            throw new BusinessException(ResultCode.StreamingAccount.BIND_GAME_ACCOUNT, "该流媒体账号下有关联的游戏账号，请先解绑后再删除");
+        }
+
         streamingAccountService.delete(id);
         return ApiResponse.success("删除成功", null);
     }
@@ -168,6 +212,11 @@ public class StreamingAccountController {
         if (account == null) {
             throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
         }
+
+        if (!UserContext.isPlatformAdmin() && !account.getMerchantId().equals(UserContext.getMerchantId())) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+
         List<String> xboxHosts = loginRecordService.findByStreamingAccountId(id).stream()
                 .map(r -> r.getXboxHostId())
                 .collect(Collectors.toList());

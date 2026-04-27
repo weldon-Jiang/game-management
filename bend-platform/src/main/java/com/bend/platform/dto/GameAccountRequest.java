@@ -20,7 +20,7 @@ public class GameAccountRequest {
 
     @NotBlank(message = "Xbox玩家名不能为空")
     @Size(max = 50, message = "Xbox玩家名长度不能超过50")
-    private String xboxGamertag;
+    private String xboxGameName;
 
     @NotBlank(message = "Xbox邮箱不能为空")
     @Email(message = "Xbox邮箱格式不正确")

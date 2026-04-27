@@ -22,4 +22,6 @@ public class Merchant {
     private LocalDateTime createdTime;
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedTime;
+
+    private Boolean isSystem;
 }

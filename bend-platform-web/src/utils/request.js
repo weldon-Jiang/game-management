@@ -62,7 +62,9 @@ request.interceptors.response.use(
     removePendingRequest(response.config)
     const res = response.data
     if (res.code !== 200 && res.code !== 0) {
+      console.log('Response with error code:', res.code, res.message)
       if (isAuthError(res.code)) {
+        console.log('Auth error detected in response interceptor, redirecting to login')
         clearAllPendingRequests()
         localStorage.removeItem('token')
         localStorage.removeItem('user')
@@ -99,11 +101,18 @@ request.interceptors.response.use(
     removePendingRequest(error.config || {})
 
     if (error.response) {
+      console.log('Request error with response:', error.response.status, error.response.data)
       if (error.response.status === 401) {
+        console.log('401 detected, clearing auth and redirecting to login')
         clearAllPendingRequests()
         localStorage.removeItem('token')
         localStorage.removeItem('user')
-        router.push('/login')
+        try {
+          router.push('/login')
+          console.log('Navigation to /login initiated')
+        } catch (e) {
+          console.error('Navigation error:', e)
+        }
       }
       ElMessage.error(error.response.data?.message || 'Network error')
     } else if (error.request) {

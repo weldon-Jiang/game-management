@@ -15,11 +15,12 @@
     </div>
 
     <!-- 商户列表表格 -->
-    <div class="content-card">
+    <div class="content-card table-container">
       <el-table
         :data="tableData"
         v-loading="loading"
         class="data-table"
+        scrollbar-always-on
       >
         <el-table-column prop="id" label="商户ID" width="280" show-overflow-tooltip />
         <el-table-column prop="name" label="商户名称" min-width="150" />
@@ -47,7 +48,7 @@
               编辑
             </el-button>
             <el-button
-              v-if="isExpirable(row)"
+              v-if="isExpirable(row) && !row.isSystem"
               :type="getActionBtnType(row)"
               link
               size="small"
@@ -55,7 +56,7 @@
             >
               {{ getActionBtnText(row) }}
             </el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">
+            <el-button v-if="!row.isSystem" type="danger" link size="small" @click="handleDelete(row)">
               删除
             </el-button>
           </template>
@@ -96,6 +97,9 @@
         <el-form-item label="手机号" prop="phone">
           <el-input v-model="formData.phone" placeholder="请输入手机号" />
         </el-form-item>
+        <el-form-item v-if="authStore.isPlatformAdmin" label="系统商户">
+          <el-switch v-model="formData.isSystem" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -108,10 +112,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { merchantApi } from '@/api'
+import { useAuthStore } from '@/stores/auth'
+
+const authStore = useAuthStore()
 
 /**
  * 商户管理列表页面
@@ -165,7 +172,8 @@ const formRef = ref(null)
 const formData = reactive({
   id: '',
   name: '',
-  phone: ''
+  phone: '',
+  isSystem: false
 })
 
 /**
@@ -214,10 +222,12 @@ const showDialog = (type, row = null) => {
     formData.id = row.id
     formData.name = row.name
     formData.phone = row.phone
+    formData.isSystem = row.isSystem || false
   } else {
     formData.id = ''
     formData.name = ''
     formData.phone = ''
+    formData.isSystem = false
   }
   dialogVisible.value = true
 }
@@ -234,12 +244,17 @@ const handleSubmit = async () => {
     if (dialogType.value === 'add') {
       await merchantApi.create({
         name: formData.name,
-        phone: formData.phone
+        phone: formData.phone,
+        isSystem: formData.isSystem
       })
       ElMessage.success('商户创建成功')
     } else {
-      // 编辑暂不支持（后端接口未提供）
-      ElMessage.info('编辑功能开发中')
+      await merchantApi.update(formData.id, {
+        name: formData.name,
+        phone: formData.phone,
+        isSystem: formData.isSystem
+      })
+      ElMessage.success('商户更新成功')
     }
     dialogVisible.value = false
     loadData()

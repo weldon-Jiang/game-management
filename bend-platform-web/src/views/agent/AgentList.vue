@@ -26,11 +26,13 @@
         </el-button>
       </div>
 
-      <el-table
-        :data="tableData"
-        v-loading="loading"
-        class="data-table"
-      >
+      <div class="table-container">
+        <el-table
+          :data="tableData"
+          v-loading="loading"
+          class="data-table"
+          scrollbar-always-on
+        >
         <el-table-column prop="agentId" label="Agent ID" min-width="180" show-overflow-tooltip />
         <el-table-column prop="merchantId" label="商户" width="150" show-overflow-tooltip>
           <template #default="{ row }">
@@ -61,6 +63,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
 
       <div class="pagination-wrap">
         <el-pagination
@@ -83,7 +86,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { agentApi } from '@/api'
 import { getAgentStatusText, getAgentStatusType } from '@/utils/constants'

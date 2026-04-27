@@ -108,10 +108,9 @@ CREATE TABLE IF NOT EXISTS `streaming_account` (
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `game_account` (
     `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
-    `streaming_id` VARCHAR(64) NOT NULL COMMENT '关联的流媒体账号ID',
+    `streaming_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的流媒体账号ID',
     `merchant_id` VARCHAR(64) NOT NULL COMMENT '商户ID',
-    `name` VARCHAR(128) NOT NULL COMMENT '账号名称',
-    `xbox_gamertag` VARCHAR(64) DEFAULT NULL COMMENT 'Xbox Gamertag',
+    `xbox_game_name` VARCHAR(64) DEFAULT NULL COMMENT 'Xbox游戏名称',
     `xbox_live_email` VARCHAR(128) DEFAULT NULL COMMENT 'Xbox登录邮箱',
     `xbox_live_password_encrypted` VARCHAR(512) DEFAULT NULL COMMENT '加密后的Xbox密码',
     `is_primary` TINYINT(1) DEFAULT 0 COMMENT '是否为主账号',

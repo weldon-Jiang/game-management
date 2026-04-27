@@ -55,12 +55,14 @@
         </el-button>
       </div>
 
-      <el-table
-        :data="tableData"
-        v-loading="loading"
-        class="data-table"
-        @selection-change="handleSelectionChange"
-      >
+      <div class="table-container">
+        <el-table
+          :data="tableData"
+          v-loading="loading"
+          class="data-table"
+          scrollbar-always-on
+          @selection-change="handleSelectionChange"
+        >
         <el-table-column type="selection" width="50" />
         <el-table-column prop="code" label="注册码" min-width="180">
           <template #default="{ row }">
@@ -106,6 +108,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
 
       <div class="pagination-wrap">
         <el-pagination
@@ -184,7 +187,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, CopyDocument, Delete } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'

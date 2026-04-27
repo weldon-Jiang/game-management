@@ -13,11 +13,12 @@
       </div>
     </div>
 
-    <div class="content-card">
+    <div class="content-card table-container">
       <el-table
         :data="tableData"
         v-loading="loading"
         class="data-table"
+        scrollbar-always-on
       >
         <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" />
         <el-table-column prop="xboxId" label="Xbox ID" min-width="180" show-overflow-tooltip />
@@ -170,12 +171,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { xboxApi, streamingApi, merchantApi } from '@/api'
 import { getXboxHostStatusText, getXboxHostStatusType } from '@/utils/constants'
+
+const authStore = useAuthStore()
 
 /**
  * Xbox主机管理页面
@@ -183,8 +186,6 @@ import { getXboxHostStatusText, getXboxHostStatusType } from '@/utils/constants'
  */
 
 // ==================== 状态定义 ====================
-
-const authStore = useAuthStore()
 
 /**
  * 表格数据加载状态

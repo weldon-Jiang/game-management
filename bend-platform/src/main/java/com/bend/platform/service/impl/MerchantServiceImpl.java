@@ -53,8 +53,7 @@ public class MerchantServiceImpl implements MerchantService {
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Merchant createMerchant(String name, String phone) {
-        // 检查手机号是否已被使用
+    public Merchant createMerchant(String name, String phone, Boolean isSystem) {
         LambdaQueryWrapper<Merchant> phoneWrapper = new LambdaQueryWrapper<>();
         phoneWrapper.eq(Merchant::getPhone, phone);
         if (merchantMapper.selectCount(phoneWrapper) > 0) {
@@ -66,9 +65,10 @@ public class MerchantServiceImpl implements MerchantService {
         merchant.setName(name);
         merchant.setStatus("active");
         merchant.setExpireTime(LocalDateTime.now().plusYears(100));
+        merchant.setIsSystem(isSystem != null && isSystem);
         merchantMapper.insert(merchant);
 
-        log.info("创建商户成功 - ID: {}, 名称: {}", merchant.getId(), name);
+        log.info("创建商户成功 - ID: {}, 名称: {}, 系统商户: {}", merchant.getId(), name, merchant.getIsSystem());
         return merchant;
     }
 
@@ -94,7 +94,7 @@ public class MerchantServiceImpl implements MerchantService {
     public IPage<Merchant> findAll(MerchantPageRequest request) {
         LambdaQueryWrapper<Merchant> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(Merchant::getCreatedTime);
-        Page<Merchant> page = new Page<>(request.getPageNum(), request.getPageSize());
+        Page<Merchant> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return merchantMapper.selectPage(page, wrapper);
     }
 
@@ -149,6 +149,29 @@ public class MerchantServiceImpl implements MerchantService {
 
         merchantMapper.deleteById(id);
         log.info("删除商户 - ID: {}", id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateMerchant(String id, String name, String phone, Boolean isSystem) {
+        Merchant merchant = merchantMapper.selectById(id);
+        if (merchant == null) {
+            throw new BusinessException(ResultCode.Merchant.NOT_FOUND);
+        }
+
+        LambdaQueryWrapper<Merchant> phoneWrapper = new LambdaQueryWrapper<>();
+        phoneWrapper.eq(Merchant::getPhone, phone)
+                    .ne(Merchant::getId, id);
+        if (merchantMapper.selectCount(phoneWrapper) > 0) {
+            throw new BusinessException(ResultCode.Merchant.PHONE_DUPLICATE);
+        }
+
+        merchant.setName(name);
+        merchant.setPhone(phone);
+        merchant.setIsSystem(isSystem != null && isSystem);
+        merchantMapper.updateById(merchant);
+
+        log.info("更新商户 - ID: {}, 名称: {}, 系统商户: {}", id, name, merchant.getIsSystem());
     }
 
     /**

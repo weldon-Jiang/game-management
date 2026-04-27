@@ -150,7 +150,8 @@ public interface ResultCode {
         UPDATE_FAILED(14006, "更新账号失败"),
         DELETE_FAILED(14007, "删除账号失败"),
         BIND_FAILED(14008, "绑定失败"),
-        UNBIND_FAILED(14009, "解绑失败");
+        UNBIND_FAILED(14009, "解绑失败"),
+        BIND_GAME_ACCOUNT(14010, "已关联游戏账号");
 
         private final int code;
         private final String message;
@@ -290,7 +291,8 @@ public interface ResultCode {
         DELETE_FAILED(18005, "删除游戏账号失败"),
         LOCK_FAILED(18006, "锁定失败"),
         UNLOCK_FAILED(18007, "解锁失败"),
-        ALREADY_LOCKED(18008, "已被其他主机锁定");
+        ALREADY_LOCKED(18008, "已被其他主机锁定"),
+        BIND_STREAMING_ACCOUNT(18009, "已关联流媒体账号");
 
         private final int code;
         private final String message;

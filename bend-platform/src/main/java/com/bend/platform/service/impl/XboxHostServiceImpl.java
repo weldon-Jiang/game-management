@@ -94,7 +94,7 @@ public class XboxHostServiceImpl implements XboxHostService {
             wrapper.eq(XboxHost::getMerchantId, merchantId);
         }
         wrapper.orderByDesc(XboxHost::getCreatedTime);
-        Page<XboxHost> page = new Page<>(request.getPageNum(), request.getPageSize());
+        Page<XboxHost> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return xboxHostMapper.selectPage(page, wrapper);
     }
 

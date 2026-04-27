@@ -122,6 +122,18 @@ export const GAME_ACCOUNT_STATUS_TYPE_MAP = {
   disabled: 'danger'
 }
 
+export const STREAMING_ACCOUNT_STATUS_MAP = {
+  idle: '空闲',
+  busy: '忙碌',
+  error: '异常'
+}
+
+export const STREAMING_ACCOUNT_STATUS_TYPE_MAP = {
+  idle: 'success',
+  busy: 'warning',
+  error: 'danger'
+}
+
 export const ROLE_TEXT_MAP = {
   platform_admin: '平台管理员',
   owner: '商户所有者',
@@ -230,6 +242,16 @@ export const getGameAccountStatusText = (status) => {
 export const getGameAccountStatusType = (status) => {
   if (!status) return 'info'
   return GAME_ACCOUNT_STATUS_TYPE_MAP[status] || 'info'
+}
+
+export const getStreamingAccountStatusText = (status) => {
+  if (!status) return '-'
+  return STREAMING_ACCOUNT_STATUS_MAP[status] || status
+}
+
+export const getStreamingAccountStatusType = (status) => {
+  if (!status) return 'info'
+  return STREAMING_ACCOUNT_STATUS_TYPE_MAP[status] || 'info'
 }
 
 /**

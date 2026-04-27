@@ -9,6 +9,9 @@
       </div>
       <div class="header-right">
         <!-- 新增账号按钮 -->
+        <el-button @click="showImportDialog">
+          批量导入
+        </el-button>
         <el-button type="primary" @click="showAddDialog">
           <el-icon><Plus /></el-icon>
           新增账号
@@ -17,11 +20,12 @@
     </div>
 
     <!-- 账号列表表格 -->
-    <div class="content-card">
+    <div class="content-card table-container">
       <el-table
         :data="tableData"
         v-loading="loading"
         class="data-table"
+        scrollbar-always-on
       >
         <!-- 商户列（仅平台管理员可见） -->
         <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" />
@@ -32,8 +36,8 @@
         <!-- 状态 -->
         <el-table-column prop="status" label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">
-              {{ getStatusText(row.status) }}
+            <el-tag :type="getStreamingAccountStatusType(row.status)" size="small">
+              {{ getStreamingAccountStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -86,6 +90,10 @@
             <!-- 登录记录按钮 -->
             <el-button type="info" link size="small" @click="showLoginRecords(row)">
               登录记录
+            </el-button>
+            <!-- 关联游戏账号按钮 -->
+            <el-button type="warning" link size="small" @click="showBindGameAccountsDialog(row)">
+              关联游戏账号
             </el-button>
             <!-- 删除按钮 -->
             <el-button type="danger" link size="small" @click="handleDelete(row)">
@@ -241,6 +249,136 @@
       </div>
       <el-empty v-else description="暂无登录记录" />
     </el-dialog>
+
+    <!-- 批量导入对话框 -->
+    <el-dialog
+      v-model="importDialogVisible"
+      title="批量导入流媒体账号"
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <div class="import-template">
+        <h4>导入说明</h4>
+        <ol>
+          <li>请先点击"下载模板"按钮获取导入模板</li>
+          <li>按照模板格式填写流媒体账号信息</li>
+          <li>上传填写好的CSV文件</li>
+          <li>系统会验证数据格式和重复情况</li>
+          <li>验证通过后点击"开始导入"</li>
+        </ol>
+      </div>
+      <el-form-item v-if="authStore.isPlatformAdmin" label="导入到商户">
+        <el-select
+          v-model="importMerchantId"
+          placeholder="请选择商户"
+          style="width: 100%"
+          filterable
+        >
+          <el-option
+            v-for="merchant in merchantList"
+            :key="merchant.id"
+            :label="merchant.name"
+            :value="merchant.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-upload
+        ref="uploadRef"
+        :auto-upload="false"
+        :limit="1"
+        accept=".csv"
+        :on-change="handleFileChange"
+        :file-list="fileList"
+        class="upload-component"
+      >
+        <template #trigger>
+          <el-button>选择CSV文件</el-button>
+        </template>
+        <template #tip>
+          <div class="el-upload__tip">只能上传CSV文件</div>
+        </template>
+      </el-upload>
+      <div v-if="importResult" class="import-result">
+        <el-alert
+          :title="`导入完成：成功 ${importResult.successCount} 条，失败 ${importResult.failCount} 条`"
+          :type="importResult.failCount > 0 ? 'warning' : 'success'"
+          show-icon
+        >
+          <template v-if="importResult.errors && importResult.errors.length > 0">
+            <div v-for="(err, idx) in importResult.errors.slice(0, 10)" :key="idx" class="error-item">
+              {{ err }}
+            </div>
+            <div v-if="importResult.errors.length > 10" class="error-more">
+              还有 {{ importResult.errors.length - 10 }} 条错误...
+            </div>
+          </template>
+        </el-alert>
+      </div>
+      <template #footer>
+        <el-button @click="handleDownloadTemplate">下载模板</el-button>
+        <el-button @click="importDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="importLoading" :disabled="!selectedFile" @click="handleImport">
+          开始导入
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 关联游戏账号对话框 -->
+    <el-dialog
+      v-model="bindDialogVisible"
+      :title="`关联游戏账号 - ${selectedStreamingAccount?.name}`"
+      width="700px"
+      :close-on-click-modal="false"
+    class="bind-dialog"
+    >
+      <div class="bind-section">
+        <h4>已关联的游戏账号</h4>
+        <el-table
+          :data="boundGameAccounts"
+          v-loading="bindLoading"
+          max-height="200"
+        >
+          <el-table-column prop="xboxGameName" label="Xbox玩家名称" />
+          <el-table-column prop="xboxLiveEmail" label="Xbox邮箱" />
+          <el-table-column label="操作" width="80">
+            <template #default="{ row }">
+              <el-button type="danger" link size="small" @click="handleUnbindGameAccount(row)">
+                解绑
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div v-if="boundGameAccounts.length === 0 && !bindLoading" class="empty-tip">
+          暂无关联的游戏账号
+        </div>
+      </div>
+      <div class="bind-section">
+        <h4>添加关联</h4>
+        <el-table
+          ref="unboundTableRef"
+          :data="unboundGameAccounts"
+          max-height="200"
+          @selection-change="handleUnboundSelectionChange"
+        >
+          <el-table-column type="selection" width="55" />
+          <el-table-column prop="xboxGameName" label="Xbox玩家名称" />
+          <el-table-column prop="xboxLiveEmail" label="Xbox邮箱" />
+        </el-table>
+        <div v-if="unboundGameAccounts.length === 0" class="empty-tip">
+          暂无未关联的游戏账号
+        </div>
+        <div class="bind-actions">
+          <el-button
+            type="primary"
+            size="small"
+            :disabled="selectedUnboundAccounts.length === 0"
+            @click="handleBindGameAccounts"
+          >
+            关联选中账号 ({{ selectedUnboundAccounts.length }})
+          </el-button>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -260,12 +398,12 @@
  * - 分页组件：数据分页
  * - 对话框：新增/编辑、启动自动化、登录记录
  */
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Monitor } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { streamingApi, merchantApi, agentApi, automationApi } from '@/api'
-import { getStatusText, getStatusType } from '@/utils/constants'
+import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi } from '@/api'
+import { getStreamingAccountStatusText, getStreamingAccountStatusType } from '@/utils/constants'
 
 // ==================== 状态定义 ====================
 
@@ -353,6 +491,28 @@ const formRef = ref(null)
  * 登录记录列表
  */
 const loginRecords = ref([])
+
+/**
+ * 批量导入相关状态
+ */
+const importDialogVisible = ref(false)
+const uploadRef = ref(null)
+const fileList = ref([])
+const selectedFile = ref(null)
+const importLoading = ref(false)
+const importResult = ref(null)
+const importMerchantId = ref('')
+
+/**
+ * 关联游戏账号相关状态
+ */
+const bindDialogVisible = ref(false)
+const bindLoading = ref(false)
+const selectedStreamingAccount = ref(null)
+const boundGameAccounts = ref([])
+const unboundGameAccounts = ref([])
+const selectedUnboundAccounts = ref([])
+const unboundTableRef = ref(null)
 
 /**
  * 选中的流媒体账号
@@ -540,6 +700,7 @@ const handleSubmit = async () => {
     } else {
       // 更新账号
       const updateData = {
+        merchantId: formData.merchantId,
         name: formData.name,
         authCode: formData.authCode || undefined
       }
@@ -571,6 +732,19 @@ const handleSubmit = async () => {
  * - row: 选中的账号行数据
  */
 const showStartAutomationDialog = async (row) => {
+  try {
+    const res = await gameAccountApi.list({ streamingId: row.id, pageSize: 1000 })
+    const boundAccounts = res.data?.records || []
+    if (boundAccounts.length === 0) {
+      ElMessage.warning('该流媒体账号下没有关联的游戏账号，请先关联游戏账号后再启动自动化')
+      return
+    }
+  } catch (error) {
+    console.error('Failed to check bound game accounts:', error)
+    ElMessage.warning('检查关联游戏账号失败')
+    return
+  }
+
   selectedAccount.value = row
   selectedAgentId.value = ''
   taskType.value = 'stream_control'
@@ -690,6 +864,214 @@ const showLoginRecords = async (row) => {
     recordsDialogVisible.value = true
   } catch (error) {
     console.error('Failed to load login records:', error)
+  }
+}
+
+/**
+ * 显示导入对话框
+ */
+const showImportDialog = async () => {
+  importResult.value = null
+  selectedFile.value = null
+  fileList.value = []
+  importMerchantId.value = authStore.isPlatformAdmin ? '' : authStore.merchantId
+  if (authStore.isPlatformAdmin && merchantList.value.length === 0) {
+    await loadMerchants()
+  }
+  importDialogVisible.value = true
+}
+
+/**
+ * 下载导入模板
+ */
+const handleDownloadTemplate = async () => {
+  try {
+    const res = await streamingApi.downloadTemplate()
+    const template = res.data
+    const blob = new Blob(['\ufeff' + template], { type: 'text/csv;charset=utf-8' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'streaming_account_template.csv'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Failed to download template:', error)
+  }
+}
+
+/**
+ * 处理文件选择
+ */
+const handleFileChange = (file) => {
+  selectedFile.value = file.raw
+  importResult.value = null
+}
+
+/**
+ * 处理导入
+ */
+const handleImport = async () => {
+  if (!selectedFile.value) {
+    ElMessage.warning('请先选择CSV文件')
+    return
+  }
+
+  importLoading.value = true
+  importResult.value = null
+
+  try {
+    const text = await selectedFile.value.text()
+    const lines = text.split('\n').filter(line => line.trim())
+
+    if (lines.length < 2) {
+      ElMessage.warning('CSV文件内容为空或格式不正确')
+      return
+    }
+
+    const header = lines[0].split(',').map(h => h.trim())
+    const requiredHeaders = ['账号名称', '邮箱', '密码']
+    const hasRequiredHeaders = requiredHeaders.every(h => header.includes(h))
+
+    if (!hasRequiredHeaders) {
+      ElMessage.warning('CSV文件格式不正确，请检查表头是否包含：账号名称、邮箱、密码')
+      return
+    }
+
+    const accounts = []
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',').map(v => v.trim())
+      if (values.length >= 3 && values[0] && values[1] && values[2]) {
+        accounts.push({
+          name: values[0],
+          email: values[1],
+          password: values[2],
+          authCode: values[3] || ''
+        })
+      }
+    }
+
+    if (accounts.length === 0) {
+      ElMessage.warning('没有有效的数据行')
+      return
+    }
+
+    if (authStore.isPlatformAdmin && !importMerchantId.value) {
+      ElMessage.warning('请选择要导入到的商户')
+      return
+    }
+
+    const res = await streamingApi.batchImport({
+      merchantId: importMerchantId.value,
+      accounts: accounts
+    })
+    importResult.value = res.data
+
+    if (res.data.failCount === 0) {
+      ElMessage.success('导入成功')
+      importDialogVisible.value = false
+      loadData()
+    } else {
+      ElMessage.warning(`导入完成：成功 ${res.data.successCount} 条，失败 ${res.data.failCount} 条`)
+    }
+  } catch (error) {
+    console.error('Import failed:', error)
+    ElMessage.error('导入失败')
+  } finally {
+    importLoading.value = false
+  }
+}
+
+/**
+ * 显示关联游戏账号对话框
+ */
+const showBindGameAccountsDialog = async (row) => {
+  selectedStreamingAccount.value = row
+  bindDialogVisible.value = true
+  await loadBoundGameAccounts()
+  await loadUnboundGameAccounts()
+}
+
+/**
+ * 加载已关联的游戏账号
+ */
+const loadBoundGameAccounts = async () => {
+  bindLoading.value = true
+  try {
+    const res = await gameAccountApi.list({ streamingId: selectedStreamingAccount.value.id, pageSize: 1000 })
+    boundGameAccounts.value = res.data?.records || []
+  } catch (error) {
+    console.error('Failed to load bound game accounts:', error)
+    boundGameAccounts.value = []
+  } finally {
+    bindLoading.value = false
+  }
+}
+
+/**
+ * 加载未关联的游戏账号
+ */
+const loadUnboundGameAccounts = async () => {
+  try {
+    const res = await gameAccountApi.getUnbound(selectedStreamingAccount.value.merchantId)
+    unboundGameAccounts.value = res.data || []
+  } catch (error) {
+    console.error('Failed to load unbound game accounts:', error)
+    unboundGameAccounts.value = []
+  }
+}
+
+/**
+ * 处理未关联账号选择变化
+ */
+const handleUnboundSelectionChange = (selection) => {
+  selectedUnboundAccounts.value = selection
+}
+
+/**
+ * 绑定选中的游戏账号
+ */
+const handleBindGameAccounts = async () => {
+  if (selectedUnboundAccounts.value.length === 0) {
+    ElMessage.warning('请先选择要关联的游戏账号')
+    return
+  }
+
+  try {
+    const gameAccountIds = selectedUnboundAccounts.value.map(acc => acc.id)
+    await gameAccountApi.bind(selectedStreamingAccount.value.id, { gameAccountIds })
+    ElMessage.success('关联成功')
+    selectedUnboundAccounts.value = []
+    if (unboundTableRef.value) {
+      unboundTableRef.value.clearSelection()
+    }
+    await loadBoundGameAccounts()
+    await loadUnboundGameAccounts()
+  } catch (error) {
+    console.error('Failed to bind game accounts:', error)
+  }
+}
+
+/**
+ * 解绑单个游戏账号
+ */
+const handleUnbindGameAccount = async (row) => {
+  try {
+    await ElMessageBox.confirm(`确定要解绑账号「${row.xboxGameName}」吗？`, '提示', {
+      confirmButtonText: '确定解绑',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await gameAccountApi.unbind({ gameAccountIds: [row.id] })
+    ElMessage.success('解绑成功')
+    await loadBoundGameAccounts()
+    await loadUnboundGameAccounts()
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Failed to unbind game account:', error)
+    }
   }
 }
 
@@ -972,5 +1354,80 @@ onMounted(() => {
 .record-item .el-icon {
   color: #3b82f6;
   font-size: 18px;
+}
+
+.import-template {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.import-template h4 {
+  color: #ffffff;
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.import-template ol {
+  color: #b0b0b0;
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.upload-component {
+  margin-top: 16px;
+}
+
+.import-result {
+  margin-top: 20px;
+}
+
+.error-item {
+  font-size: 12px;
+  color: #e6a23c;
+  margin-top: 4px;
+}
+
+.error-more {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.bind-dialog .el-dialog__body {
+  padding: 20px;
+}
+
+.bind-section {
+  margin-bottom: 16px;
+}
+
+.bind-section:first-child {
+  margin-top: 16px;
+}
+
+.bind-section:last-child {
+  margin-bottom: 0;
+}
+
+.bind-section h4 {
+  color: #ffffff;
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.bind-section .empty-tip {
+  color: #6b7280;
+  font-size: 13px;
+  text-align: center;
+  padding: 20px 0;
+}
+
+.bind-actions {
+  margin-top: 16px;
+  text-align: right;
 }
 </style>

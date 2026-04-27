@@ -117,7 +117,7 @@ public class VipConfigServiceImpl implements VipConfigService {
     @Override
     public IPage<VipConfig> findAll(VipConfigPageRequest request) {
         LambdaQueryWrapper<VipConfig> wrapper = new LambdaQueryWrapper<>();
-        Page<VipConfig> page = new Page<>(request.getPageNum(), request.getPageSize());
+        Page<VipConfig> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         IPage<VipConfig> result = vipConfigMapper.selectPage(page, wrapper);
         List<VipConfig> records = result.getRecords();
         Collections.sort(records, new Comparator<VipConfig>() {

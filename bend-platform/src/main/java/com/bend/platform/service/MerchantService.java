@@ -13,11 +13,22 @@ public interface MerchantService {
     /**
      * 创建商户
      *
-     * @param name  商户名称
-     * @param phone 商户联系电话
+     * @param name     商户名称
+     * @param phone    商户联系电话
+     * @param isSystem 是否为系统商户
      * @return 创建的商户实体
      */
-    Merchant createMerchant(String name, String phone);
+    Merchant createMerchant(String name, String phone, Boolean isSystem);
+
+    /**
+     * 更新商户信息
+     *
+     * @param id       商户ID
+     * @param name     商户名称
+     * @param phone    商户联系电话
+     * @param isSystem 是否为系统商户
+     */
+    void updateMerchant(String id, String name, String phone, Boolean isSystem);
 
     /**
      * 根据ID查询商户

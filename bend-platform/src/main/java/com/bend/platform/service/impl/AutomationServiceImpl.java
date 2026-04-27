@@ -178,8 +178,7 @@ public class AutomationServiceImpl implements AutomationService {
         for (GameAccount ga : accounts) {
             Map<String, Object> info = new HashMap<>();
             info.put("id", ga.getId());
-            info.put("name", ga.getName());
-            info.put("xboxGamertag", ga.getXboxGamertag());
+            info.put("xboxGameName", ga.getXboxGameName());
             info.put("xboxLiveEmail", ga.getXboxLiveEmail());
             info.put("isPrimary", ga.getIsPrimary());
             info.put("passwordToken", credentialTokenService.generateToken(

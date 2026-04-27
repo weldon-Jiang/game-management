@@ -1,6 +1,8 @@
 package com.bend.platform.service;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.bend.platform.dto.ImportResultDto;
+import com.bend.platform.dto.StreamingAccountImportDto;
 import com.bend.platform.dto.StreamingAccountPageRequest;
 import com.bend.platform.entity.StreamingAccount;
 
@@ -23,6 +25,15 @@ public interface StreamingAccountService {
      * @return 创建的账号实体
      */
     StreamingAccount create(String merchantId, String name, String email, String password, String authCode);
+
+    /**
+     * 批量导入流媒体账号
+     *
+     * @param merchantId 商户ID
+     * @param accounts   导入的账号列表
+     * @return 导入结果
+     */
+    ImportResultDto batchImport(String merchantId, List<StreamingAccountImportDto> accounts);
 
     /**
      * 根据ID查询账号
@@ -67,6 +78,16 @@ public interface StreamingAccountService {
     void update(String id, String name, String authCode);
 
     /**
+     * 更新账号信息（管理员用）
+     *
+     * @param id         账号ID
+     * @param merchantId 新商户ID（可选）
+     * @param name       新名称（可选）
+     * @param authCode   新认证码（可选）
+     */
+    void update(String id, String merchantId, String name, String authCode);
+
+    /**
      * 更新账号状态
      *
      * @param id     账号ID
@@ -79,7 +100,7 @@ public interface StreamingAccountService {
      *
      * @param id            账号ID
      * @param errorCode     错误码
-     * @param errorMessage  错误信息
+     * @param errorMessage 错误信息
      */
     void updateError(String id, String errorCode, String errorMessage);
 

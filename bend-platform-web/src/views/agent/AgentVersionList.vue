@@ -13,11 +13,12 @@
       </div>
     </div>
 
-    <div class="content-card">
+    <div class="content-card table-container">
       <el-table
         :data="tableData"
         v-loading="loading"
         class="data-table"
+        scrollbar-always-on
       >
         <el-table-column prop="version" label="版本号" width="120" align="center" />
         <el-table-column prop="status" label="状态" width="100" align="center">
@@ -158,7 +159,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { agentVersionApi } from '@/api'

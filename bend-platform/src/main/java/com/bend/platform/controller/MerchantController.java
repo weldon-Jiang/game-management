@@ -37,17 +37,38 @@ public class MerchantController {
     /**
      * 创建商户
      *
-     * @param name  商户名称
-     * @param phone 商户联系电话
+     * @param name     商户名称
+     * @param phone    商户联系电话
+     * @param isSystem 是否为系统商户
      * @return 创建的商户信息
      */
     @PostMapping
-    public ApiResponse<Merchant> create(@RequestParam String name, @RequestParam String phone) {
+    public ApiResponse<Merchant> create(@RequestParam String name, @RequestParam String phone,
+                                         @RequestParam(required = false) Boolean isSystem) {
         if (!UserContext.hasManagementPermission()) {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
-        Merchant merchant = merchantService.createMerchant(name, phone);
+        Merchant merchant = merchantService.createMerchant(name, phone, isSystem);
         return ApiResponse.success("商户创建成功", merchant);
+    }
+
+    /**
+     * 更新商户信息
+     *
+     * @param id       商户ID
+     * @param name     商户名称
+     * @param phone    商户联系电话
+     * @param isSystem 是否为系统商户
+     * @return 操作结果
+     */
+    @PutMapping("/{id}")
+    public ApiResponse<Void> update(@PathVariable String id, @RequestParam String name,
+                                    @RequestParam String phone, @RequestParam(required = false) Boolean isSystem) {
+        if (!UserContext.hasManagementPermission()) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+        merchantService.updateMerchant(id, name, phone, isSystem);
+        return ApiResponse.success("商户更新成功", null);
     }
 
     /**
@@ -76,6 +97,9 @@ public class MerchantController {
      */
     @GetMapping
     public ApiResponse<IPage<Merchant>> list(MerchantPageRequest request) {
+        if (!UserContext.isPlatformAdmin()) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
         IPage<Merchant> page = merchantService.findAll(request);
         return ApiResponse.success(page);
     }

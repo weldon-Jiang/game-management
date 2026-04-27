@@ -187,7 +187,7 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
         LambdaQueryWrapper<ActivationCode> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ActivationCode::getBatchId, batchId)
                .orderByDesc(ActivationCode::getCreatedTime);
-        Page<ActivationCode> page = new Page<>(request.getPageNum(), request.getPageSize());
+        Page<ActivationCode> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return activationCodeMapper.selectPage(page, wrapper);
     }
 
@@ -208,7 +208,7 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
             wrapper.eq(ActivationCodeBatch::getMerchantId, merchantId);
         }
         wrapper.orderByDesc(ActivationCodeBatch::getCreatedTime);
-        Page<ActivationCodeBatch> page = new Page<>(request.getPageNum(), request.getPageSize());
+        Page<ActivationCodeBatch> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return activationCodeBatchMapper.selectPage(page, wrapper);
     }
 

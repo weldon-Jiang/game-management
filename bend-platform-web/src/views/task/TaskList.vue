@@ -48,11 +48,13 @@
         </el-button>
       </div>
 
-      <el-table
-        :data="tableData"
-        v-loading="loading"
-        class="data-table"
-      >
+      <div class="table-container">
+        <el-table
+          :data="tableData"
+          v-loading="loading"
+          class="data-table"
+          scrollbar-always-on
+        >
         <el-table-column prop="name" label="任务名称" min-width="150" show-overflow-tooltip />
         <el-table-column prop="type" label="类型" width="120" align="center">
           <template #default="{ row }">
@@ -135,6 +137,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
 
       <div class="pagination-wrap">
         <el-pagination
@@ -221,7 +224,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { taskApi, agentApi } from '@/api'

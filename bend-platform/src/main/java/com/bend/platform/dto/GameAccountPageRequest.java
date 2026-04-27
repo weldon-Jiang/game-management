@@ -1,7 +1,10 @@
 package com.bend.platform.dto;
 
-/**
- * 游戏账号分页请求
- */
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+@Data
+@EqualsAndHashCode(callSuper = true)
 public class GameAccountPageRequest extends PageRequest {
+    private String streamingId;
 }

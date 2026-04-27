@@ -78,7 +78,8 @@
       <div class="section-header">
         <h3>已激活VIP套餐</h3>
       </div>
-      <el-table :data="activatedVips" class="data-table">
+      <div class="table-container">
+        <el-table :data="activatedVips" class="data-table" scrollbar-always-on>
         <el-table-column prop="vipName" label="套餐名称" min-width="120" />
         <el-table-column prop="vipTypeText" label="VIP类型" width="100" align="center">
           <template #default="{ row }">
@@ -98,6 +99,7 @@
         </el-table-column>
         <el-table-column prop="code" label="激活码" min-width="150" show-overflow-tooltip />
       </el-table>
+      </div>
     </div>
 
     <!-- VIP套餐列表 -->

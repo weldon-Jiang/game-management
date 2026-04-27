@@ -46,16 +46,10 @@ public class GameAccount {
     private String merchantId;
 
     /**
-     * 账号名称
-     * 用于显示的友好名称
+     * Xbox游戏名称
+     * Xbox游戏的玩家名称
      */
-    private String name;
-
-    /**
-     * Xbox Gamertag
-     * Xbox游戏的玩家昵称
-     */
-    private String xboxGamertag;
+    private String xboxGameName;
 
     /**
      * Xbox登录邮箱
@@ -123,4 +117,10 @@ public class GameAccount {
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedTime;
+
+    @TableField(exist = false)
+    private String merchantName;
+
+    @TableField(exist = false)
+    private String streamingName;
 }

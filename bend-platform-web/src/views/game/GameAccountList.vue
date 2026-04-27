@@ -6,6 +6,9 @@
         <span class="header-desc">管理Xbox游戏账号</span>
       </div>
       <div class="header-right">
+        <el-button @click="showImportDialog">
+          批量导入
+        </el-button>
         <el-button type="primary" @click="showAddDialog">
           <el-icon><Plus /></el-icon>
           新增账号
@@ -13,16 +16,18 @@
       </div>
     </div>
 
-    <div class="content-card">
+    <div class="content-card table-container">
       <el-table
         :data="tableData"
         v-loading="loading"
         class="data-table"
+        scrollbar-always-on
       >
-        <el-table-column prop="name" label="账号名称" min-width="120" />
-        <el-table-column prop="xboxGamertag" label="Gamertag" min-width="150" show-overflow-tooltip />
+        <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" />
+        <el-table-column prop="streamingName" label="关联流媒体账号" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="xboxGameName" label="Xbox玩家名称" min-width="150" show-overflow-tooltip />
         <el-table-column prop="xboxLiveEmail" label="Xbox邮箱" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="isActive" label="状态" width="100" align="center">
+        <el-table-column prop="isActive" label="状态" width="80" align="center">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.isActive)" size="small">
               {{ getStatusText(row.isActive) }}
@@ -33,6 +38,26 @@
           <template #default="{ row }">
             <el-tag v-if="row.isPrimary" type="warning" size="small">是</el-tag>
             <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="priority" label="优先级" width="80" align="center">
+          <template #default="{ row }">
+            {{ row.priority ?? '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="dailyMatchLimit" label="每日限制" width="90" align="center">
+          <template #default="{ row }">
+            <span>{{ row.todayMatchCount ?? 0 }}/{{ row.dailyMatchLimit ?? '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="totalMatchCount" label="总场次" width="80" align="center">
+          <template #default="{ row }">
+            {{ row.totalMatchCount ?? 0 }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="lastUsedTime" label="最后使用" width="170">
+          <template #default="{ row }">
+            {{ formatDate(row.lastUsedTime) }}
           </template>
         </el-table-column>
         <el-table-column prop="createdTime" label="创建时间" width="170">
@@ -79,26 +104,23 @@
         label-width="110px"
         class="dialog-form"
       >
-        <el-form-item label="所属串流账号" prop="streamingId">
+        <el-form-item v-if="authStore.isPlatformAdmin" label="所属商户" prop="merchantId">
           <el-select
-            v-model="formData.streamingId"
-            placeholder="请选择串流账号"
+            v-model="formData.merchantId"
+            placeholder="请选择商户"
             style="width: 100%"
             filterable
           >
             <el-option
-              v-for="sa in streamingList"
-              :key="sa.id"
-              :label="sa.name + ' (' + sa.email + ')'"
-              :value="sa.id"
+              v-for="merchant in merchantList"
+              :key="merchant.id"
+              :label="merchant.name"
+              :value="merchant.id"
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="账号名称" prop="name">
-          <el-input v-model="formData.name" placeholder="请输入账号名称" />
-        </el-form-item>
-        <el-form-item label="Xbox玩家名" prop="xboxGamertag">
-          <el-input v-model="formData.xboxGamertag" placeholder="请输入Xbox玩家名" />
+        <el-form-item label="Xbox玩家名" prop="xboxGameName">
+          <el-input v-model="formData.xboxGameName" placeholder="请输入Xbox玩家名称" />
         </el-form-item>
         <el-form-item label="Xbox邮箱" prop="xboxLiveEmail">
           <el-input v-model="formData.xboxLiveEmail" placeholder="请输入Xbox邮箱" />
@@ -119,21 +141,90 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量导入对话框 -->
+    <el-dialog
+      v-model="importDialogVisible"
+      title="批量导入游戏账号"
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <div class="import-template">
+        <h4>导入说明</h4>
+        <ol>
+          <li>请先点击"下载模板"按钮获取导入模板</li>
+          <li>按照模板格式填写游戏账号信息</li>
+          <li>上传填写好的CSV文件</li>
+          <li>系统会验证数据格式和重复情况</li>
+          <li>验证通过后点击"开始导入"</li>
+        </ol>
+      </div>
+      <el-form-item v-if="authStore.isPlatformAdmin" label="导入到商户">
+        <el-select
+          v-model="importMerchantId"
+          placeholder="请选择商户"
+          style="width: 100%"
+          filterable
+        >
+          <el-option
+            v-for="merchant in merchantList"
+            :key="merchant.id"
+            :label="merchant.name"
+            :value="merchant.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-upload
+        ref="uploadRef"
+        :auto-upload="false"
+        :limit="1"
+        accept=".csv"
+        :on-change="handleFileChange"
+        :file-list="fileList"
+        class="upload-component"
+      >
+        <template #trigger>
+          <el-button>选择CSV文件</el-button>
+        </template>
+        <template #tip>
+          <div class="el-upload__tip">只能上传CSV文件</div>
+        </template>
+      </el-upload>
+      <div v-if="importResult" class="import-result">
+        <el-alert
+          :title="`导入完成：成功 ${importResult.successCount} 条，失败 ${importResult.failCount} 条`"
+          :type="importResult.failCount > 0 ? 'warning' : 'success'"
+          show-icon
+        >
+          <template v-if="importResult.errors && importResult.errors.length > 0">
+            <div v-for="(err, idx) in importResult.errors.slice(0, 10)" :key="idx" class="error-item">
+              {{ err }}
+            </div>
+            <div v-if="importResult.errors.length > 10" class="error-more">
+              还有 {{ importResult.errors.length - 10 }} 条错误...
+            </div>
+          </template>
+        </el-alert>
+      </div>
+      <template #footer>
+        <el-button @click="handleDownloadTemplate">下载模板</el-button>
+        <el-button @click="importDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="importLoading" :disabled="!selectedFile" @click="handleImport">
+          开始导入
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onErrorCaptured } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { gameAccountApi, streamingApi } from '@/api'
+import { gameAccountApi, merchantApi } from '@/api'
+import { useAuthStore } from '@/stores/auth'
 
-// 捕获组件内子组件的错误
-onErrorCaptured((err, instance, info) => {
-  console.error('GameAccountList Error:', err, 'Info:', info)
-  ElMessage.error('组件加载错误: ' + err.message)
-  return false
-})
+const authStore = useAuthStore()
 
 /**
  * 游戏账号管理页面
@@ -172,16 +263,22 @@ const pagination = reactive({
 const dialogVisible = ref(false)
 const dialogType = ref('add')
 const formRef = ref(null)
-const streamingList = ref([])
+const importDialogVisible = ref(false)
+const uploadRef = ref(null)
+const fileList = ref([])
+const selectedFile = ref(null)
+const importLoading = ref(false)
+const importResult = ref(null)
+const merchantList = ref([])
+const importMerchantId = ref('')
 
 /**
  * 表单数据
  */
 const formData = reactive({
   id: '',
-  streamingId: '',
-  name: '',
-  xboxGamertag: '',
+  merchantId: '',
+  xboxGameName: '',
   xboxLiveEmail: '',
   xboxLivePassword: ''
 })
@@ -190,14 +287,11 @@ const formData = reactive({
  * 表单验证规则
  */
 const formRules = {
-  name: [
-    { required: true, message: '请输入账号名称', trigger: 'blur' }
+  merchantId: [
+    { required: true, message: '请选择商户', trigger: 'change' }
   ],
-  streamingId: [
-    { required: true, message: '请选择所属串流账号', trigger: 'change' }
-  ],
-  xboxGamertag: [
-    { required: true, message: '请输入Gamertag', trigger: 'blur' }
+  xboxGameName: [
+    { required: true, message: '请输入Xbox玩家名称', trigger: 'blur' }
   ],
   xboxLiveEmail: [
     { required: true, message: '请输入Xbox邮箱', trigger: 'blur' },
@@ -211,43 +305,37 @@ const formRules = {
  * 加载游戏账号列表
  */
 const loadData = async () => {
-  console.log('GameAccountList loadData called, loading:', loading.value)
   loading.value = true
   tableData.value = []
   try {
-    console.log('GameAccountList calling API...')
     const res = await gameAccountApi.list({
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize
     })
-    console.log('GameAccountList API response:', res)
-    console.log('GameAccountList res.data keys:', Object.keys(res.data || {}))
-    console.log('GameAccountList res.data.records:', res.data?.records)
     tableData.value = res.data?.records || []
     pagination.total = res.data?.total || 0
-    console.log('GameAccountList tableData after load:', tableData.value)
   } catch (error) {
-    console.error('GameAccountList load error:', error)
+    console.error('Failed to load game accounts:', error)
     tableData.value = []
     pagination.total = 0
   } finally {
     loading.value = false
-    console.log('GameAccountList loadData complete, loading:', loading.value)
   }
 }
 
 /**
  * 显示新增对话框
  */
-const showAddDialog = () => {
+const showAddDialog = async () => {
   dialogType.value = 'add'
   formData.id = ''
-  formData.streamingId = ''
-  formData.name = ''
-  formData.xboxGamertag = ''
+  formData.merchantId = authStore.isPlatformAdmin ? '' : authStore.merchantId
+  formData.xboxGameName = ''
   formData.xboxLiveEmail = ''
   formData.xboxLivePassword = ''
-  loadStreamingList()
+  if (authStore.isPlatformAdmin && merchantList.value.length === 0) {
+    await loadMerchants()
+  }
   dialogVisible.value = true
 }
 
@@ -255,28 +343,30 @@ const showAddDialog = () => {
  * 显示编辑对话框
  * @param {Object} row - 当前行数据
  */
-const showEditDialog = (row) => {
+const showEditDialog = async (row) => {
   dialogType.value = 'edit'
   formData.id = row.id
-  formData.streamingId = row.streamingId || ''
-  formData.name = row.name
-  formData.xboxGamertag = row.xboxGamertag
+  formData.merchantId = row.merchantId || ''
+  formData.xboxGameName = row.xboxGameName
   formData.xboxLiveEmail = row.xboxLiveEmail
   formData.xboxLivePassword = ''
-  loadStreamingList()
+  if (authStore.isPlatformAdmin && merchantList.value.length === 0) {
+    await loadMerchants()
+  }
   dialogVisible.value = true
 }
 
 /**
- * 加载串流账号列表
+ * 加载商户列表
  */
-const loadStreamingList = async () => {
+const loadMerchants = async () => {
+  if (!authStore.isPlatformAdmin) return
   try {
-    const res = await streamingApi.listAll()
-    streamingList.value = res.data || []
+    const res = await merchantApi.listAll()
+    merchantList.value = res.data || []
   } catch (error) {
-    console.error('Failed to load streaming accounts:', error)
-    streamingList.value = []
+    console.error('Failed to load merchants:', error)
+    merchantList.value = []
   }
 }
 
@@ -291,21 +381,17 @@ const handleSubmit = async () => {
   try {
     if (dialogType.value === 'add') {
       await gameAccountApi.create({
-        streamingId: formData.streamingId,
-        name: formData.name,
-        xboxGamertag: formData.xboxGamertag,
+        merchantId: formData.merchantId,
+        xboxGameName: formData.xboxGameName,
         xboxLiveEmail: formData.xboxLiveEmail,
         xboxLivePassword: formData.xboxLivePassword
       })
       ElMessage.success('创建成功')
     } else {
       const updateData = {
-        name: formData.name,
+        merchantId: formData.merchantId,
         xboxLiveEmail: formData.xboxLiveEmail,
         xboxLivePassword: formData.xboxLivePassword || undefined
-      }
-      if (formData.streamingId) {
-        updateData.streamingId = formData.streamingId
       }
       await gameAccountApi.update(formData.id, updateData)
       ElMessage.success('更新成功')
@@ -324,7 +410,7 @@ const handleSubmit = async () => {
  * @param {Object} row - 当前行数据
  */
 const handleDelete = async (row) => {
-  await ElMessageBox.confirm(`确定要删除账号「${row.name}」吗？`, '提示', {
+  await ElMessageBox.confirm(`确定要删除账号「${row.xboxGameName}」吗？`, '提示', {
     confirmButtonText: '确定删除',
     cancelButtonText: '取消',
     type: 'warning'
@@ -336,6 +422,122 @@ const handleDelete = async (row) => {
     loadData()
   } catch (error) {
     // 错误已在拦截器中处理
+  }
+}
+
+/**
+ * 显示导入对话框
+ */
+const showImportDialog = async () => {
+  importResult.value = null
+  selectedFile.value = null
+  fileList.value = []
+  importMerchantId.value = authStore.isPlatformAdmin ? '' : authStore.merchantId
+  if (authStore.isPlatformAdmin && merchantList.value.length === 0) {
+    await loadMerchants()
+  }
+  importDialogVisible.value = true
+}
+
+/**
+ * 下载导入模板
+ */
+const handleDownloadTemplate = async () => {
+  try {
+    const res = await gameAccountApi.downloadTemplate()
+    const template = res.data
+    const blob = new Blob(['\ufeff' + template], { type: 'text/csv;charset=utf-8' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'game_account_template.csv'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Failed to download template:', error)
+  }
+}
+
+/**
+ * 处理文件选择
+ */
+const handleFileChange = (file) => {
+  selectedFile.value = file.raw
+  importResult.value = null
+}
+
+/**
+ * 处理导入
+ */
+const handleImport = async () => {
+  if (!selectedFile.value) {
+    ElMessage.warning('请先选择CSV文件')
+    return
+  }
+
+  importLoading.value = true
+  importResult.value = null
+
+  try {
+    const text = await selectedFile.value.text()
+    const lines = text.split('\n').filter(line => line.trim())
+
+    if (lines.length < 2) {
+      ElMessage.warning('CSV文件内容为空或格式不正确')
+      return
+    }
+
+    const header = lines[0].split(',').map(h => h.trim())
+    const requiredHeaders = ['Xbox玩家名称', 'Xbox邮箱', 'Xbox密码']
+    const hasRequiredHeaders = requiredHeaders.every(h => header.includes(h))
+
+    if (!hasRequiredHeaders) {
+      ElMessage.warning('CSV文件格式不正确，请检查表头是否包含：Xbox玩家名称、Xbox邮箱、Xbox密码')
+      return
+    }
+
+    const accounts = []
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',').map(v => v.trim())
+      if (values.length >= 3 && values[0] && values[1] && values[2]) {
+        accounts.push({
+          xboxGameName: values[0],
+          xboxLiveEmail: values[1],
+          xboxLivePassword: values[2] || ''
+        })
+      }
+    }
+
+    if (accounts.length === 0) {
+      ElMessage.warning('没有有效的数据行')
+      return
+    }
+
+    if (authStore.isPlatformAdmin && !importMerchantId.value) {
+      ElMessage.warning('请选择要导入到的商户')
+      return
+    }
+
+    const res = await gameAccountApi.batchImport({
+      merchantId: importMerchantId.value,
+      accounts: accounts
+    })
+    importResult.value = res.data
+
+    if (res.data.failCount === 0) {
+      ElMessage.success('导入成功')
+      importDialogVisible.value = false
+      loadData()
+    } else {
+      ElMessage.warning(`导入完成：成功 ${res.data.successCount} 条，失败 ${res.data.failCount} 条`)
+    }
+  } catch (error) {
+    console.error('Import failed:', error)
+    ElMessage.error('导入失败')
+  } finally {
+    importLoading.value = false
   }
 }
 
@@ -377,7 +579,6 @@ const formatDate = (dateStr) => {
 // ==================== 生命周期 ====================
 
 onMounted(() => {
-  console.log('GameAccountList mounted!')
   loadData()
 })
 </script>
@@ -528,5 +729,46 @@ onMounted(() => {
 
 :deep(.el-input__inner) {
   color: #ffffff;
+}
+
+.import-template {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.import-template h4 {
+  color: #ffffff;
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.import-template ol {
+  color: #b0b0b0;
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.upload-component {
+  margin-top: 16px;
+}
+
+.import-result {
+  margin-top: 20px;
+}
+
+.error-item {
+  font-size: 12px;
+  color: #e6a23c;
+  margin-top: 4px;
+}
+
+.error-more {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
 }
 </style>

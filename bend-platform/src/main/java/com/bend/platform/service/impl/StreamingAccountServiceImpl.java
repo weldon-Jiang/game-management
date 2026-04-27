@@ -3,6 +3,8 @@ package com.bend.platform.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bend.platform.dto.ImportResultDto;
+import com.bend.platform.dto.StreamingAccountImportDto;
 import com.bend.platform.dto.StreamingAccountPageRequest;
 import com.bend.platform.entity.StreamingAccount;
 import com.bend.platform.exception.BusinessException;
@@ -15,9 +17,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.CollectionUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 流媒体账号服务实现类
@@ -72,6 +78,74 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ImportResultDto batchImport(String merchantId, List<StreamingAccountImportDto> accounts) {
+        ImportResultDto result = new ImportResultDto();
+        List<String> errors = new ArrayList<>();
+        int successCount = 0;
+
+        if (CollectionUtils.isEmpty(accounts)) {
+            errors.add("导入数据不能为空");
+            result.setFailCount(accounts.size());
+            result.setErrors(errors);
+            return result;
+        }
+
+        merchantService.validateMerchantActive(merchantId);
+
+        Set<String> emailSet = new HashSet<>();
+        for (int i = 0; i < accounts.size(); i++) {
+            StreamingAccountImportDto dto = accounts.get(i);
+            int rowNum = i + 2;
+
+            if (emailSet.contains(dto.getEmail())) {
+                errors.add(String.format("第%d行: 邮箱[%s]重复", rowNum, dto.getEmail()));
+                continue;
+            }
+
+            StreamingAccount existing = findByEmail(dto.getEmail());
+            if (existing != null) {
+                errors.add(String.format("第%d行: 邮箱[%s]已存在", rowNum, dto.getEmail()));
+                continue;
+            }
+
+            emailSet.add(dto.getEmail());
+        }
+
+        if (!errors.isEmpty()) {
+            result.setSuccessCount(0);
+            result.setFailCount(accounts.size());
+            result.setErrors(errors);
+            return result;
+        }
+
+        for (StreamingAccountImportDto dto : accounts) {
+            try {
+                StreamingAccount entity = new StreamingAccount();
+                entity.setMerchantId(merchantId);
+                entity.setName(dto.getName());
+                entity.setEmail(dto.getEmail());
+                entity.setPasswordEncrypted(aesUtil.encrypt(dto.getPassword()));
+                entity.setAuthCode(dto.getAuthCode());
+                entity.setStatus("idle");
+                entity.setCreatedTime(LocalDateTime.now());
+                entity.setUpdatedTime(LocalDateTime.now());
+                streamingAccountMapper.insert(entity);
+                successCount++;
+            } catch (Exception e) {
+                log.error("导入流媒体账号失败: {}", dto.getEmail(), e);
+                errors.add(String.format("邮箱[%s]: 导入失败", dto.getEmail()));
+            }
+        }
+
+        result.setSuccessCount(successCount);
+        result.setFailCount(accounts.size() - successCount);
+        result.setErrors(errors);
+        log.info("批量导入流媒体账号完成 - 成功: {}, 失败: {}", successCount, accounts.size() - successCount);
+        return result;
+    }
+
+    @Override
     public StreamingAccount findById(String id) {
         return streamingAccountMapper.selectById(id);
     }
@@ -90,7 +164,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             wrapper.eq(StreamingAccount::getMerchantId, merchantId);
         }
         wrapper.orderByDesc(StreamingAccount::getCreatedTime);
-        Page<StreamingAccount> page = new Page<>(request.getPageNum(), request.getPageSize());
+        IPage<StreamingAccount> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return streamingAccountMapper.selectPage(page, wrapper);
     }
 
@@ -115,6 +189,29 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         // 校验商户是否有效
         merchantService.validateMerchantActive(account.getMerchantId());
 
+        if (name != null) {
+            account.setName(name);
+        }
+        if (authCode != null) {
+            account.setAuthCode(authCode);
+        }
+
+        streamingAccountMapper.updateById(account);
+        log.info("更新流媒体账号 - ID: {}", id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void update(String id, String merchantId, String name, String authCode) {
+        StreamingAccount account = streamingAccountMapper.selectById(id);
+        if (account == null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+        }
+
+        if (merchantId != null) {
+            merchantService.validateMerchantActive(merchantId);
+            account.setMerchantId(merchantId);
+        }
         if (name != null) {
             account.setName(name);
         }

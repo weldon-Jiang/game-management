@@ -13,11 +13,12 @@
       </div>
     </div>
 
-    <div class="content-card">
+    <div class="content-card table-container">
       <el-table
         :data="tableData"
         v-loading="loading"
         class="data-table"
+        scrollbar-always-on
       >
         <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" />
         <el-table-column prop="id" label="用户ID" width="280" show-overflow-tooltip />
@@ -242,11 +243,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { userApi, merchantApi } from '@/api'
+
+const authStore = useAuthStore()
 
 /**
  * 用户管理列表页面
@@ -254,8 +257,6 @@ import { userApi, merchantApi } from '@/api'
  */
 
 // ==================== 状态定义 ====================
-
-const authStore = useAuthStore()
 
 /**
  * 当前用户ID（防止删除自己）

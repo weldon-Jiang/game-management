@@ -1,17 +1,18 @@
 package com.bend.platform.service;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.bend.platform.dto.GameAccountImportDto;
 import com.bend.platform.dto.GameAccountPageRequest;
+import com.bend.platform.dto.ImportResultDto;
 import com.bend.platform.entity.GameAccount;
 
 import java.util.List;
 
-/**
- * 游戏账号服务接口
- */
 public interface GameAccountService {
 
     GameAccount create(String merchantId, GameAccount account);
+
+    ImportResultDto batchImport(String merchantId, List<GameAccountImportDto> accounts);
 
     GameAccount findById(String id);
 
@@ -25,7 +26,13 @@ public interface GameAccountService {
 
     IPage<GameAccount> findAll(GameAccountPageRequest request);
 
+    List<GameAccount> findUnboundByMerchantId(String merchantId);
+
     void update(String id, GameAccount account);
+
+    void bindToStreamingAccount(String streamingAccountId, List<String> gameAccountIds);
+
+    void unbindFromStreamingAccount(List<String> gameAccountIds);
 
     void lock(String id, String xboxHostId);
 
