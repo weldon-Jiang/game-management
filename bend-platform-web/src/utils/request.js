@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
+import { useAuthStore } from '@/stores/auth'
 import { isAuthError } from './constants'
 
 const pendingRequests = new Map()
@@ -38,13 +39,42 @@ const clearAllPendingRequests = () => {
 
 const retryDelay = (retryCount) => Math.min(1000 * Math.pow(2, retryCount), 10000)
 
+let isRefreshing = false
+let refreshSubscribers = []
+
+const subscribeTokenRefresh = (callback) => {
+  refreshSubscribers.push(callback)
+}
+
+const onTokenRefreshed = (newToken) => {
+  refreshSubscribers.forEach((callback) => callback(newToken))
+  refreshSubscribers = []
+}
+
 request.interceptors.request.use(
   (config) => {
     addPendingRequest(config)
 
-    const token = localStorage.getItem('token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+    const authStore = useAuthStore()
+    if (authStore.token) {
+      if (authStore.needsRefresh && !authStore.isRefreshing && !config.url.includes('/auth/refresh')) {
+        if (!isRefreshing) {
+          isRefreshing = true
+          authStore.refreshToken().then((success) => {
+            isRefreshing = false
+            if (success) {
+              onTokenRefreshed(authStore.token)
+            }
+          })
+        }
+        return new Promise((resolve) => {
+          subscribeTokenRefresh((newToken) => {
+            config.headers.Authorization = `Bearer ${newToken}`
+            resolve(config)
+          })
+        })
+      }
+      config.headers.Authorization = `Bearer ${authStore.token}`
     }
     if (config.method === 'post' || config.method === 'put') {
       config.headers['Content-Type'] = 'application/json'
@@ -68,6 +98,7 @@ request.interceptors.response.use(
         clearAllPendingRequests()
         localStorage.removeItem('token')
         localStorage.removeItem('user')
+        localStorage.removeItem('token_expiry')
         router.push('/login')
         return Promise.reject(new Error(res.message || 'Auth error'))
       }
@@ -77,6 +108,8 @@ request.interceptors.response.use(
     return res
   },
   async (error) => {
+    const authStore = useAuthStore()
+
     if (error.config && !error.config.__retryCount) {
       error.config.__retryCount = error.config.__retryCount || 0
 
@@ -103,10 +136,18 @@ request.interceptors.response.use(
     if (error.response) {
       console.log('Request error with response:', error.response.status, error.response.data)
       if (error.response.status === 401) {
+        if (!error.config.url.includes('/auth/refresh') && !error.config.url.includes('/auth/login')) {
+          const refreshed = await authStore.refreshToken()
+          if (refreshed) {
+            error.config.headers.Authorization = `Bearer ${authStore.token}`
+            return request(error.config)
+          }
+        }
         console.log('401 detected, clearing auth and redirecting to login')
         clearAllPendingRequests()
         localStorage.removeItem('token')
         localStorage.removeItem('user')
+        localStorage.removeItem('token_expiry')
         try {
           router.push('/login')
           console.log('Navigation to /login initiated')

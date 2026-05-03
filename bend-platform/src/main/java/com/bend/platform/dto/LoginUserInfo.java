@@ -8,6 +8,11 @@ import lombok.NoArgsConstructor;
 /**
  * 登录用户信息
  * 从JWT token解析后存储到上下文，供整个请求周期使用
+ *
+ * 角色说明：
+ * - platform_admin: 平台管理员，管理所有商户
+ * - merchant_owner: 商户所有者/管理员，管理所属商户及下级用户
+ * - operator: 操作员，使用系统功能
  */
 @Data
 @Builder
@@ -32,6 +37,7 @@ public class LoginUserInfo {
 
     /**
      * 角色
+     * 可选值: platform_admin, merchant_owner, operator
      */
     private String role;
 
@@ -43,17 +49,11 @@ public class LoginUserInfo {
     }
 
     /**
-     * 判断是否为商户所有者
+     * 判断是否为商户所有者/管理员
+     * 合并了 owner 和 admin 两个角色
      */
-    public boolean isOwner() {
-        return "owner".equals(role);
-    }
-
-    /**
-     * 判断是否为商户管理员
-     */
-    public boolean isAdmin() {
-        return "admin".equals(role);
+    public boolean isMerchantOwner() {
+        return "merchant_owner".equals(role);
     }
 
     /**
@@ -64,9 +64,25 @@ public class LoginUserInfo {
     }
 
     /**
-     * 判断是否有管理权限（平台管理员、商户所有者、商户管理员）
+     * 判断是否有管理权限（平台管理员、商户所有者/管理员）
      */
     public boolean hasManagementPermission() {
-        return isPlatformAdmin() || isOwner() || isAdmin();
+        return isPlatformAdmin() || isMerchantOwner();
+    }
+
+    /**
+     * @deprecated 使用 isMerchantOwner() 替代
+     */
+    @Deprecated
+    public boolean isOwner() {
+        return isMerchantOwner();
+    }
+
+    /**
+     * @deprecated 使用 isMerchantOwner() 替代
+     */
+    @Deprecated
+    public boolean isAdmin() {
+        return isMerchantOwner();
     }
 }

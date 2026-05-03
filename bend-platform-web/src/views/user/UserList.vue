@@ -119,8 +119,7 @@
         </el-form-item>
         <el-form-item label="角色" prop="role">
           <el-select v-model="editFormData.role" placeholder="请选择角色" style="width: 100%">
-            <el-option label="商户所有者" value="owner" />
-            <el-option label="商户管理员" value="admin" />
+            <el-option label="商户管理员" value="merchant_owner" />
             <el-option label="操作员" value="operator" />
           </el-select>
         </el-form-item>
@@ -184,8 +183,7 @@
         </el-form-item>
         <el-form-item label="角色" prop="role">
           <el-select v-model="addFormData.role" placeholder="请选择角色" style="width: 100%">
-            <el-option label="商户所有者" value="owner" />
-            <el-option label="商户管理员" value="admin" />
+            <el-option label="商户管理员" value="merchant_owner" />
             <el-option label="操作员" value="operator" />
           </el-select>
         </el-form-item>
@@ -578,8 +576,7 @@ const getRoleType = (role) => {
 const getRoleText = (role) => {
   const textMap = {
     platform_admin: '平台管理员',
-    owner: '商户所有者',
-    admin: '管理员',
+    merchant_owner: '商户管理员',
     operator: '操作员'
   }
   return textMap[role] || role
@@ -660,13 +657,6 @@ onMounted(() => {
   color: #8a8a8a;
 }
 
-.content-card {
-  background: rgba(18, 18, 26, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
-  padding: 24px;
-}
-
 .data-table {
   width: 100%;
 }
@@ -711,55 +701,6 @@ onMounted(() => {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
-}
-
-:deep(.el-pagination) {
-  --el-pagination-bg-color: transparent;
-  --el-pagination-text-color: #8a8a8a;
-  --el-pagination-hover-color: #6366f1;
-  --el-pagination-button-disabled-bg-color: transparent;
-  --el-pagination-button-bg-color: transparent;
-  --el-pagination-border-color: rgba(255, 255, 255, 0.06);
-  --el-pagination-disabled-color: #5a5a5a;
-  --el-pagination-button-color: #8a8a8a;
-}
-
-:deep(.el-pagination .el-pager li) {
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-  margin: 0 3px;
-  color: #8a8a8a;
-  font-size: 13px;
-  min-width: 32px;
-  height: 32px;
-  line-height: 32px;
-}
-
-:deep(.el-pagination .el-pager li:hover) {
-  color: #6366f1;
-}
-
-:deep(.el-pagination .el-pager li.is-active) {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  color: #ffffff;
-}
-
-:deep(.el-pagination .btn-prev, .el-pagination .btn-next) {
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-  color: #8a8a8a;
-}
-
-:deep(.el-pagination .btn-prev:hover, .el-pagination .btn-next:hover) {
-  color: #6366f1;
-}
-
-:deep(.el-pagination .el-pagination__jump) {
-  color: #8a8a8a;
-}
-
-:deep(.el-pagination .el-pagination__total) {
-  color: #6b7280;
 }
 
 :deep(.el-dialog) {

@@ -172,21 +172,6 @@
         <el-form-item label="批次名称" prop="batchName">
           <el-input v-model="generateFormData.batchName" placeholder="请输入批次名称（可选）" />
         </el-form-item>
-        <el-form-item label="VIP类型" prop="vipType">
-          <el-select
-            v-model="generateFormData.vipType"
-            placeholder="请先配置VIP类型"
-            style="width: 100%"
-            :disabled="vipConfigs.length === 0"
-          >
-            <el-option
-              v-for="config in vipConfigs"
-              :key="config.vipType"
-              :label="`${config.vipName}-${config.price}元/${config.durationDays}天`"
-              :value="config.vipType"
-            />
-          </el-select>
-        </el-form-item>
         <el-form-item label="生成数量" prop="count">
           <el-input-number
             v-model="generateFormData.count"
@@ -194,9 +179,6 @@
             :max="100"
             style="width: 100%"
           />
-        </el-form-item>
-        <el-form-item v-if="vipConfigs.length === 0" style="margin-bottom: 0">
-          <span class="text-warning">当前没有可用的VIP配置，请先在VIP配置中添加</span>
         </el-form-item>
         <el-form-item label="过期时间" prop="expireTime">
           <el-date-picker
@@ -243,7 +225,7 @@ import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, CopyDocument, Delete } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { activationApi, vipApi, merchantApi } from '@/api'
+import { activationApi, merchantApi } from '@/api'
 import { getVipTypeText, getCodeStatusText, getCodeStatusType } from '@/utils/constants'
 
 /**
@@ -279,11 +261,6 @@ const tableData = ref([])
  * 选中的激活码列表
  */
 const selectedCodes = ref([])
-
-/**
- * VIP配置列表
- */
-const vipConfigs = ref([])
 
 /**
  * 搜索关键词
@@ -376,19 +353,6 @@ const loadCodes = async () => {
 }
 
 /**
- * 加载VIP配置列表（仅有效状态）
- */
-const loadVipConfigs = async () => {
-  try {
-    const res = await vipApi.listPage({ pageNum: 1, pageSize: 100 })
-    vipConfigs.value = (res.data.records || []).filter(config => config.status === 'active')
-  } catch (error) {
-    console.error('Failed to load VIP configs:', error)
-    vipConfigs.value = []
-  }
-}
-
-/**
  * 加载商户列表
  */
 const loadMerchantList = async () => {
@@ -414,7 +378,7 @@ const showGenerateDialog = async () => {
   generateFormData.vipType = ''
   generateFormData.count = 1
   generateFormData.expireTime = null
-  await Promise.all([loadVipConfigs(), loadMerchantList()])
+  await loadMerchantList()
   generateDialogVisible.value = true
 }
 
@@ -557,13 +521,6 @@ onMounted(() => {
   color: #8a8a8a;
 }
 
-.content-card {
-  background: rgba(18, 18, 26, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
-  padding: 24px;
-}
-
 .toolbar {
   display: flex;
   gap: 12px;
@@ -625,45 +582,6 @@ onMounted(() => {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
-}
-
-:deep(.el-pagination) {
-  --el-pagination-bg-color: transparent;
-  --el-pagination-text-color: #8a8a8a;
-  --el-pagination-hover-color: #6366f1;
-  --el-pagination-button-disabled-bg-color: transparent;
-  --el-pagination-button-bg-color: transparent;
-  --el-pagination-border-color: rgba(255, 255, 255, 0.06);
-}
-
-:deep(.el-pagination .el-pager li) {
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-  margin: 0 3px;
-  color: #8a8a8a;
-}
-
-:deep(.el-pagination .el-pager li:hover) {
-  color: #6366f1;
-}
-
-:deep(.el-pagination .el-pager li.is-active) {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  color: #ffffff;
-}
-
-:deep(.el-pagination .btn-prev, .el-pagination .btn-next) {
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-  color: #8a8a8a;
-}
-
-:deep(.el-pagination .btn-prev:hover, .el-pagination .btn-next:hover) {
-  color: #6366f1;
-}
-
-:deep(.el-pagination .el-pagination__jump) {
-  color: #8a8a8a;
 }
 
 :deep(.el-pagination .el-pagination__total) {

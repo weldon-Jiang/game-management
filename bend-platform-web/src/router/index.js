@@ -57,12 +57,6 @@ const routes = [
         meta: { title: 'Xbox主机', icon: 'GameConsole' }
       },
       {
-        path: 'vip-configs',
-        name: 'VipConfigs',
-        component: () => import('@/views/vip/VipConfigList.vue'),
-        meta: { title: 'VIP配置', icon: 'Coin', requiresAdmin: true }
-      },
-      {
         path: 'activation-codes',
         name: 'ActivationCodes',
         component: () => import('@/views/activation/ActivationCodeList.vue'),
@@ -97,6 +91,24 @@ const routes = [
         name: 'Subscription',
         component: () => import('@/views/subscription/SubscriptionView.vue'),
         meta: { title: '商户订阅', icon: 'CreditCard' }
+      },
+      {
+        path: 'subscriptions',
+        name: 'SubscriptionManagement',
+        component: () => import('@/views/subscription/SubscriptionList.vue'),
+        meta: { title: '订阅管理', icon: 'Wallet' }
+      },
+      {
+        path: 'merchant-groups',
+        name: 'MerchantGroups',
+        component: () => import('@/views/merchant/MerchantGroupList.vue'),
+        meta: { title: '商户分组', icon: 'User', requiresAdmin: true }
+      },
+      {
+        path: 'recharge-cards',
+        name: 'RechargeCards',
+        component: () => import('@/views/recharge/RechargeCardManagement.vue'),
+        meta: { title: '充值卡管理', icon: 'Tickets' }
       }
     ]
   },

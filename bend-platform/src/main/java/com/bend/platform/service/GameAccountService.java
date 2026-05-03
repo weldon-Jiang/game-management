@@ -34,9 +34,9 @@ public interface GameAccountService {
 
     void unbindFromStreamingAccount(List<String> gameAccountIds);
 
-    void lock(String id, String xboxHostId);
+    void disable(String id);
 
-    void unlock(String id);
+    void enable(String id);
 
     void setPrimary(String id, boolean primary);
 

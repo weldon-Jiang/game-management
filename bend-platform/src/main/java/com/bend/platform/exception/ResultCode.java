@@ -423,4 +423,114 @@ public interface ResultCode {
             return message;
         }
     }
+
+    enum Balance implements ResultCode {
+        NOT_ENOUGH(21001, "点数余额不足"),
+        DEDUCT_FAILED(21002, "扣点失败"),
+        REFUND_FAILED(21003, "返还点数失败"),
+        NOT_FOUND(21004, "账户不存在");
+
+        private final int code;
+        private final String message;
+
+        Balance(int code, String message) {
+            this.code = code;
+            this.message = message;
+        }
+
+        @Override
+        public int getCode() {
+            return code;
+        }
+
+        @Override
+        public String getMessage() {
+            return message;
+        }
+    }
+
+    enum Subscription implements ResultCode {
+        NOT_FOUND(22001, "订阅不存在"),
+        ALREADY_EXISTS(22002, "订阅已存在"),
+        INVALID_STATUS(22003, "订阅状态无效"),
+        DEVICE_NOT_BOUND(22004, "设备未绑定"),
+        DEVICE_ALREADY_BOUND(22005, "设备已被绑定"),
+        UNBIND_LIMIT_EXCEEDED(22006, "解绑次数超限"),
+        CREATE_FAILED(22007, "创建订阅失败"),
+        RENEW_FAILED(22008, "续费失败");
+
+        private final int code;
+        private final String message;
+
+        Subscription(int code, String message) {
+            this.code = code;
+            this.message = message;
+        }
+
+        @Override
+        public int getCode() {
+            return code;
+        }
+
+        @Override
+        public String getMessage() {
+            return message;
+        }
+    }
+
+    enum RechargeCard implements ResultCode {
+        NOT_FOUND(23001, "充值卡不存在"),
+        ALREADY_USED(23002, "充值卡已被使用"),
+        EXPIRED(23003, "充值卡已过期"),
+        INVALID(23004, "充值卡无效"),
+        PASSWORD_ERROR(23005, "卡密错误"),
+        SOLD_OUT(23006, "充值卡已售完"),
+        GENERATE_FAILED(23007, "生成充值卡失败"),
+        BATCH_NOT_FOUND(23008, "批次不存在");
+
+        private final int code;
+        private final String message;
+
+        RechargeCard(int code, String message) {
+            this.code = code;
+            this.message = message;
+        }
+
+        @Override
+        public int getCode() {
+            return code;
+        }
+
+        @Override
+        public String getMessage() {
+            return message;
+        }
+    }
+
+    enum MerchantGroup implements ResultCode {
+        NOT_FOUND(24001, "商户分组不存在"),
+        NAME_DUPLICATE(24002, "分组名称已存在"),
+        CREATE_FAILED(24003, "创建分组失败"),
+        UPDATE_FAILED(24004, "更新分组失败"),
+        DELETE_FAILED(24005, "删除分组失败"),
+        HAS_MERCHANT(24006, "分组下存在商户，无法删除");
+
+        private final int code;
+        private final String message;
+
+        MerchantGroup(int code, String message) {
+            this.code = code;
+            this.message = message;
+        }
+
+        @Override
+        public int getCode() {
+            return code;
+        }
+
+        @Override
+        public String getMessage() {
+            return message;
+        }
+    }
 }

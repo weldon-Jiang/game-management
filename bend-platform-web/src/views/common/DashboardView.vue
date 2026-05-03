@@ -26,7 +26,7 @@
         </div>
       </div>
 
-      <div v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" class="stat-card">
+      <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="stat-card">
         <div class="stat-icon streaming">
           <el-icon><VideoPlay /></el-icon>
         </div>
@@ -36,7 +36,7 @@
         </div>
       </div>
 
-      <div v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" class="stat-card">
+      <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="stat-card">
         <div class="stat-icon games">
           <el-icon><Trophy /></el-icon>
         </div>
@@ -46,7 +46,7 @@
         </div>
       </div>
 
-      <div v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" class="stat-card">
+      <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="stat-card">
         <div class="stat-icon xbox">
           <el-icon><Monitor /></el-icon>
         </div>
@@ -56,7 +56,7 @@
         </div>
       </div>
 
-      <div v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" class="stat-card">
+      <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="stat-card">
         <div class="stat-icon agents">
           <el-icon><Cpu /></el-icon>
         </div>
@@ -80,31 +80,31 @@
               </div>
               <span>商户管理</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin" class="action-item" @click="router.push('/users')">
+            <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="action-item" @click="router.push('/users')">
               <div class="action-icon">
                 <el-icon><User /></el-icon>
               </div>
               <span>用户管理</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" class="action-item" @click="router.push('/streaming-accounts')">
+            <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="action-item" @click="router.push('/streaming-accounts')">
               <div class="action-icon">
                 <el-icon><VideoPlay /></el-icon>
               </div>
               <span>流媒体账号</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" class="action-item" @click="router.push('/game-accounts')">
+            <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="action-item" @click="router.push('/game-accounts')">
               <div class="action-icon">
                 <el-icon><Trophy /></el-icon>
               </div>
               <span>游戏账号</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" class="action-item" @click="router.push('/xbox-hosts')">
+            <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="action-item" @click="router.push('/xbox-hosts')">
               <div class="action-icon">
                 <el-icon><Monitor /></el-icon>
               </div>
               <span>Xbox主机</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" class="action-item" @click="router.push('/agents')">
+            <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="action-item" @click="router.push('/agents')">
               <div class="action-icon">
                 <el-icon><Cpu /></el-icon>
               </div>
@@ -116,29 +116,23 @@
               </div>
               <span>Agent版本</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/vip-configs')">
-              <div class="action-icon">
-                <el-icon><Coin /></el-icon>
-              </div>
-              <span>VIP配置</span>
-            </div>
             <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/activation-codes')">
               <div class="action-icon">
                 <el-icon><Key /></el-icon>
               </div>
               <span>激活码管理</span>
             </div>
-            <div v-if="authStore.isOwner || authStore.isAdmin" class="action-item" @click="router.push('/subscription')">
+            <div v-if="authStore.hasManagementPermission" class="action-item" @click="router.push('/subscription')">
               <div class="action-icon">
                 <el-icon><CreditCard /></el-icon>
               </div>
               <span>商户订阅</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin" class="action-item" @click="router.push('/registration-codes')">
+            <div v-if="authStore.hasManagementPermission" class="action-item" @click="router.push('/registration-codes')">
               <div class="action-icon">
                 <el-icon><Key /></el-icon>
               </div>
-              <span>注册码管理</span>
+              <span>Agent注册码管理</span>
             </div>
           </div>
         </div>
@@ -178,7 +172,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { OfficeBuilding, User, VideoPlay, Monitor, Coin, Key, CreditCard, Cpu, Trophy } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { merchantApi, userApi, streamingApi, xboxApi, agentApi, gameAccountApi } from '@/api'
+import { dashboardApi } from '@/api'
 
 /**
  * 控制台视图组件
@@ -215,8 +209,7 @@ let timer = null
 const roleText = computed(() => {
   const roleMap = {
     platform_admin: '平台管理员',
-    owner: '商户所有者',
-    admin: '商户管理员',
+    merchant_owner: '商户管理员',
     operator: '操作员'
   }
   return roleMap[authStore.role] || authStore.role
@@ -239,29 +232,20 @@ const updateTime = () => {
 
 /**
  * 加载统计数据
- * 根据用户角色获取不同的统计数据
+ * 使用聚合API一次性获取所有统计数据
  */
 const loadStats = async () => {
   try {
-    if (authStore.isPlatformAdmin) {
-      const merchantRes = await merchantApi.list({ pageNum: 1, pageSize: 1 })
-      stats.value.merchantCount = merchantRes.data?.total || 0
+    const res = await dashboardApi.getStats()
+    if (res.code === 0 || res.code === 200) {
+      const data = res.data
+      stats.value.merchantCount = data.merchantCount || 0
+      stats.value.userCount = data.merchantUserCount || 0
+      stats.value.streamingCount = data.streamingAccountCount || 0
+      stats.value.xboxCount = data.xboxHostCount || 0
+      stats.value.agentCount = data.agentCount || 0
+      stats.value.gameAccountCount = data.gameAccountCount || 0
     }
-
-    const userRes = await userApi.list({ pageNum: 1, pageSize: 1 })
-    stats.value.userCount = userRes.data?.total || 0
-
-    const streamingRes = await streamingApi.list({ pageNum: 1, pageSize: 1 })
-    stats.value.streamingCount = streamingRes.data?.total || 0
-
-    const xboxRes = await xboxApi.listPage({ pageNum: 1, pageSize: 1 })
-    stats.value.xboxCount = xboxRes.data?.total || 0
-
-    const agentRes = await agentApi.listPage({ pageNum: 1, pageSize: 1 })
-    stats.value.agentCount = agentRes.data?.total || 0
-
-    const gameAccountRes = await gameAccountApi.list({ pageNum: 1, pageSize: 1 })
-    stats.value.gameAccountCount = gameAccountRes.data?.total || 0
   } catch (error) {
     console.error('Failed to load stats:', error)
   }
@@ -394,10 +378,6 @@ onUnmounted(() => {
 }
 
 .content-card {
-  background: rgba(18, 18, 26, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
-  padding: 24px;
   height: 100%;
 }
 

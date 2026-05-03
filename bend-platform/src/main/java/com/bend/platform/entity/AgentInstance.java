@@ -52,6 +52,12 @@ public class AgentInstance {
     private String merchantId;
 
     /**
+     * 商户名称（非数据库字段）
+     */
+    @TableField(exist = false)
+    private String merchantName;
+
+    /**
      * 注册码
      * Agent注册时使用的注册码
      * 注册成功后关联到具体商户

@@ -122,4 +122,7 @@ public class StreamingAccount {
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedTime;
+
+    @TableLogic
+    private Boolean deleted;
 }

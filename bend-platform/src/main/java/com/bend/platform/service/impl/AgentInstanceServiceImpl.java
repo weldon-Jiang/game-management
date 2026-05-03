@@ -5,18 +5,25 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.AgentInstancePageRequest;
 import com.bend.platform.entity.AgentInstance;
+import com.bend.platform.entity.Merchant;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.AgentInstanceMapper;
+import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.AgentInstanceService;
+import com.bend.platform.util.DataSecurityUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Agent实例服务实现类
@@ -43,6 +50,27 @@ import java.util.List;
 public class AgentInstanceServiceImpl implements AgentInstanceService {
 
     private final AgentInstanceMapper agentInstanceMapper;
+    private final MerchantMapper merchantMapper;
+    private final DataSecurityUtil dataSecurityUtil;
+
+    private static final Map<String, String> merchantNameCache = new HashMap<>();
+
+    private void populateMerchantNames(List<AgentInstance> instances) {
+        if (instances == null || instances.isEmpty()) {
+            return;
+        }
+        for (AgentInstance instance : instances) {
+            if (instance.getMerchantId() != null) {
+                String merchantName = merchantNameCache.get(instance.getMerchantId());
+                if (merchantName == null) {
+                    Merchant merchant = merchantMapper.selectById(instance.getMerchantId());
+                    merchantName = merchant != null ? merchant.getName() : instance.getMerchantId();
+                    merchantNameCache.put(instance.getMerchantId(), merchantName);
+                }
+                instance.setMerchantName(merchantName);
+            }
+        }
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -66,7 +94,11 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
 
     @Override
     public AgentInstance findById(String id) {
-        return agentInstanceMapper.selectById(id);
+        AgentInstance instance = agentInstanceMapper.selectById(id);
+        if (instance != null) {
+            dataSecurityUtil.validateMerchantAccess(instance.getMerchantId(), "AgentInstance");
+        }
+        return instance;
     }
 
     @Override
@@ -82,7 +114,9 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getDeleted, false);
         wrapper.orderByDesc(AgentInstance::getCreatedTime);
-        return agentInstanceMapper.selectList(wrapper);
+        List<AgentInstance> instances = agentInstanceMapper.selectList(wrapper);
+        populateMerchantNames(instances);
+        return instances;
     }
 
     @Override
@@ -91,7 +125,9 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
         wrapper.eq(AgentInstance::getDeleted, false);
         wrapper.orderByDesc(AgentInstance::getCreatedTime);
         Page<AgentInstance> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
-        return agentInstanceMapper.selectPage(page, wrapper);
+        IPage<AgentInstance> result = agentInstanceMapper.selectPage(page, wrapper);
+        populateMerchantNames(result.getRecords());
+        return result;
     }
 
     @Override
@@ -125,7 +161,9 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
         }
         wrapper.orderByDesc(AgentInstance::getLastHeartbeat);
         Page<AgentInstance> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
-        return agentInstanceMapper.selectPage(page, wrapper);
+        IPage<AgentInstance> result = agentInstanceMapper.selectPage(page, wrapper);
+        populateMerchantNames(result.getRecords());
+        return result;
     }
 
     @Override
@@ -169,10 +207,13 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     @Transactional(rollbackFor = Exception.class)
     public boolean validateCredentials(String agentId, String agentSecret) {
         AgentInstance instance = findByAgentId(agentId);
-        if (instance == null) {
+        if (instance == null || instance.getAgentSecret() == null) {
             return false;
         }
-        return agentSecret.equals(instance.getAgentSecret());
+        return MessageDigest.isEqual(
+            agentSecret.getBytes(StandardCharsets.UTF_8),
+            instance.getAgentSecret().getBytes(StandardCharsets.UTF_8)
+        );
     }
 
     @Override
@@ -269,15 +310,20 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     @Transactional(rollbackFor = Exception.class)
     public void offlineByTimeout(int minutes) {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AgentInstance::getStatus, "online");
-        wrapper.lt(AgentInstance::getLastHeartbeat, LocalDateTime.now().minusMinutes(minutes));
+        wrapper.eq(AgentInstance::getStatus, "online")
+               .lt(AgentInstance::getLastHeartbeat, LocalDateTime.now().minusMinutes(minutes));
 
         List<AgentInstance> timeoutAgents = agentInstanceMapper.selectList(wrapper);
+        if (timeoutAgents.isEmpty()) {
+            return;
+        }
+
         for (AgentInstance agent : timeoutAgents) {
             agent.setStatus("offline");
             agent.setLastOnlineTime(LocalDateTime.now());
             agentInstanceMapper.updateById(agent);
-            log.info("Agent因心跳超时下线 - AgentID: {}, 最后心跳: {}", agent.getAgentId(), agent.getLastHeartbeat());
         }
+
+        log.info("批量下线超时Agent - 数量: {}", timeoutAgents.size());
     }
 }

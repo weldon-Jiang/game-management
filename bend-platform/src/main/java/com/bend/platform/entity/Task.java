@@ -39,6 +39,12 @@ public class Task {
     private String id;
 
     /**
+     * 商户ID
+     * 任务所属的商户
+     */
+    private String merchantId;
+
+    /**
      * 任务名称
      * 用于显示和识别任务
      */
@@ -55,6 +61,18 @@ public class Task {
      * 决定任务的执行方式和处理逻辑
      */
     private String type;
+
+    /**
+     * 游戏平台
+     * 如: xbox, playstation, switch
+     */
+    private String gamePlatform;
+
+    /**
+     * 游戏模式
+     * 如: solo, multiplayer, cooperative
+     */
+    private String gameMode;
 
     /**
      * 目标Agent ID
@@ -84,7 +102,7 @@ public class Task {
      * 任务优先级
      * 数值越小优先级越高
      */
-    private String priority;
+    private Integer priority;
 
     /**
      * 任务参数（JSON格式）
@@ -133,6 +151,12 @@ public class Task {
      * 任务过期自动取消的时间点
      */
     private LocalDateTime expireTime;
+
+    /**
+     * 超时时间（秒）
+     * 任务执行超过此时长自动标记为失败，0表示不超时
+     */
+    private Integer timeoutSeconds;
 
     /**
      * 当前重试次数

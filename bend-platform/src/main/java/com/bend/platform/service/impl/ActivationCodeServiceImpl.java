@@ -17,6 +17,7 @@ import com.bend.platform.repository.ActivationCodeMapper;
 import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.repository.VipConfigMapper;
 import com.bend.platform.service.ActivationCodeService;
+import com.bend.platform.util.DataSecurityUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -58,6 +59,7 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
     private final ActivationCodeBatchMapper activationCodeBatchMapper;
     private final VipConfigMapper vipConfigMapper;
     private final MerchantMapper merchantMapper;
+    private final DataSecurityUtil dataSecurityUtil;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -113,7 +115,11 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
 
     @Override
     public ActivationCode findById(String id) {
-        return activationCodeMapper.selectById(id);
+        ActivationCode code = activationCodeMapper.selectById(id);
+        if (code != null) {
+            dataSecurityUtil.validateMerchantAccess(code.getMerchantId(), "ActivationCode");
+        }
+        return code;
     }
 
     @Override

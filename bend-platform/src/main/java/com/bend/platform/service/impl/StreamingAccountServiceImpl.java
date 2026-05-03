@@ -13,6 +13,7 @@ import com.bend.platform.repository.StreamingAccountMapper;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.util.AesUtil;
+import com.bend.platform.util.DataSecurityUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -52,6 +53,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
     private final StreamingAccountMapper streamingAccountMapper;
     private final MerchantService merchantService;
     private final AesUtil aesUtil;
+    private final DataSecurityUtil dataSecurityUtil;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -147,7 +149,11 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
 
     @Override
     public StreamingAccount findById(String id) {
-        return streamingAccountMapper.selectById(id);
+        StreamingAccount account = streamingAccountMapper.selectById(id);
+        if (account != null) {
+            dataSecurityUtil.validateMerchantAccess(account.getMerchantId(), "StreamingAccount");
+        }
+        return account;
     }
 
     @Override

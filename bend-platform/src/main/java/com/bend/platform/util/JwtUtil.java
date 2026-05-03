@@ -1,6 +1,7 @@
 package com.bend.platform.util;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -28,11 +29,15 @@ public class JwtUtil {
     @Value("${jwt.expiration}")
     private Long expiration;
 
+    private static final long MILLIS_PER_SECOND = 1000;
+    private static final long REFRESH_THRESHOLD_SECONDS = 3600;
+
     private SecretKey getSigningKey() {
         byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
-        byte[] paddedKey = new byte[32];
-        System.arraycopy(keyBytes, 0, paddedKey, 0, Math.min(keyBytes.length, 32));
-        return Keys.hmacShaKeyFor(paddedKey);
+        if (keyBytes.length < 32) {
+            throw new IllegalStateException("JWT secret must be at least 32 characters for HS256");
+        }
+        return Keys.hmacShaKeyFor(keyBytes);
     }
 
     public String generateToken(String userId, String username, String merchantId, String role) {
@@ -65,10 +70,41 @@ public class JwtUtil {
         try {
             parseToken(token);
             return true;
+        } catch (ExpiredJwtException e) {
+            log.warn("JWT已过期: {}", e.getMessage());
+            return false;
         } catch (JwtException e) {
             log.warn("JWT验证失败: {}", e.getMessage());
             return false;
         }
+    }
+
+    public boolean isTokenExpired(String token) {
+        try {
+            Claims claims = parseToken(token);
+            return claims.getExpiration().before(new Date());
+        } catch (ExpiredJwtException e) {
+            return true;
+        } catch (JwtException e) {
+            log.warn("JWT解析失败: {}", e.getMessage());
+            return true;
+        }
+    }
+
+    public long getRemainingTimeSeconds(String token) {
+        try {
+            Claims claims = parseToken(token);
+            Date expiration = claims.getExpiration();
+            long remainingMillis = expiration.getTime() - System.currentTimeMillis();
+            return Math.max(0, remainingMillis / MILLIS_PER_SECOND);
+        } catch (JwtException e) {
+            log.warn("JWT解析失败: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    public boolean needsRefresh(String token) {
+        return getRemainingTimeSeconds(token) < REFRESH_THRESHOLD_SECONDS;
     }
 
     public String getUserIdFromToken(String token) {

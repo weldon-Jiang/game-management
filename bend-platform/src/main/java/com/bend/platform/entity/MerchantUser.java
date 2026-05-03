@@ -23,4 +23,7 @@ public class MerchantUser {
     private LocalDateTime lastLoginTime;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdTime;
+
+    @TableLogic
+    private Boolean deleted;
 }

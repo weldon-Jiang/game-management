@@ -11,6 +11,8 @@ import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.service.TaskService;
 import com.bend.platform.service.TaskStateMachine;
+import com.bend.platform.util.DataSecurityUtil;
+import com.bend.platform.util.UserContext;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +24,8 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * 任务服务实现类
@@ -47,8 +51,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class TaskServiceImpl implements TaskService {
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private final TaskMapper taskMapper;
     private final TaskStateMachine stateMachine;
+    private final DataSecurityUtil dataSecurityUtil;
 
     /**
      * 创建任务
@@ -68,13 +75,20 @@ public class TaskServiceImpl implements TaskService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Task create(Task task) {
-        task.setStatus("pending");  // 初始状态为待执行
-        task.setRetryCount(0);     // 重试次数归零
+        String merchantId = UserContext.getMerchantId();
+        if (merchantId == null) {
+            throw new BusinessException(ResultCode.Auth.TOKEN_INVALID, "无法获取商户信息");
+        }
+
+        task.setMerchantId(merchantId);
+        task.setStatus("pending");
+        task.setRetryCount(0);
         if (task.getMaxRetries() == null) {
-            task.setMaxRetries(3); // 默认最大重试3次
+            task.setMaxRetries(3);
         }
         taskMapper.insert(task);
-        log.info("创建任务 - ID: {}, 名称: {}, 类型: {}", task.getId(), task.getName(), task.getType());
+        log.info("创建任务 - ID: {}, 名称: {}, 类型: {}, 商户: {}",
+                 task.getId(), task.getName(), task.getType(), merchantId);
         return task;
     }
 
@@ -89,7 +103,11 @@ public class TaskServiceImpl implements TaskService {
      */
     @Override
     public Task findById(String id) {
-        return taskMapper.selectById(id);
+        Task task = taskMapper.selectById(id);
+        if (task != null) {
+            dataSecurityUtil.validateMerchantAccess(task.getMerchantId(), "Task");
+        }
+        return task;
     }
 
     /**
@@ -371,14 +389,26 @@ public class TaskServiceImpl implements TaskService {
             throw new BusinessException(ResultCode.Task.NOT_FOUND, "任务不存在");
         }
 
-        if (!"pending".equals(task.getStatus())) {
-            throw new BusinessException(ResultCode.Task.INVALID_STATUS, "只能取消待执行的任务");
+        if ("pending".equals(task.getStatus())) {
+            task.setStatus("cancelled");
+            taskMapper.updateById(task);
+            log.info("任务已取消 - TaskID: {}", taskId);
+        } else if ("running".equals(task.getStatus())) {
+            String targetAgentId = task.getTargetAgentId();
+            if (targetAgentId != null) {
+                Map<String, Object> cancelData = new HashMap<>();
+                cancelData.put("taskId", taskId);
+                AgentWebSocketEndpoint.sendMessageToAgent(targetAgentId, "cancel_task", cancelData);
+            }
+            task.setStatus("cancelled");
+            task.setErrorMessage("用户取消执行");
+            task.setCompletedTime(LocalDateTime.now());
+            taskMapper.updateById(task);
+            log.info("运行中任务已取消并通知Agent - TaskID: {}, AgentID: {}", taskId, targetAgentId);
+        } else {
+            throw new BusinessException(ResultCode.Task.INVALID_STATUS, "当前状态不允许取消");
         }
 
-        task.setStatus("cancelled");
-        taskMapper.updateById(task);
-
-        log.info("任务已取消 - TaskID: {}", taskId);
         return task;
     }
 
@@ -500,7 +530,7 @@ public class TaskServiceImpl implements TaskService {
             return new HashMap<>();
         }
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().readValue(paramsJson, Map.class);
+            return OBJECT_MAPPER.readValue(paramsJson, Map.class);
         } catch (Exception e) {
             log.error("解析任务参数失败: {}", paramsJson);
             return new HashMap<>();

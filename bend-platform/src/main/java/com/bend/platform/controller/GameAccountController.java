@@ -124,8 +124,12 @@ public class GameAccountController {
     @PostMapping("/batch")
     public ApiResponse<ImportResultDto> batchImport(@Valid @RequestBody BatchImportRequest request) {
         String merchantId;
-        if (UserContext.isPlatformAdmin() && request.getMerchantId() != null) {
-            merchantId = request.getMerchantId();
+        if (UserContext.isPlatformAdmin()) {
+            if (request.getMerchantId() == null || request.getMerchantId().isEmpty()) {
+                merchantId = UserContext.getMerchantId();
+            } else {
+                merchantId = request.getMerchantId();
+            }
         } else {
             merchantId = UserContext.getMerchantId();
         }

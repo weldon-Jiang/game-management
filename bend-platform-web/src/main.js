@@ -6,6 +6,7 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import router from '@/router'
 import App from './App.vue'
 import './style.css'
+import { setupErrorHandler } from '@/utils/errorHandler'
 
 /**
  * Bend Platform 前端应用入口
@@ -26,6 +27,9 @@ app.use(router)
 
 // 注册Element Plus插件，并设置中文语言包
 app.use(ElementPlus, { locale: zhCn })
+
+// 设置全局错误处理器
+setupErrorHandler(app)
 
 // 挂载应用到#app元素
 app.mount('#app')

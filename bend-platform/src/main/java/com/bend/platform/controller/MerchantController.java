@@ -2,7 +2,9 @@ package com.bend.platform.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.bend.platform.dto.ApiResponse;
+import com.bend.platform.dto.MerchantCreateRequest;
 import com.bend.platform.dto.MerchantPageRequest;
+import com.bend.platform.dto.MerchantUpdateRequest;
 import com.bend.platform.entity.Merchant;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
@@ -43,12 +45,11 @@ public class MerchantController {
      * @return 创建的商户信息
      */
     @PostMapping
-    public ApiResponse<Merchant> create(@RequestParam String name, @RequestParam String phone,
-                                         @RequestParam(required = false) Boolean isSystem) {
+    public ApiResponse<Merchant> create(@RequestBody MerchantCreateRequest request) {
         if (!UserContext.hasManagementPermission()) {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
-        Merchant merchant = merchantService.createMerchant(name, phone, isSystem);
+        Merchant merchant = merchantService.createMerchant(request.getName(), request.getPhone(), request.getIsSystem());
         return ApiResponse.success("商户创建成功", merchant);
     }
 
@@ -62,12 +63,11 @@ public class MerchantController {
      * @return 操作结果
      */
     @PutMapping("/{id}")
-    public ApiResponse<Void> update(@PathVariable String id, @RequestParam String name,
-                                    @RequestParam String phone, @RequestParam(required = false) Boolean isSystem) {
+    public ApiResponse<Void> update(@PathVariable String id, @RequestBody MerchantUpdateRequest request) {
         if (!UserContext.hasManagementPermission()) {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
-        merchantService.updateMerchant(id, name, phone, isSystem);
+        merchantService.updateMerchant(id, request.getName(), request.getPhone(), request.getIsSystem());
         return ApiResponse.success("商户更新成功", null);
     }
 

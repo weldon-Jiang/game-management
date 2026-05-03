@@ -72,7 +72,7 @@ public class AutomationServiceImpl implements AutomationService {
             task.setType(request.getTaskType());
             task.setTargetAgentId(agentId);
             task.setStreamingAccountId(streamingAccountId);
-            task.setPriority(request.getPriority() != null ? String.valueOf(request.getPriority()) : "0");
+            task.setPriority(request.getPriority() != null ? request.getPriority() : 0);
             task.setParams(toJson(taskParams));
             task.setCreatedBy(userId);
             task.setStatus("pending");

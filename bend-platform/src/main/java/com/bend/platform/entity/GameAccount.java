@@ -64,6 +64,12 @@ public class GameAccount {
     private String xboxLivePasswordEncrypted;
 
     /**
+     * 锁定的Xbox ID
+     * 当前锁定到此Xbox主机
+     */
+    private Long lockedXboxId;
+
+    /**
      * 是否为主账号
      * true-主账号 false-备选账号
      * 主账号优先使用
@@ -107,6 +113,11 @@ public class GameAccount {
     private LocalDateTime lastUsedTime;
 
     /**
+     * 当前绑定的Agent ID
+     */
+    private String agentId;
+
+    /**
      * 创建时间
      */
     @TableField(fill = FieldFill.INSERT)
@@ -123,4 +134,7 @@ public class GameAccount {
 
     @TableField(exist = false)
     private String streamingName;
+
+    @TableLogic
+    private Boolean deleted;
 }

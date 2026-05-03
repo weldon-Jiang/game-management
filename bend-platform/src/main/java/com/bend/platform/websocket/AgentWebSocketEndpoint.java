@@ -94,7 +94,12 @@ public class AgentWebSocketEndpoint {
         try {
             ObjectMapper mapper = new ObjectMapper();
             JsonNode json = mapper.readTree(message);
-            String type = json.get("type").asText();
+            JsonNode typeNode = json.get("type");
+            if (typeNode == null) {
+                log.warn("Agent消息缺少type字段 - AgentID: {}, Message: {}", agentId, message);
+                return;
+            }
+            String type = typeNode.asText();
             JsonNode data = json.get("data");
 
             log.debug("收到Agent消息 - AgentID: {}, Type: {}", agentId, type);

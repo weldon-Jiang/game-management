@@ -104,3 +104,17 @@ cors:
   allowed-headers: "*"
   allow-credentials: true
   max-age: 3600
+
+# ----------------------------------------------
+# Agent 心跳检测配置
+# ----------------------------------------------
+agent:
+  heartbeat_timeout: ${AGENT_HEARTBEAT_TIMEOUT:120}
+  heartbeat_check_interval: ${AGENT_HEARTBEAT_CHECK_INTERVAL:30000}
+
+# ----------------------------------------------
+# 任务超时检测配置
+# ----------------------------------------------
+task:
+  timeout_check_interval: ${TASK_TIMEOUT_CHECK_INTERVAL:60000}
+  default_timeout_seconds: ${TASK_DEFAULT_TIMEOUT:3600}

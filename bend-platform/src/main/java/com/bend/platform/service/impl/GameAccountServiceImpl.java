@@ -16,6 +16,7 @@ import com.bend.platform.repository.GameAccountMapper;
 import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.repository.StreamingAccountMapper;
 import com.bend.platform.service.GameAccountService;
+import com.bend.platform.util.DataSecurityUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -58,6 +59,7 @@ public class GameAccountServiceImpl implements GameAccountService {
     private final GameAccountMapper gameAccountMapper;
     private final StreamingAccountMapper streamingAccountMapper;
     private final MerchantMapper merchantMapper;
+    private final DataSecurityUtil dataSecurityUtil;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -154,7 +156,11 @@ public class GameAccountServiceImpl implements GameAccountService {
 
     @Override
     public GameAccount findById(String id) {
-        return gameAccountMapper.selectById(id);
+        GameAccount account = gameAccountMapper.selectById(id);
+        if (account != null) {
+            dataSecurityUtil.validateMerchantAccess(account.getMerchantId(), "GameAccount");
+        }
+        return account;
     }
 
     @Override
@@ -316,34 +322,30 @@ public class GameAccountServiceImpl implements GameAccountService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void lock(String id, String xboxHostId) {
+    public void disable(String id) {
         GameAccount account = gameAccountMapper.selectById(id);
         if (account == null) {
             throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
         }
 
         account.setIsActive(false);
-        
         account.setUpdatedTime(LocalDateTime.now());
-
         gameAccountMapper.updateById(account);
-        log.info("锁定游戏账号 - ID: {}, XboxHost: {}", id, xboxHostId);
+        log.info("禁用游戏账号 - ID: {}", id);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void unlock(String id) {
+    public void enable(String id) {
         GameAccount account = gameAccountMapper.selectById(id);
         if (account == null) {
             throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
         }
 
         account.setIsActive(true);
-        
         account.setUpdatedTime(LocalDateTime.now());
-
         gameAccountMapper.updateById(account);
-        log.info("解锁游戏账号 - ID: {}", id);
+        log.info("启用游戏账号 - ID: {}", id);
     }
 
     @Override
@@ -376,7 +378,7 @@ public class GameAccountServiceImpl implements GameAccountService {
             throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
         }
 
-        
+        account.setAgentId(agentId);
         account.setUpdatedTime(LocalDateTime.now());
         gameAccountMapper.updateById(account);
         log.info("更新游戏账号Agent绑定 - ID: {}, AgentID: {}", id, agentId);

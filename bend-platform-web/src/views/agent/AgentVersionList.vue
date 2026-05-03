@@ -349,13 +349,6 @@ onMounted(() => {
   color: #8a8a8a;
 }
 
-.content-card {
-  background: rgba(18, 18, 26, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
-  padding: 24px;
-}
-
 :deep(.el-table) {
   background: transparent;
   --el-table-bg-color: transparent;

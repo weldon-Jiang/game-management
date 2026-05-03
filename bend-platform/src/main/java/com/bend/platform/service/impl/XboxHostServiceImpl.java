@@ -11,6 +11,7 @@ import com.bend.platform.repository.XboxHostMapper;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountLoginRecordService;
 import com.bend.platform.service.XboxHostService;
+import com.bend.platform.util.DataSecurityUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,7 @@ public class XboxHostServiceImpl implements XboxHostService {
     private final XboxHostMapper xboxHostMapper;
     private final StreamingAccountLoginRecordService loginRecordService;
     private final MerchantService merchantService;
+    private final DataSecurityUtil dataSecurityUtil;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -77,7 +79,11 @@ public class XboxHostServiceImpl implements XboxHostService {
 
     @Override
     public XboxHost findById(String id) {
-        return xboxHostMapper.selectById(id);
+        XboxHost host = xboxHostMapper.selectById(id);
+        if (host != null) {
+            dataSecurityUtil.validateMerchantAccess(host.getMerchantId(), "XboxHost");
+        }
+        return host;
     }
 
     @Override

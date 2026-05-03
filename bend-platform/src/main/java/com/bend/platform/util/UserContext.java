@@ -82,23 +82,13 @@ public class UserContext {
     }
 
     /**
-     * 判断当前用户是否为商户所有者
+     * 判断当前用户是否为商户所有者/管理员
      *
-     * @return 是否为商户所有者
+     * @return 是否为商户所有者/管理员
      */
-    public static boolean isOwner() {
+    public static boolean isMerchantOwner() {
         LoginUserInfo userInfo = getUserInfo();
-        return userInfo != null && userInfo.isOwner();
-    }
-
-    /**
-     * 判断当前用户是否为商户管理员
-     *
-     * @return 是否为商户管理员
-     */
-    public static boolean isAdmin() {
-        LoginUserInfo userInfo = getUserInfo();
-        return userInfo != null && userInfo.isAdmin();
+        return userInfo != null && userInfo.isMerchantOwner();
     }
 
     /**
@@ -119,6 +109,22 @@ public class UserContext {
     public static boolean hasManagementPermission() {
         LoginUserInfo userInfo = getUserInfo();
         return userInfo != null && userInfo.hasManagementPermission();
+    }
+
+    /**
+     * @deprecated 使用 isMerchantOwner() 替代
+     */
+    @Deprecated
+    public static boolean isOwner() {
+        return isMerchantOwner();
+    }
+
+    /**
+     * @deprecated 使用 isMerchantOwner() 替代
+     */
+    @Deprecated
+    public static boolean isAdmin() {
+        return isMerchantOwner();
     }
 
     /**

@@ -4,8 +4,8 @@ export const merchantApi = {
   list: (params) => request.get('/api/merchants', { params }),
   listAll: () => request.get('/api/merchants/all'),
   getById: (id) => request.get(`/api/merchants/${id}`),
-  create: (data) => request.post('/api/merchants', null, { params: data }),
-  update: (id, data) => request.put(`/api/merchants/${id}`, null, { params: data }),
+  create: (data) => request.post('/api/merchants', data),
+  update: (id, data) => request.put(`/api/merchants/${id}`, data),
   updateStatus: (id, status) => request.put(`/api/merchants/${id}/status`, null, { params: { status } }),
   delete: (id) => request.delete(`/api/merchants/${id}`)
 }

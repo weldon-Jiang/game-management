@@ -14,6 +14,7 @@ import com.bend.platform.repository.MerchantUserMapper;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.MerchantUserService;
 import com.bend.platform.util.AesUtil;
+import com.bend.platform.util.DataSecurityUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -55,6 +56,7 @@ public class MerchantUserServiceImpl implements MerchantUserService {
     private final MerchantMapper merchantMapper;
     private final MerchantService merchantService;
     private final AesUtil aesUtil;
+    private final DataSecurityUtil dataSecurityUtil;
 
     /**
      * 商户用户登录
@@ -136,7 +138,11 @@ public class MerchantUserServiceImpl implements MerchantUserService {
 
     @Override
     public MerchantUser findById(String id) {
-        return merchantUserMapper.selectById(id);
+        MerchantUser user = merchantUserMapper.selectById(id);
+        if (user != null) {
+            dataSecurityUtil.validateMerchantAccess(user.getMerchantId(), "MerchantUser");
+        }
+        return user;
     }
 
     @Override

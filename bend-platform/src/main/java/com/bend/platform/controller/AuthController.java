@@ -144,7 +144,8 @@ public class AuthController {
     public ApiResponse<LoginResponse> register(@Valid @RequestBody RegisterRequest request) {
         Merchant merchant = merchantService.createMerchant(
                 request.getMerchantName() != null ? request.getMerchantName() : "默认商户",
-                request.getPhone()
+                request.getPhone(),
+                false
         );
 
         MerchantUser user = merchantUserService.register(

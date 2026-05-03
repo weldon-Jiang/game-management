@@ -60,4 +60,7 @@ public class XboxHost {
 
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedTime;
+
+    @TableLogic
+    private Boolean deleted;
 }

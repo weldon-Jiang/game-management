@@ -29,59 +29,66 @@
           <template #title>控制台</template>
         </el-menu-item>
 
+        <el-divider style="margin: 8px 0; border-color: rgba(255,255,255,0.06);" />
+
+        <div class="menu-group-title" v-if="!isCollapse && showPlatformGroup">平台管理</div>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="Merchants" @click="router.push('/merchants')">
           <el-icon><OfficeBuilding /></el-icon>
           <template #title>商户管理</template>
         </el-menu-item>
-
-        <el-menu-item v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin" index="Users" @click="router.push('/users')">
+        <el-menu-item v-if="authStore.isPlatformAdmin" index="MerchantGroups" @click="router.push('/merchant-groups')">
           <el-icon><User /></el-icon>
-          <template #title>用户管理</template>
+          <template #title>商户分组</template>
         </el-menu-item>
-
-        <el-menu-item v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" index="StreamingAccounts" @click="router.push('/streaming-accounts')">
-          <el-icon><VideoPlay /></el-icon>
-          <template #title>流媒体账号</template>
+        <el-menu-item v-if="authStore.isPlatformAdmin" index="ActivationCodes" @click="router.push('/activation-codes')">
+          <el-icon><Key /></el-icon>
+          <template #title>激活码管理</template>
         </el-menu-item>
-
-        <el-menu-item v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" index="GameAccounts" @click="router.push('/game-accounts')">
-          <el-icon><Trophy /></el-icon>
-          <template #title>游戏账号</template>
-        </el-menu-item>
-
-        <el-menu-item v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" index="XboxHosts" @click="router.push('/xbox-hosts')">
-          <el-icon><Monitor /></el-icon>
-          <template #title>Xbox主机</template>
-        </el-menu-item>
-
-        <el-menu-item v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin || authStore.isOperator" index="Agents" @click="router.push('/agents')">
-          <el-icon><Cpu /></el-icon>
-          <template #title>Agent管理</template>
-        </el-menu-item>
-
         <el-menu-item v-if="authStore.isPlatformAdmin" index="AgentVersions" @click="router.push('/agent-versions')">
           <el-icon><Box /></el-icon>
           <template #title>Agent版本</template>
         </el-menu-item>
 
-        <el-menu-item v-if="authStore.isPlatformAdmin" index="VipConfigs" @click="router.push('/vip-configs')">
-          <el-icon><Coin /></el-icon>
-          <template #title>VIP配置</template>
+        <div class="menu-group-title" v-if="!isCollapse && showAccountGroup">账号管理</div>
+        <el-menu-item v-if="authStore.hasManagementPermission" index="Users" @click="router.push('/users')">
+          <el-icon><User /></el-icon>
+          <template #title>用户管理</template>
+        </el-menu-item>
+        <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="StreamingAccounts" @click="router.push('/streaming-accounts')">
+          <el-icon><VideoPlay /></el-icon>
+          <template #title>流媒体账号</template>
+        </el-menu-item>
+        <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="GameAccounts" @click="router.push('/game-accounts')">
+          <el-icon><Trophy /></el-icon>
+          <template #title>游戏账号</template>
+        </el-menu-item>
+        <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="XboxHosts" @click="router.push('/xbox-hosts')">
+          <el-icon><Monitor /></el-icon>
+          <template #title>Xbox主机</template>
         </el-menu-item>
 
-        <el-menu-item v-if="authStore.isPlatformAdmin" index="ActivationCodes" @click="router.push('/activation-codes')">
+        <div class="menu-group-title" v-if="!isCollapse && showAgentGroup">Agent管理</div>
+        <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="Agents" @click="router.push('/agents')">
+          <el-icon><Cpu /></el-icon>
+          <template #title>Agent实例</template>
+        </el-menu-item>
+        <el-menu-item v-if="authStore.hasManagementPermission" index="RegistrationCodes" @click="router.push('/registration-codes')">
           <el-icon><Key /></el-icon>
-          <template #title>激活码管理</template>
+          <template #title>Agent注册码</template>
         </el-menu-item>
 
-        <el-menu-item v-if="authStore.isOwner || authStore.isAdmin" index="Subscription" @click="router.push('/subscription')">
+        <div class="menu-group-title" v-if="!isCollapse && showBillingGroup">订阅与计费</div>
+        <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="SubscriptionManagement" @click="router.push('/subscriptions')">
+          <el-icon><Wallet /></el-icon>
+          <template #title>订阅管理</template>
+        </el-menu-item>
+        <el-menu-item v-if="authStore.hasManagementPermission" index="Subscription" @click="router.push('/subscription')">
           <el-icon><CreditCard /></el-icon>
           <template #title>商户订阅</template>
         </el-menu-item>
-
-        <el-menu-item v-if="authStore.isPlatformAdmin || authStore.isOwner || authStore.isAdmin" index="RegistrationCodes" @click="router.push('/registration-codes')">
-          <el-icon><Key /></el-icon>
-          <template #title>注册码管理</template>
+        <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="RechargeCards" @click="router.push('/recharge-cards')">
+          <el-icon><Tickets /></el-icon>
+          <template #title>充值卡管理</template>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -158,7 +165,9 @@ import {
   Fold,
   Expand,
   ArrowDown,
-  SwitchButton
+  SwitchButton,
+  Wallet,
+  Tickets
 } from '@element-plus/icons-vue'
 
 /**
@@ -172,6 +181,26 @@ const authStore = useAuthStore()
  * 侧边栏折叠状态
  */
 const isCollapse = ref(false)
+
+/**
+ * 平台管理分组是否显示
+ */
+const showPlatformGroup = computed(() => authStore.isPlatformAdmin)
+
+/**
+ * 账号管理分组是否显示
+ */
+const showAccountGroup = computed(() => authStore.hasManagementPermission || authStore.isOperator)
+
+/**
+ * Agent管理分组是否显示
+ */
+const showAgentGroup = computed(() => authStore.hasManagementPermission || authStore.isOperator)
+
+/**
+ * 订阅与计费分组是否显示
+ */
+const showBillingGroup = computed(() => authStore.hasManagementPermission || authStore.isOperator)
 
 /**
  * 当前激活的菜单项
@@ -189,8 +218,7 @@ const currentRoute = useRoute()
 const roleText = computed(() => {
   const roleMap = {
     platform_admin: '平台管理员',
-    owner: '商户所有者',
-    admin: '商户管理员',
+    merchant_owner: '商户管理员',
     operator: '操作员'
   }
   return roleMap[authStore.role] || authStore.role
@@ -226,7 +254,27 @@ const handleUserCommand = (command) => {
   background: linear-gradient(180deg, #12121a 0%, #0a0a0f 100%);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
   transition: width 0.3s ease;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99, 102, 241, 0.3) transparent;
+}
+
+.aside::-webkit-scrollbar {
+  width: 4px;
+}
+
+.aside::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aside::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+}
+
+.aside::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
 }
 
 /* Logo区域 */
@@ -266,6 +314,15 @@ const handleUserCommand = (command) => {
 
 .nav-menu:not(.el-menu--collapse) {
   width: 220px;
+}
+
+.menu-group-title {
+  padding: 12px 12px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5a5a5a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 :deep(.el-menu-item) {
