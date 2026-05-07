@@ -635,3 +635,16 @@ CREATE TABLE IF NOT EXISTS `automation_usage` (
     KEY `idx_usage_time` (`usage_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='自动化任务使用记录表';
 
+-- =====================================================
+-- 初始化管理员数据
+-- =====================================================
+-- 密码加密方式: AES-128-ECB ZeroPadding
+-- 加密密钥: bend-platform-se (16字节)
+-- 加密结果: HEX(AES_ENCRYPT(明文密码, 密钥))
+-- Java解密: 使用相同密钥解密后去除零填充
+-- 默认密码: 123456
+INSERT INTO bend_platform.merchant (id, phone, name, status, expire_time, created_time, updated_time, deleted, is_system, total_points, vip_level) 
+VALUES ('f5d927c40f87f57ef0f4a484d8a823e9', '13800138000', '系统管理员', 'active', '2099-12-31 23:59:59', '2026-04-16 17:21:58', '2026-04-23 11:16:44', 0, 1, 0, 0);
+
+INSERT INTO bend_platform.merchant_user (id, merchant_id, username, phone, password_hash, role, status, total_recharged, last_login_time, created_time, deleted) 
+VALUES ('f5d927c40f87f57ef0f4a484d8a823f9', 'f5d927c40f87f57ef0f4a484d8a823e9', 'admin', '13800138000', 'bc9c6ebfa285976aa94186fe90103bc7', 'platform_admin', 'active', 0, '2026-05-07 10:52:43', '2026-04-16 17:21:58', 0);
