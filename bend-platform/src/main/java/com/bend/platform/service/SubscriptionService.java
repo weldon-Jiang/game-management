@@ -12,10 +12,16 @@ import java.util.List;
 public interface SubscriptionService {
 
     /**
-     * 创建订阅
+     * 创建订阅（正常扣点）
      */
     Subscription createSubscription(String merchantId, String userId, String type, String targetId,
                                     String targetName, int pointsCost, int durationDays);
+
+    /**
+     * 创建订阅（不扣点，用于激活码等已付费场景）
+     */
+    Subscription createSubscriptionWithoutDeduction(String merchantId, String userId, String type, String targetId,
+                                                    String targetName, int durationDays);
 
     /**
      * 续费订阅

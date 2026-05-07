@@ -6,6 +6,7 @@ import com.bend.platform.dto.ActivationCodeBatchPageRequest;
 import com.bend.platform.dto.ActivationCodePageRequest;
 import com.bend.platform.entity.ActivationCode;
 import com.bend.platform.entity.ActivationCodeBatch;
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -14,16 +15,36 @@ import java.util.List;
 public interface ActivationCodeService {
 
     /**
-     * 生成激活码批次
+     * 生成激活码批次（兼容旧方法，默认点数类型）
      *
      * @param merchantId  商户ID
      * @param batchName  批次名称
-     * @param vipType    VIP类型
+     * @param points     充值点数
      * @param count      生成数量
      * @param expireTime 过期时间
      * @return 批次信息
      */
-    ActivationCodeBatch generateBatch(String merchantId, String batchName, String vipType, int count, java.time.LocalDateTime expireTime);
+    ActivationCodeBatch generateBatch(String merchantId, String batchName, Integer points, int count, java.time.LocalDateTime expireTime);
+
+    /**
+     * 生成激活码批次（支持订阅类型）
+     *
+     * @param merchantId     商户ID
+     * @param batchName       批次名称
+     * @param subscriptionType 订阅类型：points/account/window/host
+     * @param targetId        定向目标ID（订阅类型时使用）
+     * @param targetName      定向目标名称
+     * @param points          点数或价格
+     * @param durationDays    时长天数
+     * @param dailyPrice      每日价格
+     * @param count           生成数量
+     * @param expireTime      过期时间
+     * @return 批次信息
+     */
+    ActivationCodeBatch generateBatch(String merchantId, String batchName, String subscriptionType,
+                                       String targetId, String targetName, Integer points,
+                                       Integer durationDays, BigDecimal dailyPrice,
+                                       int count, java.time.LocalDateTime expireTime);
 
     /**
      * 根据ID查询激活码

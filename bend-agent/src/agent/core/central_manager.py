@@ -118,6 +118,13 @@ class CentralManager:
         self.api = ApiClient(agent_id, agent_secret)  # HTTP API客户端
         self.ws = WSClient(agent_id, agent_secret)    # WebSocket客户端
 
+        # 设置任务执行器的API客户端（用于令牌交换）
+        try:
+            from ..task.task_executor import task_executor
+            task_executor.set_api_client(self.api)
+        except Exception as e:
+            self.logger.warning(f"无法设置任务执行器的API客户端: {e}")
+
         # 初始化子组件
         self.window = StreamWindow()                 # Xbox流窗口管理器
         self.video_capture = VideoFrameCapture(self.window)  # 视频帧捕获器

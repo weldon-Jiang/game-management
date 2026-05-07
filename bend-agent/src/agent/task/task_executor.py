@@ -331,6 +331,9 @@ class HighConcurrencyTaskExecutor:
         self._max_concurrent = max_concurrent
         self._max_xbox_sessions = max_xbox_sessions
 
+        # API客户端，用于与后端通信（如令牌交换）
+        self._api_client = None
+
         # 任务状态管理
         self._running_tasks: Dict[str, asyncio.Task] = {}   # 正在运行的任务
         self._task_status: Dict[str, TaskStatus] = {}       # 任务ID -> 状态
@@ -352,6 +355,18 @@ class HighConcurrencyTaskExecutor:
         self._cleanup_task: Optional[asyncio.Task] = None
         self._result_ttl = config.get('task.result_ttl', 3600)
         self._cleanup_interval = config.get('task.cleanup_interval', 300)
+
+    def set_api_client(self, api_client):
+        """
+        设置API客户端
+
+        用于任务处理器与后端通信（如令牌交换）
+
+        参数：
+        - api_client: ApiClient实例
+        """
+        self._api_client = api_client
+        self.logger.info("API客户端已设置")
 
     def register_handler(self, task_type: str, handler: Callable):
         """
@@ -696,8 +711,17 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
     if check_cancel():
         raise asyncio.CancelledError()
 
-    # 创建流控制任务处理器
-    handler = StreamControlTaskHandler()
+    # 获取API客户端用于令牌交换
+    api_client = None
+    try:
+        from ..task.task_executor import task_executor
+        api_client = task_executor._api_client
+    except Exception as e:
+        logger = get_logger('task_executor')
+        logger.warning(f"无法获取API客户端: {e}")
+
+    # 创建流控制任务处理器（传入API客户端用于令牌交换）
+    handler = StreamControlTaskHandler(api_client=api_client)
 
     try:
         # 执行流控制任务

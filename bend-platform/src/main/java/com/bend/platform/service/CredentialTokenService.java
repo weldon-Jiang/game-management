@@ -61,4 +61,8 @@ public class CredentialTokenService {
         String redisKey = TOKEN_PREFIX + token;
         return Boolean.TRUE.equals(redisTemplate.hasKey(redisKey));
     }
+
+    public boolean isRedisEnabled() {
+        return isRedisAvailable();
+    }
 }

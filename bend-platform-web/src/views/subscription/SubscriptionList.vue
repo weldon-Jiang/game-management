@@ -4,7 +4,7 @@
       <h2>订阅管理</h2>
       <div class="header-actions">
         <el-button type="primary" @click="showRechargeDialog">
-          充值点数
+          激活/续费
         </el-button>
       </div>
     </div>
@@ -25,6 +25,21 @@
       <div class="stat-card">
         <div class="stat-label">活跃订阅</div>
         <div class="stat-value">{{ activeCount }}</div>
+      </div>
+      <div class="stat-card vip-card">
+        <div class="stat-label">VIP等级</div>
+        <div class="stat-value vip-level">VIP{{ merchantVipLevel || 0 }}</div>
+      </div>
+      <div class="stat-card status-card" :class="subscriptionStatus === 'active' ? 'active' : 'inactive'">
+        <div class="stat-label">商户状态</div>
+        <div class="stat-value">
+          <el-tag :type="subscriptionStatus === 'active' ? 'success' : 'danger'" size="small">
+            {{ subscriptionStatus === 'active' ? '正常' : '未激活' }}
+          </el-tag>
+        </div>
+        <div class="stat-sub" v-if="subscriptionStatus !== 'active'">
+          请联系管理员
+        </div>
       </div>
     </div>
 
@@ -83,18 +98,74 @@
       </div>
     </div>
 
-    <el-dialog v-model="rechargeDialogVisible" title="充值点数" width="400px">
+    <el-dialog v-model="rechargeDialogVisible" title="激活/续费" width="450px">
       <el-form ref="rechargeFormRef" :model="rechargeForm" :rules="rechargeRules" label-width="80px">
-        <el-form-item label="卡号" prop="cardNo">
-          <el-input v-model="rechargeForm.cardNo" placeholder="请输入卡号" />
+        <el-form-item label="激活码" prop="activationCode">
+          <el-input
+            v-model="rechargeForm.activationCode"
+            placeholder="请输入激活码"
+            @blur="previewActivationCode"
+            @input="activationPreview = null"
+          />
         </el-form-item>
-        <el-form-item label="卡密" prop="cardPwd">
-          <el-input v-model="rechargeForm.cardPwd" placeholder="请输入卡密" show-password />
-        </el-form-item>
+        <div v-if="activationPreview" class="activation-preview">
+          <el-divider content-position="left">激活内容预览</el-divider>
+          <el-descriptions :column="1" border size="small">
+            <el-descriptions-item label="类型">
+              <el-tag :type="getPreviewTypeTag(activationPreview.type)" size="small">
+                {{ activationPreview.typeName }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="内容">
+              <template v-if="activationPreview.type === 'points'">
+                {{ activationPreview.points }} 点数
+              </template>
+              <template v-else>
+                {{ activationPreview.targetName || '-' }}
+                <br />
+                <small class="text-muted">时长: {{ activationPreview.durationDays || 0 }}天</small>
+              </template>
+            </el-descriptions-item>
+          </el-descriptions>
+          <el-alert
+            v-if="activationConflict?.hasConflict"
+            type="warning"
+            :title="activationConflict.message"
+            :description="'当前已有' + activationConflict.activeTypeName + '「' + activationConflict.activeTargetName + '」的订阅'"
+            show-icon
+            :closable="false"
+            style="margin-top: 16px;"
+          />
+          <div v-if="vipUpgradeInfo && !activationConflict?.hasConflict" class="vip-upgrade-info">
+            <el-divider content-position="left">VIP升级预览</el-divider>
+            <el-descriptions :column="1" border size="small">
+              <el-descriptions-item label="当前VIP等级">
+                VIP{{ vipUpgradeInfo.currentVipLevel }} ({{ vipUpgradeInfo.currentTotalPoints }} 点)
+              </el-descriptions-item>
+              <el-descriptions-item label="激活后">
+                VIP{{ vipUpgradeInfo.newVipLevel }} ({{ vipUpgradeInfo.newTotalPoints }} 点)
+              </el-descriptions-item>
+            </el-descriptions>
+            <el-alert
+              v-if="vipUpgradeInfo.willUpgrade"
+              type="success"
+              :title="vipUpgradeInfo.upgradeMessage"
+              :description="'恭喜！激活后您的VIP等级将从 VIP' + vipUpgradeInfo.currentVipLevel + ' 升级到 VIP' + vipUpgradeInfo.newVipLevel"
+              show-icon
+              :closable="false"
+              style="margin-top: 12px;"
+            />
+            <div v-else-if="vipUpgradeInfo.pointsToNextLevel > 0" class="next-vip-hint">
+              <small>再消费 {{ vipUpgradeInfo.pointsToNextLevel }} 点即可升级到 {{ vipUpgradeInfo.nextVipLevelName }}</small>
+            </div>
+          </div>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="rechargeDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="rechargeLoading" @click="handleRecharge">充值</el-button>
+        <el-button type="primary" :loading="rechargeLoading" :disabled="activationConflict?.hasConflict" @click="handleRecharge">
+          {{ activationConflict?.hasConflict ? '存在冲突' : '充值' }}
+        </el-button>
       </template>
     </el-dialog>
 
@@ -124,10 +195,13 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { billingApi } from '@/api'
+import { billingApi, subscriptionApi, vipApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
+const showVipCard = ref(false)
+const merchantVipLevel = ref(0)
+const subscriptionStatus = ref('inactive')
 const loading = ref(false)
 const tableData = ref([])
 const balance = ref(null)
@@ -143,13 +217,14 @@ const rechargeDialogVisible = ref(false)
 const rechargeLoading = ref(false)
 const rechargeFormRef = ref(null)
 const rechargeForm = reactive({
-  cardNo: '',
-  cardPwd: ''
+  activationCode: ''
 })
 const rechargeRules = {
-  cardNo: [{ required: true, message: '请输入卡号', trigger: 'blur' }],
-  cardPwd: [{ required: true, message: '请输入卡密', trigger: 'blur' }]
+  activationCode: [{ required: true, message: '请输入激活码', trigger: 'blur' }]
 }
+const activationPreview = ref(null)
+const activationConflict = ref(null)
+const vipUpgradeInfo = ref(null)
 
 const renewDialogVisible = ref(false)
 const renewLoading = ref(false)
@@ -190,6 +265,12 @@ const formatDate = (dateStr) => {
   return new Date(dateStr).toLocaleDateString('zh-CN')
 }
 
+const formatDateTime = (dateStr) => {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
 const getPricePerDay = (type) => {
   const prices = {
     host: 0.67,
@@ -199,12 +280,92 @@ const getPricePerDay = (type) => {
   return prices[type] || 1
 }
 
+const getPreviewTypeTag = (type) => {
+  const map = {
+    'points': 'primary',
+    'account': 'success',
+    'window': 'warning',
+    'host': 'danger'
+  }
+  return map[type] || 'info'
+}
+
+const previewActivationCode = async () => {
+  if (!rechargeForm.activationCode || rechargeForm.activationCode.length < 6) {
+    activationPreview.value = null
+    activationConflict.value = null
+    vipUpgradeInfo.value = null
+    return
+  }
+  try {
+    const res = await subscriptionApi.previewActivation(rechargeForm.activationCode)
+    if (res.code === 200 || res.code === 0) {
+      const data = res.data
+      activationPreview.value = {
+        type: data.subscriptionType || 'points',
+        typeName: data.subscriptionType ? typeNames[data.subscriptionType] : '点数',
+        points: data.points || 0,
+        targetName: data.targetName || '-',
+        durationDays: data.durationDays || 0
+      }
+      if (data.activeSubscriptionConflict) {
+        activationConflict.value = {
+          hasConflict: true,
+          message: data.conflictMessage || '您已有活跃订阅，无法激活此激活码',
+          activeTypeName: data.activeSubscriptionTypeName,
+          activeTargetName: data.activeSubscriptionTargetName
+        }
+      } else {
+        activationConflict.value = null
+      }
+
+      // VIP升级信息
+      if (data.currentVipLevel !== undefined) {
+        vipUpgradeInfo.value = {
+          currentVipLevel: data.currentVipLevel,
+          currentTotalPoints: data.currentTotalPoints || 0,
+          newTotalPoints: data.newTotalPointsAfterActivation || 0,
+          newVipLevel: data.newVipLevelAfterActivation || data.currentVipLevel,
+          willUpgrade: data.willUpgradeVip || false,
+          upgradeMessage: data.vipUpgradeMessage || '',
+          pointsToNextLevel: data.pointsToNextVipLevel || 0,
+          nextVipLevelName: data.nextVipLevelName || null
+        }
+      }
+    } else {
+      activationPreview.value = null
+      activationConflict.value = null
+      vipUpgradeInfo.value = null
+    }
+  } catch (error) {
+    activationPreview.value = null
+    activationConflict.value = null
+    vipUpgradeInfo.value = null
+  }
+}
+
 const loadBalance = async () => {
   try {
     const res = await billingApi.getBalance()
     balance.value = res.data
+
+    const vipRes = await vipApi.getMyInfo()
+    if (vipRes.code === 200 || vipRes.code === 0) {
+      merchantVipLevel.value = vipRes.data?.currentVipLevel || 0
+    }
   } catch (error) {
     console.error('Failed to load balance:', error)
+  }
+}
+
+const loadSubscriptionStatus = async () => {
+  try {
+    const res = await subscriptionApi.getStatus()
+    if (res.code === 200 || res.code === 0) {
+      subscriptionStatus.value = res.data?.status || 'inactive'
+    }
+  } catch (error) {
+    console.error('Failed to load subscription status:', error)
   }
 }
 
@@ -235,8 +396,10 @@ const loadData = async () => {
 }
 
 const showRechargeDialog = () => {
-  rechargeForm.cardNo = ''
-  rechargeForm.cardPwd = ''
+  rechargeForm.activationCode = ''
+  activationPreview.value = null
+  activationConflict.value = null
+  vipUpgradeInfo.value = null
   rechargeDialogVisible.value = true
 }
 
@@ -246,12 +409,17 @@ const handleRecharge = async () => {
 
   rechargeLoading.value = true
   try {
-    await billingApi.recharge(rechargeForm.cardNo, rechargeForm.cardPwd)
-    ElMessage.success('充值成功')
-    rechargeDialogVisible.value = false
-    loadBalance()
+    const res = await subscriptionApi.activate(rechargeForm.activationCode)
+    if (res.code === 200 || res.code === 0) {
+      ElMessage.success('激活成功')
+      rechargeDialogVisible.value = false
+      rechargeForm.activationCode = ''
+      loadSubscriptionStatus()
+      loadBalance()
+      loadData()
+    }
   } catch (error) {
-    console.error('Recharge failed:', error)
+    console.error('Activate failed:', error)
   } finally {
     rechargeLoading.value = false
   }
@@ -314,6 +482,7 @@ const showDetail = (row) => {
 }
 
 onMounted(() => {
+  loadSubscriptionStatus()
   loadBalance()
   loadActiveCount()
   loadData()
@@ -321,55 +490,119 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 组件特有样式，使用 CSS 变量 */
+
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: var(--spacing-xl);
 }
 
 .page-header h2 {
-  font-size: 18px;
+  font-size: var(--font-size-lg);
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-primary);
   margin: 0;
 }
 
 .stats-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: var(--spacing-lg);
+  margin-bottom: var(--spacing-xl);
 }
 
 .stat-card {
-  background: rgba(18, 18, 26, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  padding: 20px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
   text-align: center;
 }
 
 .stat-card.balance-card {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.1) 100%);
-  border-color: rgba(99, 102, 241, 0.3);
+  /* 使用和其他卡片一致的样式 */
 }
 
 .stat-label {
-  font-size: 13px;
-  color: #8a8a8a;
-  margin-bottom: 8px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  margin-bottom: var(--spacing-sm);
 }
 
 .stat-value {
   font-size: 28px;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-primary);
 }
 
 .table-filters {
   display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.vip-card {
+  background: linear-gradient(135deg, var(--warning-soft) 0%, rgba(217, 119, 6, 0.2) 100%);
+  border: 1px solid var(--warning-soft);
+}
+
+.vip-card .stat-label {
+  color: var(--warning);
+}
+
+.vip-level {
+  color: var(--warning) !important;
+  font-weight: 700;
+}
+
+.status-card {
+  min-width: 140px;
+}
+
+.status-card.active {
+  background: linear-gradient(135deg, rgba(103, 194, 58, 0.15) 0%, rgba(82, 160, 44, 0.15) 100%);
+  border: 1px solid rgba(103, 194, 58, 0.3);
+}
+
+.status-card.inactive {
+  background: linear-gradient(135deg, rgba(245, 108, 108, 0.15) 0%, rgba(204, 85, 85, 0.15) 100%);
+  border: 1px solid rgba(245, 108, 108, 0.3);
+}
+
+.stat-sub {
+  margin-top: var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.subscription-info small {
+  font-size: 11px;
+}
+
+.activation-preview {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--bg-soft);
+  border-radius: var(--radius-md);
+}
+
+.activation-preview .text-muted {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.vip-upgrade-info {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--bg-soft);
+  border-radius: var(--radius-md);
+}
+
+.vip-upgrade-info .next-vip-hint {
+  margin-top: var(--spacing-sm);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-align: center;
 }
 </style>

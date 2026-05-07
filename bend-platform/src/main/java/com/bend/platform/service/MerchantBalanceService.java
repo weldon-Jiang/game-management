@@ -37,4 +37,10 @@ public interface MerchantBalanceService {
      * 检查余额是否充足
      */
     boolean hasEnoughBalance(String merchantId, int points);
+
+    /**
+     * 记录激活码消费用于VIP升级检查
+     * 用于订阅类型激活码，将点数价值计入totalRecharged以便触发VIP升级检查
+     */
+    void recordActivationCodeValueForVipUpgrade(String merchantId, int points);
 }

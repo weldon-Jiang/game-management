@@ -20,6 +20,7 @@ import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.util.UserContext;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -102,13 +103,19 @@ public class StreamingAccountController {
     /**
      * 分页查询流媒体账号列表
      * 平台管理员返回所有账号，商户用户返回本商户账号
+     * 平台管理员可指定merchantId查询特定商户的账号
      *
      * @param request 分页请求参数
      * @return 流媒体账号分页列表
      */
     @GetMapping
     public ApiResponse<IPage<StreamingAccountItemDto>> list(StreamingAccountPageRequest request) {
-        String merchantId = UserContext.isPlatformAdmin() ? null : UserContext.getMerchantId();
+        String merchantId;
+        if (UserContext.isPlatformAdmin()) {
+            merchantId = StringUtils.isNotBlank(request.getMerchantId()) ? request.getMerchantId() : null;
+        } else {
+            merchantId = UserContext.getMerchantId();
+        }
         IPage<StreamingAccount> page = streamingAccountService.findByMerchantId(merchantId, request);
 
         List<Merchant> merchants = merchantService.findAllSimple();

@@ -1,5 +1,6 @@
 export * from './auth'
 export * from './merchant'
+export * from './vip'
 export * from './user'
 export * from './streaming'
 export * from './automation'

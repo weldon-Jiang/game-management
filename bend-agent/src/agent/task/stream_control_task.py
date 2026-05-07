@@ -94,16 +94,18 @@ class StreamControlTaskHandler:
         results = await handler.handle_batch_tasks(task_params)
     """
 
-    def __init__(self, max_workers: int = 10):
+    def __init__(self, max_workers: int = 10, api_client=None):
         """
         初始化处理器
 
         Args:
             max_workers: 最大并发线程数
+            api_client: API客户端实例，用于令牌交换
         """
         self.logger = get_logger('stream_control_task')
         self._max_workers = max_workers
         self._aes_key = get_aes_key()
+        self._api_client = api_client
 
         # 线程池
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -198,7 +200,7 @@ class StreamControlTaskHandler:
                 return result
 
             # Step 2: 解密密码
-            password = self._decrypt_password(task.encrypted_password)
+            password = await self._decrypt_password(task.encrypted_password)
             if not password:
                 result.message = "密码解密失败"
                 result.error_code = "PASSWORD_DECRYPT_ERROR"
@@ -318,12 +320,12 @@ class StreamControlTaskHandler:
             self.logger.error(f"Xbox绑定异常: {xbox_ip}: {e}")
             return False
 
-    def _decrypt_password(self, encrypted_password: str) -> Optional[str]:
+    async def _decrypt_password(self, encrypted_password: str) -> Optional[str]:
         """
-        解密密码
+        解密密码（支持令牌交换）
 
         Args:
-            encrypted_password: 加密的密码
+            encrypted_password: 加密的密码或令牌
 
         Returns:
             明文密码或None
@@ -334,10 +336,26 @@ class StreamControlTaskHandler:
         try:
             # 如果是 token 格式，需要先换取实际密码
             if encrypted_password.startswith('token:'):
-                # 需要调用平台API换取实际密码
-                # 这里暂时返回 None，实际需要实现 token 交换
-                self.logger.warning("需要实现token交换逻辑")
-                return None
+                token = encrypted_password[6:]  # 去掉 'token:' 前缀
+
+                if not self._api_client:
+                    self.logger.error("无法进行令牌交换：没有API客户端")
+                    return None
+
+                # 调用平台API换取加密的密码
+                self.logger.info("正在交换令牌获取密码...")
+                encrypted_password = await self._api_client.exchange_credential_token(token)
+
+                if not encrypted_password:
+                    self.logger.error("令牌交换失败：返回为空")
+                    return None
+
+                # 检查Redis是否未启用（返回DISABLED:开头）
+                if encrypted_password.startswith('DISABLED:'):
+                    self.logger.error("令牌交换失败：后端Redis未启用")
+                    return None
+
+                self.logger.info("令牌交换成功，正在解密...")
 
             # 直接解密
             return decrypt_password(encrypted_password)

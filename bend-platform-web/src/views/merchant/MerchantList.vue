@@ -32,6 +32,19 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="vipLevel" label="VIP等级" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.vipLevel && row.vipLevel > 0" type="warning" size="small">
+              VIP{{ row.vipLevel }}
+            </el-tag>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="totalPoints" label="累计点数" width="120" align="right">
+          <template #default="{ row }">
+            <span class="points-text">{{ row.totalPoints || 0 }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="expireTime" label="有效期至" width="170">
           <template #default="{ row }">
             {{ row.expireTime ? formatDate(row.expireTime) : '永久' }}
@@ -418,121 +431,14 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.page-container {
-  padding: 0;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-
-.header-left h2 {
-  font-size: 20px;
-  font-weight: 600;
-  color: #ffffff;
-  margin: 0 0 4px;
-}
-
-.header-desc {
-  font-size: 13px;
-  color: #8a8a8a;
-}
+/* 组件特有样式，去除重复的全局样式覆盖 */
 
 .data-table {
   width: 100%;
 }
 
-:deep(.el-table) {
-  background: transparent;
-  --el-table-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: rgba(255, 255, 255, 0.03);
-  --el-table-row-hover-bg-color: rgba(99, 102, 241, 0.15);
-  --el-table-current-row-bg-color: rgba(99, 102, 241, 0.1);
-  --el-table-border-color: rgba(255, 255, 255, 0.06);
-  --el-table-header-border-color: rgba(255, 255, 255, 0.06);
-  --el-table-text-color: #b0b0b0;
-  --el-table-header-text-color: #888888;
-  --el-table-row-hover-text-color: #ffffff;
-}
-
-:deep(.el-table__inner-wrapper::before) {
-  display: none;
-}
-
-:deep(.el-table .el-table__row) {
-  background: transparent !important;
-}
-
-:deep(.el-table .el-table__row:hover > td) {
-  background: rgba(99, 102, 241, 0.15) !important;
-}
-
-:deep(.el-table th.el-table__cell) {
+.points-text {
+  color: var(--warning);
   font-weight: 500;
-  font-size: 13px;
-}
-
-:deep(.el-table td.el-table__cell) {
-  font-size: 13px;
-  padding: 14px 0;
-}
-
-:deep(.el-table__inner-wrapper::before) {
-  display: none;
-}
-
-.pagination-wrap {
-  margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-:deep(.el-dialog) {
-  background: rgba(18, 18, 26, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-}
-
-:deep(.el-dialog__header) {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 20px 24px;
-}
-
-:deep(.el-dialog__title) {
-  color: #ffffff;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-:deep(.el-dialog__body) {
-  padding: 28px 24px;
-}
-
-:deep(.el-dialog__footer) {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 16px 24px;
-}
-
-:deep(.el-form-item__label) {
-  color: #b0b0b0;
-}
-
-:deep(.el-input__wrapper) {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  box-shadow: none;
-}
-
-:deep(.el-input__inner) {
-  color: #ffffff;
-}
-
-:deep(.el-input__inner::placeholder) {
-  color: #5a5a5a;
 }
 </style>

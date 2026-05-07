@@ -18,6 +18,8 @@ public class PageRequest {
     @Max(value = 100, message = "每页数量最大值为100")
     private Integer pageSize = 10;
 
+    private String merchantId;
+
     public int getOffset() {
         if (pageNum == null || pageNum < 1) {
             pageNum = 1;

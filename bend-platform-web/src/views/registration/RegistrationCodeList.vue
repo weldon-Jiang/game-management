@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div class="header-left">
-        <h2>Agent注册码管理</h2>
+        <h2>注册码管理</h2>
         <span class="header-desc">生成和管理注册码</span>
       </div>
       <div class="header-right">

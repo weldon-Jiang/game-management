@@ -13,7 +13,7 @@
     <el-tabs v-model="activeTab" @tab-change="onTabChange">
       <el-tab-pane label="批次管理" name="batches">
         <div class="content-card">
-          <el-table :data="batchTableData" v-loading="batchLoading">
+          <el-table :data="batchTableData" v-loading="batchLoading" class="data-table">
             <el-table-column prop="name" label="批次名称" />
             <el-table-column prop="cardType" label="类型" width="120">
               <template #default="{ row }">
@@ -68,7 +68,7 @@
             <el-button @click="searchCard">查询</el-button>
           </div>
 
-          <el-table :data="cardTableData" v-loading="cardLoading">
+          <el-table :data="cardTableData" v-loading="cardLoading" class="data-table">
             <el-table-column prop="cardNo" label="卡号" width="180" show-overflow-tooltip />
             <el-table-column label="面额" width="100">
               <template #default="{ row }">
@@ -166,7 +166,7 @@
         <el-button @click="loadCardList">筛选</el-button>
         <el-button type="success" @click="exportCurrentBatchCards">导出当前批次</el-button>
       </div>
-      <el-table :data="cardListData" max-height="400">
+      <el-table :data="cardListData" max-height="400" class="data-table">
         <el-table-column prop="cardNo" label="卡号" width="180" show-overflow-tooltip />
         <el-table-column label="卡密" width="150">
           <template #default="{ row }">

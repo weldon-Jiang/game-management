@@ -50,10 +50,6 @@
         </el-menu-item>
 
         <div class="menu-group-title" v-if="!isCollapse && showAccountGroup">账号管理</div>
-        <el-menu-item v-if="authStore.hasManagementPermission" index="Users" @click="router.push('/users')">
-          <el-icon><User /></el-icon>
-          <template #title>用户管理</template>
-        </el-menu-item>
         <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="StreamingAccounts" @click="router.push('/streaming-accounts')">
           <el-icon><VideoPlay /></el-icon>
           <template #title>流媒体账号</template>
@@ -70,23 +66,19 @@
         <div class="menu-group-title" v-if="!isCollapse && showAgentGroup">Agent管理</div>
         <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="Agents" @click="router.push('/agents')">
           <el-icon><Cpu /></el-icon>
-          <template #title>Agent实例</template>
+          <template #title>Agent管理</template>
         </el-menu-item>
-        <el-menu-item v-if="authStore.hasManagementPermission" index="RegistrationCodes" @click="router.push('/registration-codes')">
+        <el-menu-item v-if="authStore.isPlatformAdmin" index="RegistrationCodes" @click="router.push('/registration-codes')">
           <el-icon><Key /></el-icon>
-          <template #title>Agent注册码</template>
+          <template #title>注册码管理</template>
         </el-menu-item>
 
         <div class="menu-group-title" v-if="!isCollapse && showBillingGroup">订阅与计费</div>
-        <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="SubscriptionManagement" @click="router.push('/subscriptions')">
+        <el-menu-item v-if="authStore.hasManagementPermission" index="Subscription" @click="router.push('/subscription')">
           <el-icon><Wallet /></el-icon>
           <template #title>订阅管理</template>
         </el-menu-item>
-        <el-menu-item v-if="authStore.hasManagementPermission" index="Subscription" @click="router.push('/subscription')">
-          <el-icon><CreditCard /></el-icon>
-          <template #title>商户订阅</template>
-        </el-menu-item>
-        <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="RechargeCards" @click="router.push('/recharge-cards')">
+        <el-menu-item v-if="authStore.isPlatformAdmin" index="RechargeCards" @click="router.push('/recharge-cards')">
           <el-icon><Tickets /></el-icon>
           <template #title>充值卡管理</template>
         </el-menu-item>
@@ -170,51 +162,19 @@ import {
   Tickets
 } from '@element-plus/icons-vue'
 
-/**
- * 主布局组件
- * 包含左侧导航栏和右侧内容区
- */
 const router = useRouter()
 const authStore = useAuthStore()
 
-/**
- * 侧边栏折叠状态
- */
 const isCollapse = ref(false)
 
-/**
- * 平台管理分组是否显示
- */
 const showPlatformGroup = computed(() => authStore.isPlatformAdmin)
-
-/**
- * 账号管理分组是否显示
- */
 const showAccountGroup = computed(() => authStore.hasManagementPermission || authStore.isOperator)
-
-/**
- * Agent管理分组是否显示
- */
 const showAgentGroup = computed(() => authStore.hasManagementPermission || authStore.isOperator)
+const showBillingGroup = computed(() => authStore.hasManagementPermission)
 
-/**
- * 订阅与计费分组是否显示
- */
-const showBillingGroup = computed(() => authStore.hasManagementPermission || authStore.isOperator)
-
-/**
- * 当前激活的菜单项
- */
 const activeMenu = computed(() => currentRoute.name)
-
-/**
- * 当前路由信息
- */
 const currentRoute = useRoute()
 
-/**
- * 角色显示文本
- */
 const roleText = computed(() => {
   const roleMap = {
     platform_admin: '平台管理员',
@@ -224,10 +184,6 @@ const roleText = computed(() => {
   return roleMap[authStore.role] || authStore.role
 })
 
-/**
- * 处理用户下拉菜单命令
- * @param {string} command - 命令标识
- */
 const handleUserCommand = (command) => {
   if (command === 'logout') {
     ElMessageBox.confirm('确定要退出登录吗？', '提示', {
@@ -243,13 +199,11 @@ const handleUserCommand = (command) => {
 </script>
 
 <style scoped>
-/* 主布局容器 - 全屏占据 */
 .main-layout {
   height: 100vh;
   background: #0a0a0f;
 }
 
-/* 左侧边栏样式 */
 .aside {
   background: linear-gradient(180deg, #12121a 0%, #0a0a0f 100%);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
@@ -277,7 +231,6 @@ const handleUserCommand = (command) => {
   background: rgba(99, 102, 241, 0.5);
 }
 
-/* Logo区域 */
 .logo-area {
   height: 64px;
   display: flex;
@@ -306,7 +259,6 @@ const handleUserCommand = (command) => {
   white-space: nowrap;
 }
 
-/* 导航菜单样式 */
 .nav-menu {
   border-right: none;
   padding: 12px 8px;
@@ -355,13 +307,11 @@ const handleUserCommand = (command) => {
   border-radius: 0 2px 2px 0;
 }
 
-/* 主内容区容器 */
 .main-container {
   flex-direction: column;
   background: #0a0a0f;
 }
 
-/* 顶部导航栏 */
 .header {
   height: 64px;
   background: rgba(18, 18, 26, 0.8);
@@ -389,7 +339,6 @@ const handleUserCommand = (command) => {
   color: #ffffff;
 }
 
-/* 面包屑导航 */
 :deep(.el-breadcrumb) {
   font-size: 14px;
 }
@@ -407,7 +356,6 @@ const handleUserCommand = (command) => {
   color: #4a4a4a;
 }
 
-/* 用户信息区域 */
 .user-info {
   display: flex;
   align-items: center;
@@ -450,14 +398,12 @@ const handleUserCommand = (command) => {
   font-size: 12px;
 }
 
-/* 主内容区 */
 .main-content {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
 }
 
-/* 页面切换动画 */
 .fade-slide-enter-active,
 .fade-slide-leave-active {
   transition: all 0.25s ease;
@@ -473,7 +419,6 @@ const handleUserCommand = (command) => {
   transform: translateY(-10px);
 }
 
-/* 淡入淡出动画 */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.4s ease;
@@ -485,4 +430,4 @@ const handleUserCommand = (command) => {
 .fade-leave-to {
   opacity: 0;
 }
-</style>23
+</style>

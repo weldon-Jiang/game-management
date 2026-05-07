@@ -1,0 +1,115 @@
+/* ================================================
+   基础样式重置
+   ================================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: var(--font-family);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+#app {
+  height: 100%;
+}
+
+/* 全局滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* 选择文本样式 */
+::selection {
+  background: var(--primary-soft);
+  color: var(--text-primary);
+}
+
+/* 通用容器类 */
+.page-container {
+  padding: 0;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-xl);
+}
+
+.page-header h2 {
+  font-size: var(--font-size-2xl);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px;
+}
+
+.header-desc {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+/* 卡片容器 */
+.content-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-xl);
+  overflow: hidden;
+}
+
+/* 表格容器 */
+.table-container {
+  overflow: hidden;
+}
+
+/* 工具栏 */
+.toolbar {
+  display: flex;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+/* 分页容器 */
+.pagination-wrap {
+  margin-top: var(--spacing-xl);
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 通用文本类 */
+.text-muted {
+  color: var(--text-muted);
+}
+
+.text-primary {
+  color: var(--text-primary);
+}
+
+.text-warning {
+  color: var(--warning);
+  font-size: var(--font-size-sm);
+}

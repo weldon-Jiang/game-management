@@ -204,33 +204,6 @@ public interface ResultCode {
         }
     }
 
-    enum VipConfig implements ResultCode {
-        NOT_FOUND(16001, "VIP配置不存在"),
-        NAME_DUPLICATE(16002, "VIP套餐名已存在"),
-        CREATE_FAILED(16003, "创建配置失败"),
-        UPDATE_FAILED(16004, "更新配置失败"),
-        DELETE_FAILED(16005, "删除配置失败"),
-        CANNOT_DELETE_DEFAULT(16006, "不能删除默认配置");
-
-        private final int code;
-        private final String message;
-
-        VipConfig(int code, String message) {
-            this.code = code;
-            this.message = message;
-        }
-
-        @Override
-        public int getCode() {
-            return code;
-        }
-
-        @Override
-        public String getMessage() {
-            return message;
-        }
-    }
-
     enum ActivationCode implements ResultCode {
         NOT_FOUND(17001, "激活码不存在"),
         ALREADY_USED(17002, "激活码已被使用"),

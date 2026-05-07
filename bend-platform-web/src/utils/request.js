@@ -37,8 +37,6 @@ const clearAllPendingRequests = () => {
   pendingRequests.clear()
 }
 
-const retryDelay = (retryCount) => Math.min(1000 * Math.pow(2, retryCount), 10000)
-
 let isRefreshing = false
 let refreshSubscribers = []
 
@@ -109,27 +107,6 @@ request.interceptors.response.use(
   },
   async (error) => {
     const authStore = useAuthStore()
-
-    if (error.config && !error.config.__retryCount) {
-      error.config.__retryCount = error.config.__retryCount || 0
-
-      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-        error.config.__retryCount += 1
-        if (error.config.__retryCount <= 3) {
-          ElMessage.warning(`请求超时，正在重试 (${error.config.__retryCount}/3)`)
-          await new Promise((resolve) => setTimeout(resolve, retryDelay(error.config.__retryCount)))
-          return request(error.config)
-        }
-        ElMessage.error('请求超时，请稍后重试')
-      }
-
-      if (error.response?.status >= 500 && error.config.__retryCount < 3) {
-        error.config.__retryCount += 1
-        ElMessage.warning(`服务器错误，正在重试 (${error.config.__retryCount}/3)`)
-        await new Promise((resolve) => setTimeout(resolve, retryDelay(error.config.__retryCount)))
-        return request(error.config)
-      }
-    }
 
     removePendingRequest(error.config || {})
 

@@ -37,20 +37,22 @@ def get_aes_key() -> bytes:
 
     密钥处理逻辑必须与平台侧 (Java) 完全一致：
     - 密钥长度 < 16 字节时：补足到 16 字节（用0填充）
-    - 密钥长度 >= 16 字节时：直接使用（不截断）
+    - 密钥长度 >= 16 字节时：截断到 16 字节
 
     Returns:
         16 字节的密钥
     """
     secret = config.get('aes.secret')
     if not secret:
-        import os
-        secret = os.environ.get('AES_SECRET', 'default_aes_secret_key!')
+        raise CryptoError("AES密钥未配置，请检查配置文件中的 aes.secret")
 
     key = secret.encode('utf-8')
 
+    # 密钥长度不足16字节时补0，超过16字节时截断
     if len(key) < 16:
         key = key + b'\x00' * (16 - len(key))
+    elif len(key) > 16:
+        key = key[:16]
 
     return key
 

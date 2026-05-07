@@ -10,6 +10,7 @@ import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.MerchantGroupMapper;
 import com.bend.platform.repository.MerchantMapper;
+import com.bend.platform.service.impl.VipLevelCalculator;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -27,6 +28,7 @@ public class MerchantGroupController {
 
     private final MerchantGroupMapper merchantGroupMapper;
     private final MerchantMapper merchantMapper;
+    private final VipLevelCalculator vipLevelCalculator;
 
     @GetMapping
     public ApiResponse<List<MerchantGroup>> listAll() {
@@ -40,6 +42,29 @@ public class MerchantGroupController {
         if (group == null) {
             throw new BusinessException(ResultCode.MerchantGroup.NOT_FOUND);
         }
+        return ApiResponse.success(group);
+    }
+
+    @GetMapping("/by-merchant/{merchantId}")
+    public ApiResponse<MerchantGroup> getByMerchantId(@PathVariable String merchantId) {
+        Merchant merchant = merchantMapper.selectById(merchantId);
+        if (merchant == null) {
+            throw new BusinessException(ResultCode.Merchant.NOT_FOUND);
+        }
+
+        // 根据累计点数计算实际的VIP等级
+        int calculatedVipLevel = vipLevelCalculator.calculateVipLevel(
+                merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0
+        );
+
+        if (calculatedVipLevel == 0) {
+            return ApiResponse.success(null);
+        }
+        LambdaQueryWrapper<MerchantGroup> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(MerchantGroup::getVipLevel, calculatedVipLevel)
+               .eq(MerchantGroup::getStatus, "active")
+               .last("LIMIT 1");
+        MerchantGroup group = merchantGroupMapper.selectOne(wrapper);
         return ApiResponse.success(group);
     }
 
@@ -68,8 +93,13 @@ public class MerchantGroupController {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
 
+        MerchantGroup group = merchantGroupMapper.selectById(id);
+        if (group == null) {
+            throw new BusinessException(ResultCode.MerchantGroup.NOT_FOUND);
+        }
+
         long merchantCount = merchantMapper.selectCount(
-                new LambdaQueryWrapper<Merchant>().eq(Merchant::getGroupId, id));
+                new LambdaQueryWrapper<Merchant>().eq(Merchant::getVipLevel, group.getVipLevel()));
         if (merchantCount > 0) {
             throw new BusinessException(ResultCode.MerchantGroup.HAS_MERCHANT);
         }

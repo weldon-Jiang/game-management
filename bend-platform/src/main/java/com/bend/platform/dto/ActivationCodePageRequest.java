@@ -19,4 +19,14 @@ public class ActivationCodePageRequest extends PageRequest {
      * 关键词搜索
      */
     private String keyword;
+
+    /**
+     * 状态过滤
+     */
+    private String status;
+
+    /**
+     * 订阅类型过滤
+     */
+    private String subscriptionType;
 }

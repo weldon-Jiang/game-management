@@ -173,8 +173,10 @@ public class GameAccountServiceImpl implements GameAccountService {
     @Override
     public IPage<GameAccount> findByMerchantId(String merchantId, GameAccountPageRequest request) {
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(GameAccount::getMerchantId, merchantId)
-               .orderByDesc(GameAccount::getCreatedTime);
+        if (merchantId != null) {
+            wrapper.eq(GameAccount::getMerchantId, merchantId);
+        }
+        wrapper.orderByDesc(GameAccount::getCreatedTime);
         Page<GameAccount> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         IPage<GameAccount> result = gameAccountMapper.selectPage(page, wrapper);
         fillRelatedNames(result.getRecords());

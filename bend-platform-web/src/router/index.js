@@ -89,12 +89,6 @@ const routes = [
       {
         path: 'subscription',
         name: 'Subscription',
-        component: () => import('@/views/subscription/SubscriptionView.vue'),
-        meta: { title: '商户订阅', icon: 'CreditCard' }
-      },
-      {
-        path: 'subscriptions',
-        name: 'SubscriptionManagement',
         component: () => import('@/views/subscription/SubscriptionList.vue'),
         meta: { title: '订阅管理', icon: 'Wallet' }
       },

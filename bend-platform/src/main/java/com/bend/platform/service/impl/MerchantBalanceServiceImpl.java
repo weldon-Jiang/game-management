@@ -1,12 +1,15 @@
 package com.bend.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.bend.platform.entity.MerchantBalance;
 import com.bend.platform.entity.PointTransaction;
+import com.bend.platform.entity.Merchant;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.MerchantBalanceMapper;
 import com.bend.platform.repository.PointTransactionMapper;
+import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.MerchantBalanceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +25,8 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
 
     private final MerchantBalanceMapper balanceMapper;
     private final PointTransactionMapper transactionMapper;
+    private final MerchantMapper merchantMapper;
+    private final VipLevelService vipLevelService;
 
     @Override
     public MerchantBalance getByMerchantId(String merchantId) {
@@ -63,11 +68,25 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
         MerchantBalance balance = getByMerchantId(merchantId);
         int oldBalance = balance.getBalance();
 
+        LambdaUpdateWrapper<MerchantBalance> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(MerchantBalance::getId, balance.getId());
+        updateWrapper.eq(MerchantBalance::getVersion, balance.getVersion());
+        updateWrapper.set(balance.getBalance() + points > 0, MerchantBalance::getBalance, oldBalance + points);
+        if ("recharge".equals(type) || "activation_code".equals(type)) {
+            updateWrapper.set(MerchantBalance::getTotalRecharged, balance.getTotalRecharged() + points);
+        }
+        updateWrapper.set(MerchantBalance::getVersion, balance.getVersion() + 1);
+        int rows = balanceMapper.update(null, updateWrapper);
+
+        if (rows == 0) {
+            throw new BusinessException(ResultCode.System.UNKNOWN_ERROR, "更新失败，请重试");
+        }
+
         balance.setBalance(oldBalance + points);
-        if ("recharge".equals(type)) {
+        if ("recharge".equals(type) || "activation_code".equals(type)) {
             balance.setTotalRecharged(balance.getTotalRecharged() + points);
         }
-        balanceMapper.updateById(balance);
+        balance.setVersion(balance.getVersion() + 1);
 
         PointTransaction transaction = new PointTransaction();
         transaction.setMerchantId(merchantId);
@@ -84,6 +103,53 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
 
         log.info("增加点数 - merchantId: {}, points: {}, oldBalance: {}, newBalance: {}",
                 merchantId, points, oldBalance, balance.getBalance());
+
+        if (("recharge".equals(type) || "activation_code".equals(type)) && points > 0) {
+            // 同步更新 merchant 表的 totalPoints（作为缓存字段）
+            LambdaUpdateWrapper<Merchant> merchantUpdateWrapper = new LambdaUpdateWrapper<>();
+            merchantUpdateWrapper.eq(Merchant::getId, merchantId)
+                    .setSql("total_points = COALESCE(total_points, 0) + " + points);
+            merchantMapper.update(null, merchantUpdateWrapper);
+
+            // 计算新的累计点数并传入，避免循环依赖
+            int newTotalRecharged = (balance.getTotalRecharged() != null ? balance.getTotalRecharged() : 0) + points;
+            Integer newVipLevel = vipLevelService.checkUpgrade(merchantId, newTotalRecharged);
+            if (newVipLevel != null) {
+                log.info("商户 {} VIP等级已升级到 {}", merchantId, newVipLevel);
+            }
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void recordActivationCodeValueForVipUpgrade(String merchantId, int points) {
+        if (points <= 0) {
+            return;
+        }
+
+        // 获取当前累计点数
+        MerchantBalance balance = getByMerchantId(merchantId);
+        int oldTotalRecharged = balance != null && balance.getTotalRecharged() != null ? balance.getTotalRecharged() : 0;
+        int newTotalRecharged = oldTotalRecharged + points;
+
+        // 将激活码点数价值计入 totalRecharged（用于VIP升级判定）
+        // 但不增加实际余额（因为订阅类型激活码是直接创建订阅，不涉及余额变动）
+        LambdaUpdateWrapper<MerchantBalance> balanceUpdateWrapper = new LambdaUpdateWrapper<>();
+        balanceUpdateWrapper.eq(MerchantBalance::getMerchantId, merchantId)
+                .setSql("total_recharged = COALESCE(total_recharged, 0) + " + points);
+        balanceMapper.update(null, balanceUpdateWrapper);
+
+        // 同步更新 merchant 表的 total_points
+        LambdaUpdateWrapper<Merchant> merchantUpdateWrapper = new LambdaUpdateWrapper<>();
+        merchantUpdateWrapper.eq(Merchant::getId, merchantId)
+                .setSql("total_points = COALESCE(total_points, 0) + " + points);
+        merchantMapper.update(null, merchantUpdateWrapper);
+
+        // 检查VIP升级，传入新的累计点数避免循环依赖
+        Integer newVipLevel = vipLevelService.checkUpgrade(merchantId, newTotalRecharged);
+        if (newVipLevel != null) {
+            log.info("商户 {} 激活码消费 {} 点，VIP等级已升级到 {}", merchantId, points, newVipLevel);
+        }
     }
 
     @Override
@@ -97,9 +163,22 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
             return false;
         }
 
+        LambdaUpdateWrapper<MerchantBalance> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(MerchantBalance::getId, balance.getId());
+        updateWrapper.eq(MerchantBalance::getVersion, balance.getVersion());
+        updateWrapper.set(MerchantBalance::getBalance, oldBalance - points);
+        updateWrapper.set(MerchantBalance::getTotalConsumed, balance.getTotalConsumed() + points);
+        updateWrapper.set(MerchantBalance::getVersion, balance.getVersion() + 1);
+        int rows = balanceMapper.update(null, updateWrapper);
+
+        if (rows == 0) {
+            log.warn("扣减点数失败，版本冲突 - merchantId: {}", merchantId);
+            return false;
+        }
+
         balance.setBalance(oldBalance - points);
         balance.setTotalConsumed(balance.getTotalConsumed() + points);
-        balanceMapper.updateById(balance);
+        balance.setVersion(balance.getVersion() + 1);
 
         PointTransaction transaction = new PointTransaction();
         transaction.setMerchantId(merchantId);
@@ -128,8 +207,20 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
         MerchantBalance balance = getByMerchantId(merchantId);
         int oldBalance = balance.getBalance();
 
+        LambdaUpdateWrapper<MerchantBalance> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(MerchantBalance::getId, balance.getId());
+        updateWrapper.eq(MerchantBalance::getVersion, balance.getVersion());
+        updateWrapper.set(MerchantBalance::getBalance, oldBalance + points);
+        updateWrapper.set(MerchantBalance::getVersion, balance.getVersion() + 1);
+        int rows = balanceMapper.update(null, updateWrapper);
+
+        if (rows == 0) {
+            log.warn("退款点数失败，版本冲突 - merchantId: {}", merchantId);
+            return false;
+        }
+
         balance.setBalance(oldBalance + points);
-        balanceMapper.updateById(balance);
+        balance.setVersion(balance.getVersion() + 1);
 
         PointTransaction transaction = new PointTransaction();
         transaction.setMerchantId(merchantId);

@@ -5,14 +5,17 @@ import com.bend.platform.dto.StartAutomationRequest;
 import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.StreamingAccount;
 import com.bend.platform.entity.Task;
+import com.bend.platform.entity.XboxHost;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.AutomationService;
+import com.bend.platform.service.AutomationUsageService;
 import com.bend.platform.service.CredentialTokenService;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.service.TaskService;
+import com.bend.platform.service.XboxHostService;
 import com.bend.platform.util.UserContext;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +35,8 @@ public class AutomationServiceImpl implements AutomationService {
     private final GameAccountService gameAccountService;
     private final AgentInstanceService agentInstanceService;
     private final CredentialTokenService credentialTokenService;
+    private final XboxHostService xboxHostService;
+    private final AutomationUsageService automationUsageService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -42,6 +47,10 @@ public class AutomationServiceImpl implements AutomationService {
             throw new BusinessException(400, "Agent不在线");
         }
 
+        if (!credentialTokenService.isRedisEnabled()) {
+            throw new BusinessException(503, "Redis未启用，无法启动自动化。请联系管理员启用Redis服务。");
+        }
+
         List<String> streamingAccountIds = request.getStreamingAccountIds();
         List<Map<String, Object>> results = new ArrayList<>();
         List<String> createdTaskIds = new ArrayList<>();
@@ -49,26 +58,45 @@ public class AutomationServiceImpl implements AutomationService {
         for (String streamingAccountId : streamingAccountIds) {
             StreamingAccount streamingAccount = streamingAccountService.findById(streamingAccountId);
             if (streamingAccount == null) {
-                log.warn("娴佸獟浣撹处鍙蜂笉瀛樺湪: {}", streamingAccountId);
+                log.warn("流媒体账号不存在: {}", streamingAccountId);
                 continue;
             }
 
             if (!merchantId.equals(streamingAccount.getMerchantId())) {
-                log.warn("娴佸獟浣撹处鍙蜂笉灞炰簬褰撳墠鍟嗘埛: {}", streamingAccountId);
+                log.warn("流媒体账号不属于当前商户: {}", streamingAccountId);
                 continue;
             }
 
             List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+            List<XboxHost> xboxHosts = xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
+
+            // 校验并计算需要的点数
+            Map<String, Object> validationResult = automationUsageService.validateAndCalculatePoints(
+                    merchantId, streamingAccountId, gameAccounts, xboxHosts);
+
+            if (!Boolean.TRUE.equals(validationResult.get("canStart"))) {
+                String message = (String) validationResult.get("message");
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("streamingAccountId", streamingAccountId);
+                errorResult.put("streamingAccountName", streamingAccount.getName());
+                errorResult.put("success", false);
+                errorResult.put("message", message);
+                results.add(errorResult);
+                log.warn("自动化启动失败 - merchantId: {}, account: {}, reason: {}",
+                        merchantId, streamingAccount.getName(), message);
+                continue;
+            }
 
             Map<String, Object> taskParams = new HashMap<>();
             taskParams.put("streamingAccount", buildStreamingAccountInfo(streamingAccount));
             taskParams.put("gameAccounts", buildGameAccountsInfo(gameAccounts));
+            taskParams.put("xboxHosts", buildXboxHostsInfo(xboxHosts));
             taskParams.put("taskType", request.getTaskType());
             taskParams.put("merchantId", merchantId);
 
             Task task = new Task();
-            task.setName("鑷姩鍖栦换鍔?" + streamingAccount.getName());
-            task.setDescription(request.getDescription() != null ? request.getDescription() : "娴佸獟浣撹处鍙疯嚜鍔ㄥ寲浠诲姟");
+            task.setName("自动化任务-" + streamingAccount.getName());
+            task.setDescription(request.getDescription() != null ? request.getDescription() : "流媒体账号自动化任务");
             task.setType(request.getTaskType());
             task.setTargetAgentId(agentId);
             task.setStreamingAccountId(streamingAccountId);
@@ -79,6 +107,12 @@ public class AutomationServiceImpl implements AutomationService {
 
             Task created = taskService.create(task);
             createdTaskIds.add(created.getId());
+
+            // 扣点并记录使用情况
+            automationUsageService.deductPointsAndRecordUsage(
+                    merchantId, userId, created.getId(),
+                    streamingAccountId, streamingAccount.getName(),
+                    gameAccounts.size(), xboxHosts.size(), validationResult);
 
             streamingAccountService.updateAgentId(streamingAccountId, agentId);
             for (GameAccount ga : gameAccounts) {
@@ -98,10 +132,12 @@ public class AutomationServiceImpl implements AutomationService {
             result.put("streamingAccountName", streamingAccount.getName());
             result.put("taskId", created.getId());
             result.put("gameAccountsCount", gameAccounts.size());
+            result.put("success", true);
+            result.put("pointsDeducted", validationResult.get("totalPoints"));
             results.add(result);
 
-            log.info("鍒涘缓鑷姩鍖栦换鍔℃垚鍔?- 娴佸獟浣撹处鍙? {}, Agent: {}, TaskId: {}",
-                streamingAccount.getName(), agentId, created.getId());
+            log.info("创建自动化任务成功 - 流媒体账号: {}, Agent: {}, TaskId: {}, Points: {}",
+                streamingAccount.getName(), agentId, created.getId(), validationResult.get("totalPoints"));
         }
 
         Map<String, Object> response = new HashMap<>();
@@ -135,7 +171,7 @@ public class AutomationServiceImpl implements AutomationService {
         streamingAccountService.updateAgentId(streamingAccountId, null);
         taskService.cancelByStreamingAccountId(streamingAccountId);
 
-        log.info("鍋滄鑷姩鍖栦换鍔?- 娴佸獟浣撹处鍙? {}", streamingAccountId);
+        log.info("停止自动化任务 - 流媒体账号: {}", streamingAccountId);
     }
 
     @Override
@@ -188,12 +224,26 @@ public class AutomationServiceImpl implements AutomationService {
         return result;
     }
 
+    private List<Map<String, Object>> buildXboxHostsInfo(List<XboxHost> xboxHosts) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (XboxHost xbox : xboxHosts) {
+            Map<String, Object> info = new HashMap<>();
+            info.put("id", xbox.getId());
+            info.put("xboxId", xbox.getXboxId());
+            info.put("name", xbox.getName());
+            info.put("ipAddress", xbox.getIpAddress());
+            info.put("boundGamertag", xbox.getBoundGamertag());
+            result.add(info);
+        }
+        return result;
+    }
+
     private String toJson(Map<String, Object> data) {
         try {
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             return mapper.writeValueAsString(data);
         } catch (Exception e) {
-            log.error("杞崲JSON澶辫触", e);
+            log.error("转换JSON失败", e);
             return "{}";
         }
     }

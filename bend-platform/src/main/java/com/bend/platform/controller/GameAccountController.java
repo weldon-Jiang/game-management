@@ -46,6 +46,7 @@ public class GameAccountController {
     /**
      * 分页查询游戏账号列表
      * 平台管理员返回所有账号，商户用户返回本商户账号
+     * 平台管理员可指定merchantId查询特定商户的账号
      *
      * @param request 分页请求参数
      * @return 游戏账号分页列表
@@ -63,6 +64,9 @@ public class GameAccountController {
             return ApiResponse.success(gameAccountService.findByStreamingId(request.getStreamingId(), request));
         }
         if (UserContext.isPlatformAdmin()) {
+            if (StringUtils.isNotBlank(request.getMerchantId())) {
+                return ApiResponse.success(gameAccountService.findByMerchantId(request.getMerchantId(), request));
+            }
             return ApiResponse.success(gameAccountService.findAll(request));
         }
         return ApiResponse.success(gameAccountService.findByMerchantId(UserContext.getMerchantId(), request));

@@ -39,6 +39,8 @@ public class XboxHost {
 
     private String ipAddress;
 
+    private String macAddress;
+
     private String status;
 
     private String boundStreamingAccountId;

@@ -22,7 +22,6 @@ import com.bend.platform.repository.MerchantUserMapper;
 import com.bend.platform.service.ActivationCodeService;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
-import org.apache.ibatis.util.MapUtil;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -78,7 +77,7 @@ public class ActivationCodeController {
         ActivationCodeBatch batch = activationCodeService.generateBatch(
                 targetMerchantId,
                 "SINGLE-" + System.currentTimeMillis(),
-                request.getVipType(),
+                request.getPoints(),
                 1,
                 request.getExpireTime()
         );
@@ -112,7 +111,7 @@ public class ActivationCodeController {
     /**
      * 批量生成激活码
      *
-     * @param request 批量生成请求（包含vipType、count、batchName等）
+     * @param request 批量生成请求（包含points、count、batchName等）
      * @return 创建的批次信息
      */
     @PostMapping("/batch")
@@ -130,10 +129,20 @@ public class ActivationCodeController {
                 ? request.getBatchName()
                 : "BATCH-" + System.currentTimeMillis();
 
+        String subscriptionType = request.getSubscriptionType();
+        if (!StringUtils.hasText(subscriptionType)) {
+            subscriptionType = "points";
+        }
+
         ActivationCodeBatch batch = activationCodeService.generateBatch(
                 targetMerchantId,
                 batchName,
-                request.getVipType(),
+                subscriptionType,
+                request.getTargetId(),
+                request.getTargetName(),
+                request.getPoints(),
+                request.getDurationDays(),
+                request.getDailyPrice(),
                 request.getCount() != null ? request.getCount() : 1,
                 request.getExpireTime()
         );
@@ -310,7 +319,20 @@ public class ActivationCodeController {
 
             ActivationCodeBatch batch = batchMap.get(code.getBatchId());
             if (batch != null) {
-                dto.setVipType(batch.getVipType());
+                dto.setPoints(batch.getPoints());
+                dto.setPointsAmount(batch.getPointsAmount());
+                dto.setSubscriptionType(batch.getSubscriptionType());
+                dto.setTargetId(batch.getTargetId());
+                dto.setTargetName(batch.getTargetName());
+                dto.setDurationDays(batch.getDurationDays());
+                dto.setDailyPrice(batch.getDailyPrice());
+            } else {
+                dto.setSubscriptionType(code.getSubscriptionType());
+                dto.setTargetId(code.getTargetId());
+                dto.setTargetName(code.getTargetName());
+                dto.setDurationDays(code.getDurationDays());
+                dto.setDailyPrice(code.getDailyPrice());
+                dto.setPointsAmount(code.getPointsAmount());
             }
             return dto;
         }).collect(Collectors.toList());

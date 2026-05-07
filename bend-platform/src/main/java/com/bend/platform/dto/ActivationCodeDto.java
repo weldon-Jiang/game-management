@@ -1,6 +1,7 @@
 package com.bend.platform.dto;
 
 import lombok.Data;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -10,8 +11,8 @@ public class ActivationCodeDto {
     private String merchantName;
     private String batchId;
     private String code;
-    private String vipType;
-    private String vipConfigId;
+    private Integer points;
+    private Integer pointsAmount;
     private String status;
     private String usedBy;
     private String usedByName;
@@ -20,4 +21,9 @@ public class ActivationCodeDto {
     private LocalDateTime generatedTime;
     private LocalDateTime createdTime;
     private LocalDateTime updatedTime;
+    private String subscriptionType;
+    private String targetId;
+    private String targetName;
+    private Integer durationDays;
+    private BigDecimal dailyPrice;
 }

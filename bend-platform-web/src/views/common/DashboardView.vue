@@ -26,7 +26,7 @@
         </div>
       </div>
 
-      <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="stat-card">
+      <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="stat-card">
         <div class="stat-icon streaming">
           <el-icon><VideoPlay /></el-icon>
         </div>
@@ -36,7 +36,7 @@
         </div>
       </div>
 
-      <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="stat-card">
+      <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="stat-card">
         <div class="stat-icon games">
           <el-icon><Trophy /></el-icon>
         </div>
@@ -46,7 +46,7 @@
         </div>
       </div>
 
-      <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="stat-card">
+      <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="stat-card">
         <div class="stat-icon xbox">
           <el-icon><Monitor /></el-icon>
         </div>
@@ -56,13 +56,13 @@
         </div>
       </div>
 
-      <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="stat-card">
+      <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="stat-card">
         <div class="stat-icon agents">
           <el-icon><Cpu /></el-icon>
         </div>
         <div class="stat-info">
           <span class="stat-value">{{ stats.agentCount }}</span>
-          <span class="stat-label">Agent实例</span>
+          <span class="stat-label">Agent管理</span>
         </div>
       </div>
     </div>
@@ -80,31 +80,25 @@
               </div>
               <span>商户管理</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="action-item" @click="router.push('/users')">
-              <div class="action-icon">
-                <el-icon><User /></el-icon>
-              </div>
-              <span>用户管理</span>
-            </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="action-item" @click="router.push('/streaming-accounts')">
+            <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="action-item" @click="router.push('/streaming-accounts')">
               <div class="action-icon">
                 <el-icon><VideoPlay /></el-icon>
               </div>
               <span>流媒体账号</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="action-item" @click="router.push('/game-accounts')">
+            <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="action-item" @click="router.push('/game-accounts')">
               <div class="action-icon">
                 <el-icon><Trophy /></el-icon>
               </div>
               <span>游戏账号</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="action-item" @click="router.push('/xbox-hosts')">
+            <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="action-item" @click="router.push('/xbox-hosts')">
               <div class="action-icon">
                 <el-icon><Monitor /></el-icon>
               </div>
               <span>Xbox主机</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.hasManagementPermission" class="action-item" @click="router.push('/agents')">
+            <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="action-item" @click="router.push('/agents')">
               <div class="action-icon">
                 <el-icon><Cpu /></el-icon>
               </div>
@@ -116,23 +110,29 @@
               </div>
               <span>Agent版本</span>
             </div>
-            <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/activation-codes')">
+            <div v-if="authStore.isPlatformAdmin || authStore.isMerchantOwner" class="action-item" @click="router.push('/subscription')">
+              <div class="action-icon">
+                <el-icon><Wallet /></el-icon>
+              </div>
+              <span>订阅管理</span>
+            </div>
+            <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/registration-codes')">
               <div class="action-icon">
                 <el-icon><Key /></el-icon>
               </div>
-              <span>激活码管理</span>
+              <span>注册码管理</span>
             </div>
-            <div v-if="authStore.hasManagementPermission" class="action-item" @click="router.push('/subscription')">
+            <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/merchant-groups')">
               <div class="action-icon">
-                <el-icon><CreditCard /></el-icon>
+                <el-icon><User /></el-icon>
               </div>
-              <span>商户订阅</span>
+              <span>商户分组</span>
             </div>
-            <div v-if="authStore.hasManagementPermission" class="action-item" @click="router.push('/registration-codes')">
+            <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/recharge-cards')">
               <div class="action-icon">
-                <el-icon><Key /></el-icon>
+                <el-icon><Tickets /></el-icon>
               </div>
-              <span>Agent注册码管理</span>
+              <span>充值卡管理</span>
             </div>
           </div>
         </div>
@@ -170,20 +170,13 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { OfficeBuilding, User, VideoPlay, Monitor, Coin, Key, CreditCard, Cpu, Trophy } from '@element-plus/icons-vue'
+import { OfficeBuilding, User, VideoPlay, Monitor, Coin, Key, CreditCard, Cpu, Trophy, Box, Wallet, Tickets } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { dashboardApi } from '@/api'
 
-/**
- * 控制台视图组件
- * 展示系统概览、统计数据和快捷操作入口
- */
 const router = useRouter()
 const authStore = useAuthStore()
 
-/**
- * 统计数据
- */
 const stats = ref({
   merchantCount: 0,
   userCount: 0,
@@ -193,19 +186,9 @@ const stats = ref({
   gameAccountCount: 0
 })
 
-/**
- * 当前时间
- */
 const currentTime = ref('')
-
-/**
- * 定时器ID
- */
 let timer = null
 
-/**
- * 角色显示文本
- */
 const roleText = computed(() => {
   const roleMap = {
     platform_admin: '平台管理员',
@@ -215,9 +198,6 @@ const roleText = computed(() => {
   return roleMap[authStore.role] || authStore.role
 })
 
-/**
- * 更新当前时间
- */
 const updateTime = () => {
   const now = new Date()
   currentTime.value = now.toLocaleString('zh-CN', {
@@ -230,10 +210,6 @@ const updateTime = () => {
   })
 }
 
-/**
- * 加载统计数据
- * 使用聚合API一次性获取所有统计数据
- */
 const loadStats = async () => {
   try {
     const res = await dashboardApi.getStats()
@@ -251,18 +227,12 @@ const loadStats = async () => {
   }
 }
 
-/**
- * 组件挂载时
- */
 onMounted(() => {
   updateTime()
   timer = setInterval(updateTime, 1000)
   loadStats()
 })
 
-/**
- * 组件卸载时清除定时器
- */
 onUnmounted(() => {
   if (timer) {
     clearInterval(timer)

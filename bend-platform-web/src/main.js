@@ -5,7 +5,7 @@ import 'element-plus/dist/index.css'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import router from '@/router'
 import App from './App.vue'
-import './style.css'
+import './styles/index.css'
 import { setupErrorHandler } from '@/utils/errorHandler'
 
 /**

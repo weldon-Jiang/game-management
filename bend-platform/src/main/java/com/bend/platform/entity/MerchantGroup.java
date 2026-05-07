@@ -20,6 +20,11 @@ public class MerchantGroup {
 
     private Integer vipLevel;
 
+    /**
+     * 升级到此VIP等级需要的累计点数阈值
+     */
+    private Integer pointsThreshold;
+
     private BigDecimal discountRate;
 
     private BigDecimal unbindRefundRate;

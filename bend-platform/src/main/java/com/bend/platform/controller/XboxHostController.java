@@ -13,6 +13,7 @@ import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.XboxHostService;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -67,25 +68,37 @@ public class XboxHostController {
     /**
      * 查询Xbox主机列表
      * 平台管理员返回所有主机，商户用户返回本商户主机
+     * 平台管理员可指定merchantId查询特定商户的主机
      *
      * @return 主机列表
      */
     @GetMapping
-    public ApiResponse<List<XboxHost>> list() {
-        String merchantId = UserContext.isPlatformAdmin() ? null : UserContext.getMerchantId();
+    public ApiResponse<List<XboxHost>> list(XboxHostPageRequest request) {
+        String merchantId;
+        if (UserContext.isPlatformAdmin()) {
+            merchantId = StringUtils.isNotBlank(request.getMerchantId()) ? request.getMerchantId() : null;
+        } else {
+            merchantId = UserContext.getMerchantId();
+        }
         List<XboxHost> hosts = xboxHostService.findAllByMerchantId(merchantId);
         return ApiResponse.success(hosts);
     }
 
     /**
      * 分页查询Xbox主机列表
+     * 平台管理员可指定merchantId查询特定商户的主机
      *
      * @param request 分页请求参数
      * @return 主机分页列表
      */
     @GetMapping("/page")
     public ApiResponse<IPage<XboxHostItemDto>> listPage(XboxHostPageRequest request) {
-        String merchantId = UserContext.isPlatformAdmin() ? null : UserContext.getMerchantId();
+        String merchantId;
+        if (UserContext.isPlatformAdmin()) {
+            merchantId = StringUtils.isNotBlank(request.getMerchantId()) ? request.getMerchantId() : null;
+        } else {
+            merchantId = UserContext.getMerchantId();
+        }
         IPage<XboxHost> page = xboxHostService.findByMerchantId(merchantId, request);
 
         List<Merchant> merchants = merchantService.findAllSimple();

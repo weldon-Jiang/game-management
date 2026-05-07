@@ -119,4 +119,12 @@ public interface XboxHostService {
      * @return 可用的流媒体账号ID列表
      */
     List<String> getAvailableStreamingAccounts(String id);
+
+    /**
+     * 根据绑定的流媒体账号ID查询Xbox主机列表
+     *
+     * @param streamingAccountId 流媒体账号ID
+     * @return Xbox主机列表
+     */
+    List<XboxHost> findByBoundStreamingAccountId(String streamingAccountId);
 }

@@ -76,11 +76,25 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="vipType" label="VIP类型" width="100" align="center">
+        <el-table-column prop="subscriptionType" label="类型" width="100" align="center">
           <template #default="{ row }">
-            <el-tag type="warning" size="small">
-              {{ getVipTypeText(row.vipType) }}
+            <el-tag :type="getTypeTag(row.subscriptionType)" size="small">
+              {{ getTypeName(row.subscriptionType) }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="points" label="内容" min-width="180">
+          <template #default="{ row }">
+            <template v-if="row.subscriptionType === 'points' || !row.subscriptionType">
+              <span class="points-value">{{ row.points || 0 }} 点</span>
+            </template>
+            <template v-else>
+              <div class="subscription-info">
+                <span>{{ row.targetName || '-' }}</span>
+                <br />
+                <small class="text-muted">{{ row.durationDays || 0 }}天</small>
+              </div>
+            </template>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100" align="center">
@@ -144,14 +158,14 @@
     <el-dialog
       v-model="generateDialogVisible"
       title="生成激活码"
-      width="420px"
+      width="500px"
       :close-on-click-modal="false"
     >
       <el-form
         ref="generateFormRef"
         :model="generateFormData"
         :rules="generateFormRules"
-        label-width="80px"
+        label-width="90px"
         class="dialog-form"
       >
         <el-form-item v-if="isPlatformAdmin" label="所属商户" prop="merchantId">
@@ -172,19 +186,54 @@
         <el-form-item label="批次名称" prop="batchName">
           <el-input v-model="generateFormData.batchName" placeholder="请输入批次名称（可选）" />
         </el-form-item>
+        <el-form-item label="类型" prop="subscriptionType">
+          <el-radio-group v-model="generateFormData.subscriptionType" @change="handleTypeChange">
+            <el-radio v-for="type in filteredSubscriptionTypes" :key="type.value" :value="type.value">
+              {{ type.label }}
+            </el-radio>
+          </el-radio-group>
+          <div v-if="!generateFormData.merchantId" class="form-tip">请先选择商户</div>
+          <div v-else-if="filteredSubscriptionTypes.length === 1 && filteredSubscriptionTypes[0].value === 'points'" class="form-tip">当前商户无VIP等级，仅支持点数充值</div>
+        </el-form-item>
+        <template v-if="generateFormData.subscriptionType === 'points'">
+          <el-form-item label="充值点数" prop="points">
+            <el-input-number
+              v-model="generateFormData.points"
+              :min="1"
+              :max="1000000"
+              style="width: 100%"
+            />
+          </el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="选择目标" prop="targetId">
+            <el-select
+              v-model="generateFormData.targetId"
+              placeholder="请选择目标"
+              style="width: 100%"
+              @visible-change="handleTargetVisibleChange"
+            >
+              <el-option
+                v-for="item in targetList"
+                :key="item.id"
+                :label="item.name"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="时长">
+            <span class="duration-display">30 天（固定）</span>
+          </el-form-item>
+          <el-form-item label="消耗点数">
+            <span class="points-display">{{ generateFormData.points || '请先选择目标' }}</span>
+            <span v-if="generateFormData.points" class="form-tip">（单价 × 30天）</span>
+          </el-form-item>
+        </template>
         <el-form-item label="生成数量" prop="count">
           <el-input-number
             v-model="generateFormData.count"
             :min="1"
             :max="100"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="过期时间" prop="expireTime">
-          <el-date-picker
-            v-model="generateFormData.expireTime"
-            type="datetime"
-            placeholder="选择过期时间（可选）"
             style="width: 100%"
           />
         </el-form-item>
@@ -221,12 +270,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, CopyDocument, Delete } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { activationApi, merchantApi } from '@/api'
-import { getVipTypeText, getCodeStatusText, getCodeStatusType } from '@/utils/constants'
+import { activationApi, merchantApi, gameAccountApi, streamingApi, xboxApi, merchantGroupApi } from '@/api'
+import { getCodeStatusText, getCodeStatusType } from '@/utils/constants'
 
 /**
  * 激活码管理页面
@@ -299,30 +348,82 @@ const generateDialogVisible = ref(false)
 const generateFormRef = ref(null)
 
 /**
+ * 目标列表（根据类型加载）
+ */
+const targetList = ref([])
+
+/**
  * 生成表单数据
  */
 const generateFormData = reactive({
   merchantId: '',
   batchName: '',
-  vipType: '',
-  count: 1,
-  expireTime: null
+  subscriptionType: 'points',
+  targetId: '',
+  targetName: '',
+  points: null,
+  durationDays: 30,
+  count: 1
 })
 
 /**
- * 生成表单验证规则
+ * 生成表单验证规则（动态）
  */
-const generateFormRules = {
-  vipType: [
-    { required: true, message: '请选择VIP类型', trigger: 'change' }
-  ]
-}
+const generateFormRules = computed(() => {
+  const rules = {}
+  if (generateFormData.subscriptionType === 'points') {
+    rules.points = [
+      { required: true, message: '请输入充值点数', trigger: 'blur' }
+    ]
+  } else {
+    rules.targetId = [
+      { required: true, message: '请选择目标', trigger: 'change' }
+    ]
+  }
+  return rules
+})
 
 /**
  * 激活码展示对话框状态
  */
 const showCodeDialogVisible = ref(false)
 const generatedCode = ref('')
+
+/**
+ * 商户VIP分组信息（用于确定允许的订阅类型）
+ */
+const merchantGroupInfo = ref(null)
+
+/**
+ * 允许的订阅类型列表（根据VIP等级和分组权限）
+ * 如果商户有VIP等级分组，则允许所有订阅类型；否则仅允许点数充值
+ */
+const allowedSubscriptionTypes = computed(() => {
+  if (!generateFormData.merchantId) {
+    return ['points']
+  }
+  if (!merchantGroupInfo.value || !merchantGroupInfo.value.vipLevel || merchantGroupInfo.value.vipLevel === 0) {
+    return ['points']
+  }
+  return ['points', 'account', 'window', 'host']
+})
+
+/**
+ * 可用的订阅类型选项
+ */
+const subscriptionTypeOptions = [
+  { value: 'points', label: '点数充值' },
+  { value: 'account', label: '游戏账号' },
+  { value: 'window', label: '窗口' },
+  { value: 'host', label: '主机' }
+]
+
+/**
+ * 过滤后的订阅类型选项（仅显示允许的类型）
+ */
+const filteredSubscriptionTypes = computed(() => {
+  return subscriptionTypeOptions.filter(opt => allowedSubscriptionTypes.value.includes(opt.value))
+})
 
 // ==================== 方法定义 ====================
 
@@ -375,12 +476,139 @@ const loadMerchantList = async () => {
 const showGenerateDialog = async () => {
   generateFormData.merchantId = ''
   generateFormData.batchName = ''
-  generateFormData.vipType = ''
+  generateFormData.subscriptionType = 'points'
+  generateFormData.targetId = ''
+  generateFormData.targetName = ''
+  generateFormData.points = null
+  generateFormData.durationDays = 30
   generateFormData.count = 1
-  generateFormData.expireTime = null
+  targetList.value = []
+  merchantGroupInfo.value = null
   await loadMerchantList()
   generateDialogVisible.value = true
 }
+
+/**
+ * 类型变更处理
+ */
+const handleTypeChange = () => {
+  generateFormData.targetId = ''
+  generateFormData.targetName = ''
+  targetList.value = []
+  calculatePoints()
+}
+
+/**
+ * 监听商户变更，清空目标列表并获取VIP分组信息
+ */
+watch(() => generateFormData.merchantId, async (newMerchantId) => {
+  generateFormData.targetId = ''
+  generateFormData.targetName = ''
+  targetList.value = []
+  merchantGroupInfo.value = null
+  generateFormData.points = null
+  generateFormData.durationDays = 30
+
+  if (newMerchantId) {
+    try {
+      const res = await merchantGroupApi.getByMerchantId(newMerchantId)
+      if (res.code === 200 && res.data) {
+        merchantGroupInfo.value = res.data
+        if (!allowedSubscriptionTypes.value.includes(generateFormData.subscriptionType)) {
+          generateFormData.subscriptionType = 'points'
+        }
+        calculatePoints()
+      }
+    } catch (error) {
+      console.error('Failed to load merchant group info:', error)
+    }
+  }
+})
+
+/**
+ * 目标下拉框可见性变化处理
+ */
+const handleTargetVisibleChange = (visible) => {
+  if (visible) {
+    loadTargets()
+  }
+}
+
+/**
+ * 加载目标列表
+ */
+const loadTargets = async () => {
+  if (!generateFormData.merchantId) {
+    ElMessage.warning('请先选择商户')
+    targetList.value = []
+    return
+  }
+
+  try {
+    const type = generateFormData.subscriptionType
+    const merchantId = generateFormData.merchantId
+    let res
+    if (type === 'account') {
+      res = await gameAccountApi.list({ merchantId, pageNum: 1, pageSize: 1000 })
+      targetList.value = (res.data?.records || []).map(item => ({
+        id: item.id,
+        name: item.xboxGameName || item.id
+      }))
+    } else if (type === 'window') {
+      res = await streamingApi.list({ merchantId, pageNum: 1, pageSize: 1000 })
+      targetList.value = (res.data?.records || []).map(item => ({
+        id: item.id,
+        name: item.username || item.name || 'Unknown'
+      }))
+    } else if (type === 'host') {
+      res = await xboxApi.listPage({ merchantId, pageNum: 1, pageSize: 1000 })
+      targetList.value = (res.data?.records || []).map(item => ({
+        id: item.id,
+        name: item.name || `Xbox-${item.xboxId?.slice(-4) || item.id?.slice(-4)}`
+      }))
+    }
+  } catch (error) {
+    console.error('Failed to load targets:', error)
+    targetList.value = []
+  }
+}
+
+/**
+ * 根据商户VIP分组定价自动计算点数
+ * 时长固定30天，点数 = 单价 × 30
+ */
+const calculatePoints = () => {
+  const type = generateFormData.subscriptionType
+  const group = merchantGroupInfo.value
+
+  if (!group || type === 'points') {
+    generateFormData.points = null
+    generateFormData.durationDays = 30
+    return
+  }
+
+  let pricePerDay = 0
+  if (type === 'host') {
+    pricePerDay = parseFloat(group.hostPrice) || 0
+  } else if (type === 'window') {
+    pricePerDay = parseFloat(group.windowPrice) || 0
+  } else if (type === 'account') {
+    pricePerDay = parseFloat(group.accountPrice) || 0
+  }
+
+  const durationDays = 30
+  const totalPoints = Math.round(pricePerDay * durationDays * 100) / 100
+
+  generateFormData.points = totalPoints
+  generateFormData.durationDays = durationDays
+}
+
+/**
+ * 监听目标变更，重新计算点数
+ */
+watch(() => generateFormData.targetId, () => {
+  calculatePoints()
+})
 
 /**
  * 生成激活码
@@ -389,15 +617,30 @@ const handleGenerate = async () => {
   const valid = await generateFormRef.value.validate().catch(() => false)
   if (!valid) return
 
+  if (generateFormData.subscriptionType !== 'points') {
+    if (!generateFormData.targetId) {
+      ElMessage.warning('请选择目标')
+      return
+    }
+    const selectedTarget = targetList.value.find(t => t.id === generateFormData.targetId)
+    if (selectedTarget) {
+      generateFormData.targetName = selectedTarget.name
+    }
+  }
+
   submitLoading.value = true
   try {
-    const res = await activationApi.generateBatch({
+    const requestData = {
       merchantId: generateFormData.merchantId || null,
       batchName: generateFormData.batchName || null,
-      vipType: generateFormData.vipType,
-      count: generateFormData.count,
-      expireTime: generateFormData.expireTime
-    })
+      subscriptionType: generateFormData.subscriptionType,
+      targetId: generateFormData.subscriptionType !== 'points' ? generateFormData.targetId : null,
+      targetName: generateFormData.subscriptionType !== 'points' ? generateFormData.targetName : null,
+      points: generateFormData.points || 0,
+      durationDays: generateFormData.subscriptionType !== 'points' ? generateFormData.durationDays : null,
+      count: generateFormData.count
+    }
+    const res = await activationApi.generateBatch(requestData)
     generatedCode.value = res.data ? `批次 ${res.data.batchName || ''} 创建成功` : '创建成功'
     generateDialogVisible.value = false
     showCodeDialogVisible.value = true
@@ -487,6 +730,32 @@ const formatDate = (dateStr) => {
   })
 }
 
+/**
+ * 获取类型标签颜色
+ */
+const getTypeTag = (type) => {
+  const map = {
+    'points': 'primary',
+    'account': 'success',
+    'window': 'warning',
+    'host': 'danger'
+  }
+  return map[type] || 'info'
+}
+
+/**
+ * 获取类型名称
+ */
+const getTypeName = (type) => {
+  const map = {
+    'points': '点数',
+    'account': '游戏账号',
+    'window': '窗口',
+    'host': '主机'
+  }
+  return map[type] || type || '点数'
+}
+
 // ==================== 生命周期 ====================
 
 onMounted(() => {
@@ -498,132 +767,17 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.page-container {
-  padding: 0;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-
-.header-left h2 {
-  font-size: 20px;
-  font-weight: 600;
-  color: #ffffff;
-  margin: 0 0 4px;
-}
-
-.header-desc {
-  font-size: 13px;
-  color: #8a8a8a;
-}
-
-.toolbar {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-:deep(.el-table) {
-  background: transparent;
-  --el-table-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: rgba(255, 255, 255, 0.03);
-  --el-table-row-hover-bg-color: rgba(99, 102, 241, 0.15);
-  --el-table-current-row-bg-color: rgba(99, 102, 241, 0.1);
-  --el-table-border-color: rgba(255, 255, 255, 0.06);
-  --el-table-header-border-color: rgba(255, 255, 255, 0.06);
-  --el-table-text-color: #b0b0b0;
-  --el-table-header-text-color: #888888;
-  --el-table-row-hover-text-color: #ffffff;
-}
-
-:deep(.el-table__inner-wrapper::before) {
-  display: none;
-}
-
-:deep(.el-table .el-table__row) {
-  background: transparent !important;
-}
-
-:deep(.el-table .el-table__row:hover > td) {
-  background: rgba(99, 102, 241, 0.15) !important;
-}
-
-:deep(.el-table th.el-table__cell) {
-  font-weight: 500;
-  font-size: 13px;
-}
-
-:deep(.el-table td.el-table__cell) {
-  font-size: 13px;
-  padding: 14px 0;
-}
+/* 组件特有样式，去除重复的全局样式覆盖 */
 
 .code-text {
-  font-family: 'Consolas', 'Monaco', monospace;
+  font-family: var(--font-mono);
   color: #a78bfa;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
-.text-muted {
-  color: #6b7280;
-}
-
-.text-warning {
-  color: #f59e0b;
-  font-size: 13px;
-}
-
-.pagination-wrap {
-  margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-:deep(.el-pagination .el-pagination__total) {
-  color: #6b7280;
-}
-
-:deep(.el-dialog) {
-  background: rgba(18, 18, 26, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-}
-
-:deep(.el-dialog__header) {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 20px 24px;
-}
-
-:deep(.el-dialog__title) {
-  color: #ffffff;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-:deep(.el-form-item__label) {
-  color: #b0b0b0;
-}
-
-:deep(.el-input__wrapper) {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  box-shadow: none;
-}
-
-:deep(.el-input__inner) {
-  color: #ffffff;
-}
-
-:deep(.el-select__wrapper) {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: none;
+.points-value {
+  color: var(--warning);
+  font-weight: 500;
 }
 
 .generated-code-box {
@@ -632,33 +786,58 @@ onMounted(() => {
 }
 
 .generated-code-box .label {
-  color: #8a8a8a;
-  font-size: 14px;
-  margin-bottom: 16px;
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+  margin-bottom: var(--spacing-lg);
 }
 
 .generated-code-box .code-display {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 16px;
-  background: rgba(99, 102, 241, 0.1);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  border-radius: 10px;
-  margin-bottom: 12px;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-strong);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-md);
 }
 
 .generated-code-box .code {
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 18px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xl);
   font-weight: 600;
   color: #a78bfa;
   letter-spacing: 1px;
 }
 
 .generated-code-box .tip {
-  color: #f59e0b;
-  font-size: 12px;
+  color: var(--warning);
+  font-size: var(--font-size-xs);
+}
+
+.subscription-info {
+  line-height: 1.4;
+}
+
+.subscription-info small {
+  font-size: 11px;
+}
+
+.form-tip {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  margin-top: var(--spacing-sm);
+}
+
+.duration-display {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.points-display {
+  color: var(--warning);
+  font-weight: 600;
+  font-size: var(--font-size-lg);
 }
 </style>

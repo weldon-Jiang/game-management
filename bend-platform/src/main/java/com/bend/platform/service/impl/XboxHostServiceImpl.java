@@ -253,4 +253,12 @@ public class XboxHostServiceImpl implements XboxHostService {
                 .map(r -> r.getStreamingAccountId())
                 .collect(Collectors.toList());
     }
+
+    @Override
+    public List<XboxHost> findByBoundStreamingAccountId(String streamingAccountId) {
+        LambdaQueryWrapper<XboxHost> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(XboxHost::getBoundStreamingAccountId, streamingAccountId);
+        wrapper.eq(XboxHost::getStatus, "online");
+        return xboxHostMapper.selectList(wrapper);
+    }
 }

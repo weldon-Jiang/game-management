@@ -9,6 +9,7 @@ import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.MerchantService;
+import com.bend.platform.service.impl.VipLevelCalculator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -42,6 +43,7 @@ import java.util.List;
 public class MerchantServiceImpl implements MerchantService {
 
     private final MerchantMapper merchantMapper;
+    private final VipLevelCalculator vipLevelCalculator;
 
     /**
      * 创建商户
@@ -80,7 +82,15 @@ public class MerchantServiceImpl implements MerchantService {
      */
     @Override
     public Merchant findById(String id) {
-        return merchantMapper.selectById(id);
+        Merchant merchant = merchantMapper.selectById(id);
+        if (merchant != null) {
+            // 根据累计点数计算VIP等级
+            int calculatedVipLevel = vipLevelCalculator.calculateVipLevel(
+                    merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0
+            );
+            merchant.setVipLevel(calculatedVipLevel);
+        }
+        return merchant;
     }
 
     /**
@@ -95,7 +105,17 @@ public class MerchantServiceImpl implements MerchantService {
         LambdaQueryWrapper<Merchant> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(Merchant::getCreatedTime);
         Page<Merchant> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
-        return merchantMapper.selectPage(page, wrapper);
+        IPage<Merchant> result = merchantMapper.selectPage(page, wrapper);
+
+        // 根据累计点数计算VIP等级
+        for (Merchant merchant : result.getRecords()) {
+            int calculatedVipLevel = vipLevelCalculator.calculateVipLevel(
+                    merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0
+            );
+            merchant.setVipLevel(calculatedVipLevel);
+        }
+
+        return result;
     }
 
     /**
@@ -107,7 +127,17 @@ public class MerchantServiceImpl implements MerchantService {
     public List<Merchant> findAllSimple() {
         LambdaQueryWrapper<Merchant> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByAsc(Merchant::getName);
-        return merchantMapper.selectList(wrapper);
+        List<Merchant> result = merchantMapper.selectList(wrapper);
+
+        // 根据累计点数计算VIP等级
+        for (Merchant merchant : result) {
+            int calculatedVipLevel = vipLevelCalculator.calculateVipLevel(
+                    merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0
+            );
+            merchant.setVipLevel(calculatedVipLevel);
+        }
+
+        return result;
     }
 
     /**

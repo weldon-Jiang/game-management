@@ -9,4 +9,6 @@ import lombok.EqualsAndHashCode;
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class ActivationCodeBatchPageRequest extends PageRequest {
+
+    private String status;
 }

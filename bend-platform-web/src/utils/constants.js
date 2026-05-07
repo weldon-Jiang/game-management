@@ -17,24 +17,6 @@ export const isAuthError = (code) => {
     || code === AUTH_ERROR_CODES.TOKEN_MISSING
 }
 
-export const VIP_TYPE_MAP = {
-  monthly: '月卡',
-  quarterly: '季卡',
-  yearly: '年卡'
-}
-
-export const VIP_TYPE_LIST = [
-  { value: 'monthly', label: '月卡' },
-  { value: 'quarterly', label: '季卡' },
-  { value: 'yearly', label: '年卡' }
-]
-
-export const VIP_DEFAULT_DURATION = {
-  monthly: 30,
-  quarterly: 90,
-  yearly: 365
-}
-
 export const STATUS_TEXT_MAP = {
   active: '正常',
   inactive: '未激活',
@@ -110,6 +92,16 @@ export const TASK_TYPE_MAP = {
   custom: '自定义'
 }
 
+export const FEATURE_CODE_MAP = {
+  stream_control: '串流控制',
+  sqb: 'SQB任务',
+  dr: 'DR任务',
+  rush: 'Rush任务',
+  transfer: '转会任务'
+}
+
+export const FEATURE_CODES = Object.keys(FEATURE_CODE_MAP)
+
 export const GAME_ACCOUNT_STATUS_MAP = {
   active: '正常',
   locked: '已锁定',
@@ -146,22 +138,6 @@ export const ROLE_TYPE_MAP = {
   owner: 'warning',
   admin: 'success',
   operator: 'info'
-}
-
-/**
- * 获取VIP类型中文名称
- */
-export const getVipTypeText = (vipType) => {
-  if (!vipType) return '-'
-  if (vipType === 'platform_admin') return '平台管理员'
-  return VIP_TYPE_MAP[vipType] || vipType
-}
-
-/**
- * 获取VIP类型的默认时长(天)
- */
-export const getVipDefaultDuration = (vipType) => {
-  return VIP_DEFAULT_DURATION[vipType] || null
 }
 
 /**

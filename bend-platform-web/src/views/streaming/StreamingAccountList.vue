@@ -213,9 +213,12 @@
         <!-- 任务类型 -->
         <el-form-item label="任务类型">
           <el-select v-model="taskType" style="width: 100%">
-            <el-option label="串流控制" value="stream_control" />
-            <el-option label="模板匹配" value="template_match" />
-            <el-option label="场景检测" value="scene_detection" />
+            <el-option
+              v-for="task in availableTaskTypes"
+              :key="task.code"
+              :label="task.name"
+              :value="task.code"
+            />
           </el-select>
         </el-form-item>
         <!-- 优先级 -->
@@ -398,12 +401,12 @@
  * - 分页组件：数据分页
  * - 对话框：新增/编辑、启动自动化、登录记录
  */
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, onMounted, nextTick, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Monitor } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi } from '@/api'
-import { getStreamingAccountStatusText, getStreamingAccountStatusType } from '@/utils/constants'
+import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi } from '@/api'
+import { getStreamingAccountStatusText, getStreamingAccountStatusType, TASK_TYPE_MAP } from '@/utils/constants'
 
 // ==================== 状态定义 ====================
 
@@ -539,6 +542,64 @@ const taskType = ref('stream_control')
  * 数值越小优先级越高
  */
 const priority = ref(0)
+
+/**
+ * 可用的任务类型列表
+ * 根据商户分组的权限动态加载
+ */
+const availableTaskTypes = ref([])
+
+/**
+ * 加载商户分组的功能权限
+ * 用于动态显示可用的任务类型
+ * 如果商户没有VIP等级，默认只展示"串流控制"
+ * @param {string} merchantId 商户ID
+ */
+const loadMerchantFeatures = async (merchantId) => {
+  try {
+    if (!merchantId) {
+      availableTaskTypes.value = [{ code: 'stream_control', name: '串流控制' }]
+      taskType.value = 'stream_control'
+      return
+    }
+    const res = await merchantGroupApi.getByMerchantId(merchantId)
+    if (res.code === 200 || res.code === 0) {
+      const group = res.data
+      if (group && group.features) {
+        try {
+          const features = typeof group.features === 'string' ? JSON.parse(group.features) : group.features
+          if (Array.isArray(features) && features.length > 0) {
+            availableTaskTypes.value = features.map(code => ({
+              code,
+              name: TASK_TYPE_MAP[code] || code
+            })).filter(item => TASK_TYPE_MAP[item.code])
+            if (availableTaskTypes.value.length > 0) {
+              if (!availableTaskTypes.value.find(t => t.code === taskType.value)) {
+                taskType.value = availableTaskTypes.value[0]?.code || 'stream_control'
+              }
+              return
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse features:', e)
+        }
+      }
+      if (!group || !group.vipLevel || group.vipLevel === 0) {
+        availableTaskTypes.value = [{ code: 'stream_control', name: '串流控制' }]
+        taskType.value = 'stream_control'
+      } else {
+        availableTaskTypes.value = Object.entries(TASK_TYPE_MAP).map(([code, name]) => ({ code, name }))
+      }
+    } else {
+      availableTaskTypes.value = [{ code: 'stream_control', name: '串流控制' }]
+      taskType.value = 'stream_control'
+    }
+  } catch (error) {
+    console.error('Failed to load merchant features:', error)
+    availableTaskTypes.value = [{ code: 'stream_control', name: '串流控制' }]
+    taskType.value = 'stream_control'
+  }
+}
 
 /**
  * 表单数据
@@ -749,6 +810,7 @@ const showStartAutomationDialog = async (row) => {
   selectedAgentId.value = ''
   taskType.value = 'stream_control'
   priority.value = 0
+  await loadMerchantFeatures(row.merchantId)
   await loadOnlineAgents()
   automationDialogVisible.value = true
 }

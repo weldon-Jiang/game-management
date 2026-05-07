@@ -1,0 +1,77 @@
+/* ================================================
+   统一样式变量定义
+   定义全局使用的颜色、间距、圆角等
+   ================================================ */
+
+:root {
+  /* ==================== 颜色系统 ==================== */
+  /* 主背景色 */
+  --bg-primary: #0a0a0f;
+  --bg-secondary: rgba(18, 18, 26, 0.95);
+  --bg-tertiary: rgba(18, 18, 26, 0.8);
+
+  /* 交互背景 */
+  --bg-hover: rgba(99, 102, 241, 0.15);
+  --bg-active: rgba(99, 102, 241, 0.3);
+  --bg-soft: rgba(255, 255, 255, 0.03);
+  --bg-soft-hover: rgba(255, 255, 255, 0.06);
+
+  /* 文字颜色 */
+  --text-primary: #ffffff;
+  --text-secondary: #b0b0b0;
+  --text-muted: #6b7280;
+  --text-disabled: #5a5a5a;
+
+  /* 边框颜色 */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-light: rgba(255, 255, 255, 0.1);
+
+  /* 品牌色 */
+  --primary: #6366f1;
+  --primary-soft: rgba(99, 102, 241, 0.2);
+  --primary-strong: rgba(99, 102, 241, 0.5);
+  --primary-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+
+  /* 功能色 */
+  --success: #22c55e;
+  --success-soft: rgba(34, 197, 94, 0.2);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.2);
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.2);
+  --info: #3b82f6;
+  --info-soft: rgba(59, 130, 246, 0.2);
+
+  /* ==================== 间距系统 ==================== */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+
+  /* ==================== 圆角系统 ==================== */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* ==================== 阴影系统 ==================== */
+  --shadow-soft: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --shadow-light: 0 2px 8px rgba(0, 0, 0, 0.2);
+
+  /* ==================== 字体系统 ==================== */
+  --font-family: 'Microsoft YaHei', 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Consolas', 'Monaco', monospace;
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 20px;
+
+  /* ==================== 滚动条 ==================== */
+  --scrollbar-track: rgba(255, 255, 255, 0.05);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.15);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
+}

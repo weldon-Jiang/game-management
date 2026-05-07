@@ -45,6 +45,8 @@ export const merchantGroupApi = {
 
   getById: (id) => request.get(`/api/merchant-groups/${id}`),
 
+  getByMerchantId: (merchantId) => request.get(`/api/merchant-groups/by-merchant/${merchantId}`),
+
   create: (data) => request.post('/api/merchant-groups', data),
 
   update: (id, data) => request.put(`/api/merchant-groups/${id}`, data),

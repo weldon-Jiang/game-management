@@ -24,6 +24,12 @@
         <el-table-column prop="xboxId" label="Xbox ID" min-width="180" show-overflow-tooltip />
         <el-table-column prop="name" label="主机名称" min-width="120" />
         <el-table-column prop="ipAddress" label="IP地址" width="140" />
+        <el-table-column prop="macAddress" label="MAC地址" width="170">
+          <template #default="{ row }">
+            <span v-if="row.macAddress" class="mac-address">{{ row.macAddress }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="getXboxHostStatusType(row.status)" size="small">
@@ -120,6 +126,9 @@
         </el-form-item>
         <el-form-item label="IP地址" prop="ipAddress">
           <el-input v-model="formData.ipAddress" placeholder="请输入IP地址" />
+        </el-form-item>
+        <el-form-item label="MAC地址" prop="macAddress">
+          <el-input v-model="formData.macAddress" placeholder="如 AA:BB:CC:DD:EE:FF（可选）" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -235,7 +244,8 @@ const formData = reactive({
   merchantId: '',
   xboxId: '',
   name: '',
-  ipAddress: ''
+  ipAddress: '',
+  macAddress: ''
 })
 
 /**
@@ -248,6 +258,16 @@ const formRules = {
   name: [
     { required: true, message: '请输入主机名称', trigger: 'blur' },
     { min: 2, max: 30, message: '长度在 2 到 30 个字符', trigger: 'blur' }
+  ],
+  ipAddress: [
+    { required: true, message: '请输入IP地址', trigger: 'blur' }
+  ],
+  macAddress: [
+    {
+      pattern: /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/,
+      message: 'MAC地址格式错误，示例：AA:BB:CC:DD:EE:FF',
+      trigger: 'blur'
+    }
   ]
 }
 
@@ -303,6 +323,7 @@ const showAddDialog = () => {
   formData.xboxId = ''
   formData.name = ''
   formData.ipAddress = ''
+  formData.macAddress = ''
   dialogVisible.value = true
 }
 
@@ -317,6 +338,7 @@ const showEditDialog = (row) => {
   formData.xboxId = row.xboxId
   formData.name = row.name
   formData.ipAddress = row.ipAddress
+  formData.macAddress = row.macAddress || ''
   dialogVisible.value = true
 }
 
@@ -334,13 +356,15 @@ const handleSubmit = async () => {
         merchantId: formData.merchantId,
         xboxId: formData.xboxId,
         name: formData.name,
-        ipAddress: formData.ipAddress
+        ipAddress: formData.ipAddress,
+        macAddress: formData.macAddress || undefined
       })
       ElMessage.success('创建成功')
     } else {
       await xboxApi.update(formData.id, {
         name: formData.name,
-        ipAddress: formData.ipAddress
+        ipAddress: formData.ipAddress,
+        macAddress: formData.macAddress || undefined
       })
       ElMessage.success('更新成功')
     }
@@ -488,6 +512,12 @@ onMounted(() => {
 .header-desc {
   font-size: 13px;
   color: #8a8a8a;
+}
+
+.mac-address {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .text-muted {

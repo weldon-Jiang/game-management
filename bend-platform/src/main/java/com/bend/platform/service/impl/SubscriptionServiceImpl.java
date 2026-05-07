@@ -83,6 +83,43 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                 subscription.getId(), merchantId, type, targetId, pointsCost);
         return subscription;
     }
+    
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Subscription createSubscriptionWithoutDeduction(String merchantId, String userId, String type,
+                                                           String targetId, String targetName, int durationDays) {
+        // 不检查余额，不扣点
+        Subscription subscription = new Subscription();
+        subscription.setMerchantId(merchantId);
+        subscription.setUserId(userId);
+        subscription.setType(type);
+        subscription.setTargetId(targetId);
+        subscription.setTargetName(targetName);
+        subscription.setPointsCost(0); // 激活码不扣点
+        subscription.setDurationDays(durationDays);
+        subscription.setStartTime(LocalDateTime.now());
+        subscription.setExpireTime(LocalDateTime.now().plusDays(durationDays));
+        subscription.setStatus("active");
+        subscription.setAutoRenew(false);
+        subscription.setRemark("激活码兑换");
+        subscriptionMapper.insert(subscription);
+
+        DeviceBinding binding = new DeviceBinding();
+        binding.setMerchantId(merchantId);
+        binding.setUserId(userId);
+        binding.setType(type);
+        binding.setDeviceId(targetId);
+        binding.setDeviceName(targetName);
+        binding.setBoundSubscriptionId(subscription.getId());
+        binding.setBoundTime(LocalDateTime.now());
+        binding.setIsActive(true);
+        binding.setUnbindCount(0);
+        deviceBindingMapper.insert(binding);
+
+        log.info("创建订阅（激活码） - id: {}, merchantId: {}, type: {}, targetId: {}",
+                subscription.getId(), merchantId, type, targetId);
+        return subscription;
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -164,7 +201,14 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         }
 
         Merchant merchant = merchantMapper.selectById(merchantId);
-        MerchantGroup group = merchantGroupMapper.selectById(merchant != null ? merchant.getGroupId() : null);
+        MerchantGroup group = null;
+        if (merchant != null && merchant.getVipLevel() != null && merchant.getVipLevel() > 0) {
+            LambdaQueryWrapper<MerchantGroup> groupWrapper = new LambdaQueryWrapper<>();
+            groupWrapper.eq(MerchantGroup::getVipLevel, merchant.getVipLevel())
+                    .eq(MerchantGroup::getStatus, "active")
+                    .last("LIMIT 1");
+            group = merchantGroupMapper.selectOne(groupWrapper);
+        }
 
         int weekUnbindLimit = group != null ? group.getMaxUnbindPerWeek() : 2;
         long weekUnbindCount = countUnbindsThisWeek(binding.getMerchantId(), binding.getType(), binding.getDeviceId());

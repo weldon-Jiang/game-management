@@ -13,32 +13,16 @@ CREATE TABLE IF NOT EXISTS `merchant` (
     `name` VARCHAR(128) NOT NULL COMMENT '商户名称',
     `status` VARCHAR(16) DEFAULT NULL COMMENT '状态：active-正常,expired-过期,suspended-暂停',
     `expire_time` DATETIME DEFAULT NULL COMMENT '过期时间',
+    `is_system` TINYINT(1) DEFAULT 0 COMMENT '是否系统内置',
+    `total_points` INT DEFAULT 0 COMMENT '累计充值点数',
+    `vip_level` INT DEFAULT 0 COMMENT '当前VIP等级',
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
     PRIMARY KEY (`id`),
     KEY `idx_phone` (`phone`),
     KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商户表';
-
--- ---------------------------------------------
--- VIP配置表
--- ---------------------------------------------
-CREATE TABLE IF NOT EXISTS `vip_config` (
-    `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
-    `vip_type` VARCHAR(32) NOT NULL COMMENT 'VIP类型',
-    `vip_name` VARCHAR(64) NOT NULL COMMENT 'VIP名称',
-    `price` DECIMAL(10,2) DEFAULT NULL COMMENT '价格',
-    `duration_days` INT DEFAULT NULL COMMENT '时长(天)',
-    `features` TEXT COMMENT '功能特性(JSON)',
-    `is_default` TINYINT(1) DEFAULT 0 COMMENT '是否默认',
-    `status` VARCHAR(16) DEFAULT NULL COMMENT '状态',
-    `sort_order` INT DEFAULT 0 COMMENT '排序',
-    `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`),
-    KEY `idx_vip_type` (`vip_type`),
-    KEY `idx_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='VIP配置表';
 
 -- ---------------------------------------------
 -- 商户用户表
@@ -251,8 +235,7 @@ CREATE TABLE IF NOT EXISTS `activation_code_batch` (
     `total_count` INT NOT NULL COMMENT '生成总数',
     `used_count` INT DEFAULT 0 COMMENT '已使用数量',
     `remaining_count` INT DEFAULT 0 COMMENT '剩余数量',
-    `vip_type` VARCHAR(32) DEFAULT NULL COMMENT 'VIP类型',
-    `vip_config_id` VARCHAR(64) DEFAULT NULL COMMENT 'VIP配置ID',
+    `points` INT DEFAULT NULL COMMENT '充值点数',
     `status` VARCHAR(16) DEFAULT 'active' COMMENT '状态',
     `expire_time` DATETIME DEFAULT NULL COMMENT '过期时间',
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -384,6 +367,7 @@ CREATE TABLE IF NOT EXISTS `merchant_group` (
     `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
     `name` VARCHAR(128) NOT NULL COMMENT '分组名称',
     `vip_level` INT DEFAULT NULL COMMENT 'VIP等级',
+    `points_threshold` INT DEFAULT 0 COMMENT '升级到此VIP等级需要的累计点数阈值',
     `discount_rate` DECIMAL(5,2) DEFAULT NULL COMMENT '扣点折扣比例',
     `unbind_refund_rate` DECIMAL(5,2) DEFAULT NULL COMMENT '解绑返还比例',
     `max_unbind_per_week` INT DEFAULT NULL COMMENT '每周解绑上限次数',
@@ -396,6 +380,7 @@ CREATE TABLE IF NOT EXISTS `merchant_group` (
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_vip_level` (`vip_level`),
+    KEY `idx_points_threshold` (`points_threshold`),
     KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商户分组表';
 
@@ -619,4 +604,34 @@ CREATE TABLE IF NOT EXISTS `operation_log` (
 -- ---------------------------------------------
 -- INSERT INTO bend_platform.merchant (id, phone, name, status, expire_time, created_at, updated_at) VALUES ('f5d927c40f87f57ef0f4a484d8a823e9', '13800138000', '系统管理员', 'active', '2099-12-31 23:59:59', '2026-04-16 17:21:58', '2026-04-23 11:16:44');
 -- INSERT INTO bend_platform.merchant_user (id, merchant_id, username, phone, password_hash, role, status, last_login_at, created_at) VALUES ('f5d927c40f87f57ef0f4a484d8a823f9', 'f5d927c40f87f57ef0f4a484d8a823e9', 'admin', '13800138000', 'bc9c6ebfa285976aa94186fe90103bc7', 'platform_admin', 'active', '2026-04-23 10:53:00', '2026-04-16 17:21:58');
+
+-- ---------------------------------------------
+-- 自动化任务使用记录表
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS `automation_usage` (
+    `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
+    `merchant_id` VARCHAR(64) NOT NULL COMMENT '商户ID',
+    `user_id` VARCHAR(64) NOT NULL COMMENT '用户ID',
+    `task_id` VARCHAR(64) NOT NULL COMMENT '任务ID',
+    `streaming_account_id` VARCHAR(64) NOT NULL COMMENT '流媒体账号ID',
+    `streaming_account_name` VARCHAR(128) DEFAULT NULL COMMENT '流媒体账号名称',
+    `game_accounts_count` INT DEFAULT 0 COMMENT '游戏账号数量',
+    `hosts_count` INT DEFAULT 0 COMMENT '主机数量',
+    `resource_type` VARCHAR(32) DEFAULT NULL COMMENT '使用的资源类型：window/account/host',
+    `resource_id` VARCHAR(64) DEFAULT NULL COMMENT '资源ID',
+    `resource_name` VARCHAR(128) DEFAULT NULL COMMENT '资源名称',
+    `charge_mode` VARCHAR(32) DEFAULT 'per_use' COMMENT '扣点模式：per_use-按次, monthly-包月',
+    `points_deducted` INT DEFAULT 0 COMMENT '扣减的点数',
+    `subscription_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的订阅ID（如果是包月模式）',
+    `usage_time` DATETIME DEFAULT NULL COMMENT '使用时间',
+    `remark` VARCHAR(512) DEFAULT NULL COMMENT '备注',
+    `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_merchant_id` (`merchant_id`),
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_task_id` (`task_id`),
+    KEY `idx_streaming_account_id` (`streaming_account_id`),
+    KEY `idx_usage_time` (`usage_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='自动化任务使用记录表';
 

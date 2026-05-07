@@ -8,9 +8,18 @@
     </div>
 
     <div class="content-card">
-      <el-table :data="tableData" v-loading="loading">
+      <el-table :data="tableData" v-loading="loading" class="data-table">
         <el-table-column prop="name" label="分组名称" />
-        <el-table-column prop="vipLevel" label="VIP等级" width="100" />
+        <el-table-column prop="vipLevel" label="VIP等级" width="100">
+          <template #default="{ row }">
+            VIP{{ row.vipLevel }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="pointsThreshold" label="升级门槛" width="120" align="right">
+          <template #default="{ row }">
+            {{ row.pointsThreshold || 0 }} 点
+          </template>
+        </el-table-column>
         <el-table-column label="扣点折扣" width="100">
           <template #default="{ row }">
             {{ (row.discountRate * 100).toFixed(0) }}折
@@ -34,7 +43,7 @@
         </el-table-column>
         <el-table-column label="游戏号单价" width="110">
           <template #default="{ row }">
-            {{ row.accountPrice }}点/个
+            {{ row.accountPrice }}点/个/月
           </template>
         </el-table-column>
         <el-table-column prop="features" label="功能权限" min-width="150">
@@ -65,8 +74,12 @@
         <el-form-item label="分组名称" prop="name">
           <el-input v-model="formData.name" placeholder="请输入分组名称" />
         </el-form-item>
-        <el-form-item label="VIP等级" prop="vipLevel">
+        <el-form-item label="VIP等级">
           <el-input-number v-model="formData.vipLevel" :min="1" :max="10" />
+        </el-form-item>
+        <el-form-item label="升级门槛">
+          <el-input-number v-model="formData.pointsThreshold" :min="0" :step="100" />
+          <span class="field-hint">累计充值达到此点数时，自动升级到该VIP等级</span>
         </el-form-item>
         <el-form-item label="扣点折扣">
           <el-slider v-model="formData.discountRate" :min="0.5" :max="1" :step="0.01" show-stops />
@@ -90,11 +103,9 @@
         </el-form-item>
         <el-form-item label="功能权限">
           <el-checkbox-group v-model="selectedFeatures">
-            <el-checkbox label="1">串流</el-checkbox>
-            <el-checkbox label="2">SQB</el-checkbox>
-            <el-checkbox label="3">DR</el-checkbox>
-            <el-checkbox label="4">Rush</el-checkbox>
-            <el-checkbox label="5">转会任务</el-checkbox>
+            <el-checkbox v-for="feature in featureOptions" :key="feature.code" :label="feature.code">
+              {{ feature.name }}
+            </el-checkbox>
           </el-checkbox-group>
         </el-form-item>
         <el-form-item label="状态">
@@ -114,6 +125,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { merchantGroupApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { FEATURE_CODE_MAP } from '@/utils/constants'
 
 const authStore = useAuthStore()
 const loading = ref(false)
@@ -122,7 +134,9 @@ const dialogVisible = ref(false)
 const dialogType = ref('add')
 const submitLoading = ref(false)
 const formRef = ref(null)
-const selectedFeatures = ref(['1', '2', '3'])
+const selectedFeatures = ref(['stream_control', 'sqb', 'dr'])
+
+const featureOptions = Object.entries(FEATURE_CODE_MAP).map(([code, name]) => ({ code, name }))
 
 const formData = reactive({
   id: '',
@@ -143,19 +157,20 @@ const formRules = {
   vipLevel: [{ required: true, message: '请输入VIP等级', trigger: 'blur' }]
 }
 
-const featureNames = {
-  '1': '串流',
-  '2': 'SQB',
-  '3': 'DR',
-  '4': 'Rush',
-  '5': '转会'
-}
+const getFeatureName = (code) => FEATURE_CODE_MAP[code] || code
 
-const getFeatureName = (f) => featureNames[f] || f
+const OLD_TO_NEW_CODE_MAP = {
+  '1': 'stream_control',
+  '2': 'sqb',
+  '3': 'dr',
+  '4': 'rush',
+  '5': 'transfer'
+}
 
 const parseFeatures = (features) => {
   try {
-    return JSON.parse(features || '[]')
+    const parsed = JSON.parse(features || '[]')
+    return parsed.map(f => OLD_TO_NEW_CODE_MAP[f] || f)
   } catch {
     return []
   }
@@ -183,6 +198,7 @@ const showDialog = (type, row = null) => {
       id: '',
       name: '',
       vipLevel: 1,
+      pointsThreshold: 0,
       discountRate: 1,
       unbindRefundRate: 0.5,
       maxUnbindPerWeek: 2,
@@ -192,7 +208,7 @@ const showDialog = (type, row = null) => {
       features: '[]',
       status: 'active'
     })
-    selectedFeatures.value = ['1', '2', '3']
+    selectedFeatures.value = ['stream_control', 'sqb', 'dr']
   }
   dialogVisible.value = true
 }
@@ -244,6 +260,12 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.field-hint {
+  margin-left: 12px;
+  color: #8a8a8a;
+  font-size: 12px;
 }
 
 .page-header h2 {
