@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: bend-platform-test
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+logging:
+  level:
+    root: WARN
+    com.bend.platform: DEBUG
+
+jwt:
+  secret: test-secret-key-for-testing-only
+  expiration: 86400000
+
+aes:
+  secret: test-aes-secret-key-16
