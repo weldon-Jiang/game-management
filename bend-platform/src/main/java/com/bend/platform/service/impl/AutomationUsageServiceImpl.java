@@ -38,34 +38,9 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         int totalPoints = 0;
         boolean canStart = true;
         StringBuilder message = new StringBuilder();
+        String chargeType = null;
 
         List<Subscription> activeSubscriptions = subscriptionService.getActiveSubscriptions(merchantId);
-
-        boolean hasWindowSubscription = checkSubscription(activeSubscriptions, "window", streamingAccountId);
-
-        boolean hasAccountSubscription = false;
-        String accountId = null;
-        if (gameAccounts != null && !gameAccounts.isEmpty()) {
-            accountId = gameAccounts.get(0).getId();
-            for (GameAccount gameAccount : gameAccounts) {
-                if (checkSubscription(activeSubscriptions, "account", gameAccount.getId())) {
-                    hasAccountSubscription = true;
-                    break;
-                }
-            }
-        }
-
-        boolean hasHostSubscription = false;
-        String hostId = null;
-        if (hosts != null && !hosts.isEmpty()) {
-            hostId = hosts.get(0).getId();
-            for (XboxHost host : hosts) {
-                if (checkSubscription(activeSubscriptions, "host", host.getId())) {
-                    hasHostSubscription = true;
-                    break;
-                }
-            }
-        }
 
         Merchant merchant = merchantMapper.selectById(merchantId);
         MerchantGroup group = getMerchantGroup(merchant);
@@ -75,54 +50,110 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         int hostPrice = group != null && group.getHostPrice() != null ? group.getHostPrice().intValue() : 20;
 
         Map<String, Object> windowMonthlyUsage = checkMonthlyUsage(merchantId, "window", streamingAccountId);
-        Map<String, Object> accountMonthlyUsage = checkMonthlyUsage(merchantId, "account", accountId);
-        Map<String, Object> hostMonthlyUsage = checkMonthlyUsage(merchantId, "host", hostId);
-
-        if (!hasWindowSubscription && !Boolean.TRUE.equals(windowMonthlyUsage.get("hasMonthlyFree"))) {
-            totalPoints += windowPrice;
-            result.put("windowCharge", true);
-        }
+        Map<String, Object> accountMonthlyUsage = checkMonthlyUsage(merchantId, "account",
+            gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getId() : null);
+        Map<String, Object> hostMonthlyUsage = checkMonthlyUsage(merchantId, "host",
+            hosts != null && !hosts.isEmpty() ? hosts.get(0).getId() : null);
 
         int accountCount = gameAccounts != null ? gameAccounts.size() : 0;
-        if (!hasAccountSubscription && !Boolean.TRUE.equals(accountMonthlyUsage.get("hasMonthlyFree")) && accountCount > 0) {
-            totalPoints += accountPrice * accountCount;
-            result.put("accountCharge", true);
+        int hostCount = hosts != null ? hosts.size() : 0;
+
+        boolean hasWindowSubscription = checkSubscription(activeSubscriptions, "window", streamingAccountId);
+        boolean hasAccountSubscription = false;
+        boolean hasHostSubscription = false;
+
+        for (GameAccount ga : gameAccounts) {
+            if (checkSubscription(activeSubscriptions, "account", ga.getId())) {
+                hasAccountSubscription = true;
+                break;
+            }
         }
 
-        int hostCount = hosts != null ? hosts.size() : 0;
-        if (!hasHostSubscription && !Boolean.TRUE.equals(hostMonthlyUsage.get("hasMonthlyFree")) && hostCount > 0) {
-            totalPoints += hostPrice * hostCount;
-            result.put("hostCharge", true);
+        for (XboxHost host : hosts) {
+            if (checkSubscription(activeSubscriptions, "host", host.getId())) {
+                hasHostSubscription = true;
+                break;
+            }
+        }
+
+        boolean windowMonthlyFree = Boolean.TRUE.equals(windowMonthlyUsage.get("hasMonthlyFree"));
+        boolean accountMonthlyFree = Boolean.TRUE.equals(accountMonthlyUsage.get("hasMonthlyFree"));
+        boolean hostMonthlyFree = Boolean.TRUE.equals(hostMonthlyUsage.get("hasMonthlyFree"));
+
+        if (hasWindowSubscription) {
+            totalPoints = 0;
+            chargeType = "subscription_window";
+            message.append("使用流媒体账号月度订阅，不扣点");
+        } else if (windowMonthlyFree) {
+            totalPoints = 0;
+            chargeType = "monthly_window";
+            message.append("本月流媒体账号月度额度已使用，当月免费");
+        } else if (hasAccountSubscription) {
+            totalPoints = 0;
+            chargeType = "subscription_account";
+            message.append("使用游戏账号月度订阅，不扣点");
+        } else if (accountMonthlyFree) {
+            totalPoints = 0;
+            chargeType = "monthly_account";
+            message.append("本月游戏账号月度额度已使用，当月免费");
+        } else if (hasHostSubscription) {
+            totalPoints = 0;
+            chargeType = "subscription_host";
+            message.append("使用Xbox主机月度订阅，不扣点");
+        } else if (hostMonthlyFree) {
+            totalPoints = 0;
+            chargeType = "monthly_host";
+            message.append("本月Xbox主机月度额度已使用，当月免费");
+        } else if (accountCount > 0) {
+            totalPoints = accountPrice * accountCount;
+            chargeType = "per_use_account";
+            message.append("按次扣费：游戏账号 ").append(accountCount).append(" 个，共 ").append(totalPoints).append(" 点");
+        } else if (hostCount > 0) {
+            totalPoints = hostPrice * hostCount;
+            chargeType = "per_use_host";
+            message.append("按次扣费：Xbox主机 ").append(hostCount).append(" 台，共 ").append(totalPoints).append(" 点");
+        } else {
+            totalPoints = windowPrice;
+            chargeType = "per_use_window";
+            message.append("按次扣费：流媒体账号，共 ").append(totalPoints).append(" 点");
         }
 
         if (totalPoints > 0 && !balanceService.hasEnoughBalance(merchantId, totalPoints)) {
             canStart = false;
-            message.append("余额不足，需要").append(totalPoints).append("点，当前余额不足，请先充值或使用激活码订阅。");
+            message.setLength(0);
+            message.append("余额不足，需要 ").append(totalPoints).append(" 点，当前余额不足，请先充值或使用激活码订阅。");
         }
 
         result.put("canStart", canStart);
         result.put("totalPoints", totalPoints);
         result.put("message", message.toString());
+        result.put("chargeType", chargeType);
+
         result.put("hasWindowSubscription", hasWindowSubscription);
         result.put("hasAccountSubscription", hasAccountSubscription);
         result.put("hasHostSubscription", hasHostSubscription);
+
+        result.put("windowMonthlyFree", windowMonthlyFree);
+        result.put("accountMonthlyFree", accountMonthlyFree);
+        result.put("hostMonthlyFree", hostMonthlyFree);
+
         result.put("windowPrice", windowPrice);
         result.put("accountPrice", accountPrice);
         result.put("hostPrice", hostPrice);
+
+        result.put("accountCount", accountCount);
+        result.put("hostCount", hostCount);
+
         result.put("windowMonthlyUsage", windowMonthlyUsage);
         result.put("accountMonthlyUsage", accountMonthlyUsage);
         result.put("hostMonthlyUsage", hostMonthlyUsage);
-        result.put("windowCharge", result.containsKey("windowCharge") ? result.get("windowCharge") : false);
-        result.put("accountCharge", result.containsKey("accountCharge") ? result.get("accountCharge") : false);
-        result.put("hostCharge", result.containsKey("hostCharge") ? result.get("hostCharge") : false);
+
         result.put("streamingAccountId", streamingAccountId);
-        result.put("accountId", accountId);
-        result.put("hostId", hostId);
         result.put("gameAccounts", gameAccounts);
         result.put("hosts", hosts);
 
-        log.info("自动化启动校验 - merchantId: {}, canStart: {}, totalPoints: {}",
-                merchantId, canStart, totalPoints);
+        log.info("自动化启动校验 - merchantId: {}, canStart: {}, totalPoints: {}, chargeType: {}",
+                merchantId, canStart, totalPoints, chargeType);
 
         return result;
     }
@@ -133,22 +164,18 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
                                        String streamingAccountId, String streamingAccountName,
                                        int gameAccountsCount, int hostsCount, Map<String, Object> validationResult) {
         int totalPoints = (Integer) validationResult.get("totalPoints");
+        String chargeType = (String) validationResult.get("chargeType");
 
-        String accountId = (String) validationResult.get("accountId");
-        String hostId = (String) validationResult.get("hostId");
-        Boolean hasWindowSubscription = (Boolean) validationResult.get("hasWindowSubscription");
-        Boolean hasAccountSubscription = (Boolean) validationResult.get("hasAccountSubscription");
-        Boolean hasHostSubscription = (Boolean) validationResult.get("hasHostSubscription");
-        Boolean windowCharge = (Boolean) validationResult.get("windowCharge");
-        Boolean accountCharge = (Boolean) validationResult.get("accountCharge");
-        Boolean hostCharge = (Boolean) validationResult.get("hostCharge");
-        int windowPrice = (Integer) validationResult.get("windowPrice");
-        int accountPrice = (Integer) validationResult.get("accountPrice");
-        int hostPrice = (Integer) validationResult.get("hostPrice");
         @SuppressWarnings("unchecked")
         List<GameAccount> gameAccounts = (List<GameAccount>) validationResult.get("gameAccounts");
         @SuppressWarnings("unchecked")
         List<XboxHost> hosts = (List<XboxHost>) validationResult.get("hosts");
+
+        int accountCount = (Integer) validationResult.getOrDefault("accountCount", 0);
+        int hostCount = (Integer) validationResult.getOrDefault("hostCount", 0);
+        int accountPrice = (Integer) validationResult.getOrDefault("accountPrice", 5);
+        int hostPrice = (Integer) validationResult.getOrDefault("hostPrice", 20);
+        int windowPrice = (Integer) validationResult.getOrDefault("windowPrice", 10);
 
         if (totalPoints > 0) {
             boolean deducted = balanceService.deductPoints(merchantId, totalPoints, userId,
@@ -159,88 +186,72 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
             }
         }
 
-        if (streamingAccountId != null) {
-            AutomationUsage windowUsage = new AutomationUsage();
-            windowUsage.setMerchantId(merchantId);
-            windowUsage.setUserId(userId);
-            windowUsage.setTaskId(taskId);
-            windowUsage.setStreamingAccountId(streamingAccountId);
-            windowUsage.setStreamingAccountName(streamingAccountName);
-            windowUsage.setGameAccountsCount(gameAccountsCount);
-            windowUsage.setHostsCount(hostsCount);
-            windowUsage.setResourceType("window");
-            windowUsage.setResourceId(streamingAccountId);
-            windowUsage.setResourceName(streamingAccountName);
-            if (hasWindowSubscription) {
-                windowUsage.setPointsDeducted(0);
-                windowUsage.setChargeMode("monthly");
-            } else if (Boolean.TRUE.equals(windowCharge)) {
-                windowUsage.setPointsDeducted(windowPrice);
-                windowUsage.setChargeMode("per_use");
+        String resourceType;
+        String resourceId;
+        String resourceName;
+        String chargeMode;
+        int pointsDeducted;
+
+        if (chargeType.startsWith("subscription_") || chargeType.startsWith("monthly_")) {
+            if (chargeType.contains("window")) {
+                resourceType = "window";
+                resourceId = streamingAccountId;
+                resourceName = streamingAccountName;
+                chargeMode = chargeType.startsWith("subscription_") ? "monthly" : "monthly";
+                pointsDeducted = 0;
+            } else if (chargeType.contains("account")) {
+                resourceType = "account";
+                resourceId = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getId() : null;
+                resourceName = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getXboxGameName() : null;
+                chargeMode = chargeType.startsWith("subscription_") ? "monthly" : "monthly";
+                pointsDeducted = 0;
             } else {
-                windowUsage.setPointsDeducted(0);
-                windowUsage.setChargeMode("monthly");
+                resourceType = "host";
+                resourceId = hosts != null && !hosts.isEmpty() ? hosts.get(0).getId() : null;
+                resourceName = hosts != null && !hosts.isEmpty() ? hosts.get(0).getName() : null;
+                chargeMode = chargeType.startsWith("subscription_") ? "monthly" : "monthly";
+                pointsDeducted = 0;
             }
-            windowUsage.setUsageTime(LocalDateTime.now());
-            automationUsageMapper.insert(windowUsage);
+        } else {
+            if (chargeType.contains("account")) {
+                resourceType = "account";
+                resourceId = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getId() : null;
+                resourceName = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getXboxGameName() : null;
+                chargeMode = "per_use";
+                pointsDeducted = accountPrice * accountCount;
+            } else if (chargeType.contains("host")) {
+                resourceType = "host";
+                resourceId = hosts != null && !hosts.isEmpty() ? hosts.get(0).getId() : null;
+                resourceName = hosts != null && !hosts.isEmpty() ? hosts.get(0).getName() : null;
+                chargeMode = "per_use";
+                pointsDeducted = hostPrice * hostCount;
+            } else {
+                resourceType = "window";
+                resourceId = streamingAccountId;
+                resourceName = streamingAccountName;
+                chargeMode = "per_use";
+                pointsDeducted = windowPrice;
+            }
         }
 
-        if (gameAccounts != null && !gameAccounts.isEmpty()) {
-            GameAccount firstAccount = gameAccounts.get(0);
-            AutomationUsage accountUsage = new AutomationUsage();
-            accountUsage.setMerchantId(merchantId);
-            accountUsage.setUserId(userId);
-            accountUsage.setTaskId(taskId);
-            accountUsage.setStreamingAccountId(streamingAccountId);
-            accountUsage.setStreamingAccountName(streamingAccountName);
-            accountUsage.setGameAccountsCount(gameAccountsCount);
-            accountUsage.setHostsCount(hostsCount);
-            accountUsage.setResourceType("account");
-            accountUsage.setResourceId(firstAccount.getId());
-            accountUsage.setResourceName(firstAccount.getXboxGameName());
-            if (hasAccountSubscription) {
-                accountUsage.setPointsDeducted(0);
-                accountUsage.setChargeMode("monthly");
-            } else if (Boolean.TRUE.equals(accountCharge)) {
-                accountUsage.setPointsDeducted(accountPrice);
-                accountUsage.setChargeMode("per_use");
-            } else {
-                accountUsage.setPointsDeducted(0);
-                accountUsage.setChargeMode("monthly");
-            }
-            accountUsage.setUsageTime(LocalDateTime.now());
-            automationUsageMapper.insert(accountUsage);
-        }
+        AutomationUsage usage = new AutomationUsage();
+        usage.setMerchantId(merchantId);
+        usage.setUserId(userId);
+        usage.setTaskId(taskId);
+        usage.setStreamingAccountId(streamingAccountId);
+        usage.setStreamingAccountName(streamingAccountName);
+        usage.setGameAccountsCount(gameAccountsCount);
+        usage.setHostsCount(hostsCount);
+        usage.setResourceType(resourceType);
+        usage.setResourceId(resourceId);
+        usage.setResourceName(resourceName);
+        usage.setPointsDeducted(pointsDeducted);
+        usage.setChargeMode(chargeMode);
+        usage.setUsageTime(LocalDateTime.now());
+        automationUsageMapper.insert(usage);
 
-        if (hosts != null && !hosts.isEmpty()) {
-            XboxHost firstHost = hosts.get(0);
-            AutomationUsage hostUsage = new AutomationUsage();
-            hostUsage.setMerchantId(merchantId);
-            hostUsage.setUserId(userId);
-            hostUsage.setTaskId(taskId);
-            hostUsage.setStreamingAccountId(streamingAccountId);
-            hostUsage.setStreamingAccountName(streamingAccountName);
-            hostUsage.setGameAccountsCount(gameAccountsCount);
-            hostUsage.setHostsCount(hostsCount);
-            hostUsage.setResourceType("host");
-            hostUsage.setResourceId(firstHost.getId());
-            hostUsage.setResourceName(firstHost.getName());
-            if (hasHostSubscription) {
-                hostUsage.setPointsDeducted(0);
-                hostUsage.setChargeMode("monthly");
-            } else if (Boolean.TRUE.equals(hostCharge)) {
-                hostUsage.setPointsDeducted(hostPrice);
-                hostUsage.setChargeMode("per_use");
-            } else {
-                hostUsage.setPointsDeducted(0);
-                hostUsage.setChargeMode("monthly");
-            }
-            hostUsage.setUsageTime(LocalDateTime.now());
-            automationUsageMapper.insert(hostUsage);
-        }
-
-        log.info("记录自动化使用 - merchantId: {}, taskId: {}, points: {}",
-                merchantId, taskId, totalPoints);
+        log.info("记录自动化使用 - merchantId: {}, taskId: {}, resourceType: {}, points: {}, chargeMode: {}",
+                merchantId, taskId, resourceType, pointsDeducted, chargeMode);
     }
 
     private boolean checkSubscription(List<Subscription> subscriptions, String type, String targetId) {

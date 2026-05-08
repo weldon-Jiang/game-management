@@ -235,6 +235,7 @@ const renewForm = reactive({
 })
 
 const typeNames = {
+  points: '点数',
   host: '主机',
   window: '窗口',
   account: '游戏号'
@@ -247,7 +248,7 @@ const statusNames = {
   unbound: '已解绑'
 }
 
-const getTypeName = (type) => typeNames[type] || type
+const getTypeName = (type) => typeNames[type] || type || '点数'
 const getStatusName = (status) => statusNames[status] || status
 
 const getStatusType = (status) => {
@@ -303,7 +304,7 @@ const previewActivationCode = async () => {
       const data = res.data
       activationPreview.value = {
         type: data.subscriptionType || 'points',
-        typeName: data.subscriptionType ? typeNames[data.subscriptionType] : '点数',
+        typeName: typeNames[data.subscriptionType] || '点数',
         points: data.points || 0,
         targetName: data.targetName || '-',
         durationDays: data.durationDays || 0
@@ -319,7 +320,6 @@ const previewActivationCode = async () => {
         activationConflict.value = null
       }
 
-      // VIP升级信息
       if (data.currentVipLevel !== undefined) {
         vipUpgradeInfo.value = {
           currentVipLevel: data.currentVipLevel,

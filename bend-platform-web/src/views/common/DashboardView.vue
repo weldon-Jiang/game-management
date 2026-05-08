@@ -68,77 +68,7 @@
     </div>
 
     <el-row :gutter="20" class="content-row">
-      <el-col :span="16">
-        <div class="content-card">
-          <div class="card-title">
-            <h3>快捷操作</h3>
-          </div>
-          <div class="quick-actions">
-            <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/merchants')">
-              <div class="action-icon">
-                <el-icon><OfficeBuilding /></el-icon>
-              </div>
-              <span>商户管理</span>
-            </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="action-item" @click="router.push('/streaming-accounts')">
-              <div class="action-icon">
-                <el-icon><VideoPlay /></el-icon>
-              </div>
-              <span>流媒体账号</span>
-            </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="action-item" @click="router.push('/game-accounts')">
-              <div class="action-icon">
-                <el-icon><Trophy /></el-icon>
-              </div>
-              <span>游戏账号</span>
-            </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="action-item" @click="router.push('/xbox-hosts')">
-              <div class="action-icon">
-                <el-icon><Monitor /></el-icon>
-              </div>
-              <span>Xbox主机</span>
-            </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isOperator || authStore.isMerchantOwner" class="action-item" @click="router.push('/agents')">
-              <div class="action-icon">
-                <el-icon><Cpu /></el-icon>
-              </div>
-              <span>Agent管理</span>
-            </div>
-            <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/agent-versions')">
-              <div class="action-icon">
-                <el-icon><Box /></el-icon>
-              </div>
-              <span>Agent版本</span>
-            </div>
-            <div v-if="authStore.isPlatformAdmin || authStore.isMerchantOwner" class="action-item" @click="router.push('/subscription')">
-              <div class="action-icon">
-                <el-icon><Wallet /></el-icon>
-              </div>
-              <span>订阅管理</span>
-            </div>
-            <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/registration-codes')">
-              <div class="action-icon">
-                <el-icon><Key /></el-icon>
-              </div>
-              <span>注册码管理</span>
-            </div>
-            <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/merchant-groups')">
-              <div class="action-icon">
-                <el-icon><User /></el-icon>
-              </div>
-              <span>商户分组</span>
-            </div>
-            <div v-if="authStore.isPlatformAdmin" class="action-item" @click="router.push('/recharge-cards')">
-              <div class="action-icon">
-                <el-icon><Tickets /></el-icon>
-              </div>
-              <span>充值卡管理</span>
-            </div>
-          </div>
-        </div>
-      </el-col>
-
-      <el-col :span="8">
+      <el-col :span="24">
         <div class="content-card">
           <div class="card-title">
             <h3>账户信息</h3>
@@ -362,51 +292,9 @@ onUnmounted(() => {
   margin: 0;
 }
 
-.quick-actions {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-
-.action-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 20px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.action-item:hover {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.3);
-  transform: translateY(-2px);
-}
-
-.action-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.1) 100%);
-  color: #6366f1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-}
-
-.action-item span {
-  font-size: 13px;
-  color: #b0b0b0;
-}
-
 .account-info {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 16px;
 }
 

@@ -47,7 +47,7 @@ public class MerchantServiceImpl implements MerchantService {
 
     /**
      * 创建商户
-     * 新商户默认状态为active，有效期100年
+     * 新商户默认状态为active
      *
      * @param name  商户名称
      * @param phone 商户联系电话
@@ -66,7 +66,6 @@ public class MerchantServiceImpl implements MerchantService {
         merchant.setPhone(phone);
         merchant.setName(name);
         merchant.setStatus("active");
-        merchant.setExpireTime(LocalDateTime.now().plusYears(100));
         merchant.setIsSystem(isSystem != null && isSystem);
         merchantMapper.insert(merchant);
 
@@ -84,7 +83,6 @@ public class MerchantServiceImpl implements MerchantService {
     public Merchant findById(String id) {
         Merchant merchant = merchantMapper.selectById(id);
         if (merchant != null) {
-            // 根据累计点数计算VIP等级
             int calculatedVipLevel = vipLevelCalculator.calculateVipLevel(
                     merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0
             );
@@ -107,7 +105,6 @@ public class MerchantServiceImpl implements MerchantService {
         Page<Merchant> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         IPage<Merchant> result = merchantMapper.selectPage(page, wrapper);
 
-        // 根据累计点数计算VIP等级
         for (Merchant merchant : result.getRecords()) {
             int calculatedVipLevel = vipLevelCalculator.calculateVipLevel(
                     merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0
@@ -129,7 +126,6 @@ public class MerchantServiceImpl implements MerchantService {
         wrapper.orderByAsc(Merchant::getName);
         List<Merchant> result = merchantMapper.selectList(wrapper);
 
-        // 根据累计点数计算VIP等级
         for (Merchant merchant : result) {
             int calculatedVipLevel = vipLevelCalculator.calculateVipLevel(
                     merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0
@@ -154,7 +150,6 @@ public class MerchantServiceImpl implements MerchantService {
             throw new BusinessException(ResultCode.Merchant.NOT_FOUND);
         }
 
-        // 验证状态值是否有效
         if (!isValidStatus(status)) {
             throw new BusinessException(ResultCode.Merchant.STATUS_INVALID);
         }
@@ -205,7 +200,7 @@ public class MerchantServiceImpl implements MerchantService {
     }
 
     /**
-     * 校验商户是否有效（状态正常且未过期）
+     * 校验商户是否有效（状态正常）
      *
      * @param merchantId 商户ID
      * @throws BusinessException 如果商户无效
@@ -219,10 +214,6 @@ public class MerchantServiceImpl implements MerchantService {
 
         if (!"active".equals(merchant.getStatus())) {
             throw new BusinessException(ResultCode.Merchant.STATUS_INVALID, "商户状态无效，请联系管理员");
-        }
-
-        if (merchant.getExpireTime() != null && merchant.getExpireTime().isBefore(LocalDateTime.now())) {
-            throw new BusinessException(ResultCode.Merchant.EXPIRED, "商户已过期，请续费");
         }
     }
 

@@ -1,8 +1,6 @@
 <template>
   <el-container class="main-layout">
-    <!-- 左侧边栏 -->
     <el-aside :width="isCollapse ? '64px' : '220px'" class="aside">
-      <!-- Logo区域 -->
       <div class="logo-area">
         <div class="logo-icon">
           <svg viewBox="0 0 24 24" fill="currentColor">
@@ -14,7 +12,6 @@
         </transition>
       </div>
 
-      <!-- 导航菜单 -->
       <el-menu
         :default-active="activeMenu"
         :collapse="isCollapse"
@@ -31,13 +28,17 @@
 
         <el-divider style="margin: 8px 0; border-color: rgba(255,255,255,0.06);" />
 
-        <div class="menu-group-title" v-if="!isCollapse && showPlatformGroup">平台管理</div>
+        <div class="menu-group-title" v-if="!isCollapse && showUserManagementGroup">账号管理</div>
+        <el-menu-item v-if="authStore.hasManagementPermission" index="Users" @click="router.push('/users')">
+          <el-icon><User /></el-icon>
+          <template #title>用户管理</template>
+        </el-menu-item>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="Merchants" @click="router.push('/merchants')">
           <el-icon><OfficeBuilding /></el-icon>
           <template #title>商户管理</template>
         </el-menu-item>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="MerchantGroups" @click="router.push('/merchant-groups')">
-          <el-icon><User /></el-icon>
+          <el-icon><Collection /></el-icon>
           <template #title>商户分组</template>
         </el-menu-item>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="ActivationCodes" @click="router.push('/activation-codes')">
@@ -85,9 +86,7 @@
       </el-menu>
     </el-aside>
 
-    <!-- 右侧主内容区 -->
     <el-container class="main-container">
-      <!-- 顶部导航栏 -->
       <el-header class="header">
         <div class="header-left">
           <el-button
@@ -105,7 +104,6 @@
         </div>
 
         <div class="header-right">
-          <!-- 用户信息 -->
           <el-dropdown @command="handleUserCommand">
             <div class="user-info">
               <el-avatar :size="32" class="user-avatar">
@@ -129,7 +127,6 @@
         </div>
       </el-header>
 
-      <!-- 主内容区 -->
       <el-main class="main-content">
         <router-view />
       </el-main>
@@ -159,7 +156,8 @@ import {
   ArrowDown,
   SwitchButton,
   Wallet,
-  Tickets
+  Tickets,
+  Collection
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -167,6 +165,7 @@ const authStore = useAuthStore()
 
 const isCollapse = ref(false)
 
+const showUserManagementGroup = computed(() => authStore.hasManagementPermission)
 const showPlatformGroup = computed(() => authStore.isPlatformAdmin)
 const showAccountGroup = computed(() => authStore.hasManagementPermission || authStore.isOperator)
 const showAgentGroup = computed(() => authStore.hasManagementPermission || authStore.isOperator)

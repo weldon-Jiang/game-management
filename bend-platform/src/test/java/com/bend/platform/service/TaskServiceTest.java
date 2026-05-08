@@ -40,7 +40,7 @@ class TaskServiceTest {
         testTask.setName("测试任务");
         testTask.setType("stream_control");
         testTask.setStatus("pending");
-        testTask.setPriority("0");
+        testTask.setPriority(0);
         testTask.setMaxRetries(3);
         testTask.setDeleted(false);
     }
@@ -232,5 +232,103 @@ class TaskServiceTest {
 
         assertEquals(1, stuckTasks.size());
         assertEquals("stuck-task", stuckTasks.get(0).getId());
+    }
+
+    @Test
+    void testPauseRunningTask() {
+        testTask.setStatus("running");
+        when(taskMapper.selectById("task-001")).thenReturn(testTask);
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
+        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
+
+        taskService.pause("task-001");
+
+        assertEquals("paused", testTask.getStatus());
+        verify(taskMapper, times(1)).updateById(testTask);
+    }
+
+    @Test
+    void testPauseNonRunningTask() {
+        testTask.setStatus("pending");
+        when(taskMapper.selectById("task-001")).thenReturn(testTask);
+        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
+
+        assertThrows(BusinessException.class, () -> {
+            taskService.pause("task-001");
+        });
+    }
+
+    @Test
+    void testResumePausedTask() {
+        testTask.setStatus("paused");
+        when(taskMapper.selectById("task-001")).thenReturn(testTask);
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
+        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
+
+        taskService.resume("task-001");
+
+        assertEquals("running", testTask.getStatus());
+        verify(taskMapper, times(1)).updateById(testTask);
+    }
+
+    @Test
+    void testResumeNonPausedTask() {
+        testTask.setStatus("running");
+        when(taskMapper.selectById("task-001")).thenReturn(testTask);
+        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
+
+        assertThrows(BusinessException.class, () -> {
+            taskService.resume("task-001");
+        });
+    }
+
+    @Test
+    void testStopRunningTask() {
+        testTask.setStatus("running");
+        testTask.setTargetAgentId("agent-001");
+        when(taskMapper.selectById("task-001")).thenReturn(testTask);
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
+        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
+
+        taskService.stop("task-001");
+
+        assertEquals("stopped", testTask.getStatus());
+        assertEquals("用户手动停止", testTask.getErrorMessage());
+        assertNotNull(testTask.getCompletedTime());
+        verify(taskMapper, times(1)).updateById(testTask);
+    }
+
+    @Test
+    void testStopPausedTask() {
+        testTask.setStatus("paused");
+        testTask.setTargetAgentId("agent-001");
+        when(taskMapper.selectById("task-001")).thenReturn(testTask);
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
+        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
+
+        taskService.stop("task-001");
+
+        assertEquals("stopped", testTask.getStatus());
+        verify(taskMapper, times(1)).updateById(testTask);
+    }
+
+    @Test
+    void testStopCompletedTask() {
+        testTask.setStatus("completed");
+        when(taskMapper.selectById("task-001")).thenReturn(testTask);
+        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
+
+        assertThrows(BusinessException.class, () -> {
+            taskService.stop("task-001");
+        });
+    }
+
+    @Test
+    void testStopTaskNotFound() {
+        when(taskMapper.selectById("non-existent")).thenReturn(null);
+
+        assertThrows(BusinessException.class, () -> {
+            taskService.stop("non-existent");
+        });
     }
 }

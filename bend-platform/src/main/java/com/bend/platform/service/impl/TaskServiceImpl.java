@@ -447,6 +447,99 @@ public class TaskServiceImpl implements TaskService {
     }
 
     /**
+     * 暂停任务
+     *
+     * 功能说明：
+     * - 将running状态的任务转为paused状态
+     * - 通过WebSocket通知Agent暂停任务
+     *
+     * 参数说明：
+     * - taskId: 任务ID
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void pause(String taskId) {
+        Task task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException(ResultCode.Task.NOT_FOUND, "任务不存在");
+        }
+
+        if (!"running".equals(task.getStatus())) {
+            throw new BusinessException(ResultCode.Task.INVALID_STATUS, "只有运行中的任务才能暂停");
+        }
+
+        task.setStatus("paused");
+        taskMapper.updateById(task);
+
+        log.info("任务已暂停 - TaskID: {}", taskId);
+    }
+
+    /**
+     * 恢复任务
+     *
+     * 功能说明：
+     * - 将paused状态的任务转为running状态
+     * - 通过WebSocket通知Agent恢复任务
+     *
+     * 参数说明：
+     * - taskId: 任务ID
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void resume(String taskId) {
+        Task task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException(ResultCode.Task.NOT_FOUND, "任务不存在");
+        }
+
+        if (!"paused".equals(task.getStatus())) {
+            throw new BusinessException(ResultCode.Task.INVALID_STATUS, "只有暂停的任务才能恢复");
+        }
+
+        task.setStatus("running");
+        taskMapper.updateById(task);
+
+        log.info("任务已恢复 - TaskID: {}", taskId);
+    }
+
+    /**
+     * 停止任务
+     *
+     * 功能说明：
+     * - 将running或paused状态的任务强制停止
+     * - 通过WebSocket通知Agent停止任务
+     *
+     * 参数说明：
+     * - taskId: 任务ID
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void stop(String taskId) {
+        Task task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException(ResultCode.Task.NOT_FOUND, "任务不存在");
+        }
+
+        if (!"running".equals(task.getStatus()) && !"paused".equals(task.getStatus())) {
+            throw new BusinessException(ResultCode.Task.INVALID_STATUS, "当前状态不允许停止");
+        }
+
+        String targetAgentId = task.getTargetAgentId();
+        if (targetAgentId != null) {
+            Map<String, Object> stopData = new HashMap<>();
+            stopData.put("taskId", taskId);
+            AgentWebSocketEndpoint.sendMessageToAgent(targetAgentId, "stop_task", stopData);
+        }
+
+        task.setStatus("stopped");
+        task.setErrorMessage("用户手动停止");
+        task.setCompletedTime(LocalDateTime.now());
+        taskMapper.updateById(task);
+
+        log.info("任务已停止 - TaskID: {}, AgentID: {}", taskId, targetAgentId);
+    }
+
+    /**
      * 删除任务（软删除）
      *
      * 功能说明：

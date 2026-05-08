@@ -57,7 +57,6 @@ public class MerchantSubscriptionController {
         }
 
         Map<String, Object> status = new HashMap<>();
-        // 点数制：只要商户存在且状态正常就是 active
         String currentStatus = "active".equals(merchant.getStatus()) ? "active" : "inactive";
         status.put("status", currentStatus);
         status.put("merchantName", merchant.getName());
@@ -95,6 +94,10 @@ public class MerchantSubscriptionController {
             return ApiResponse.error(404, "激活码不存在");
         }
 
+        if (!merchantId.equals(activationCode.getMerchantId())) {
+            return ApiResponse.error(403, "激活码不属于当前商户");
+        }
+
         ActivationCodeBatch batch = activationCodeBatchMapper.selectById(activationCode.getBatchId());
 
         Map<String, Object> preview = new HashMap<>();
@@ -103,7 +106,6 @@ public class MerchantSubscriptionController {
             subscriptionType = "points";
         }
         preview.put("subscriptionType", subscriptionType);
-        // 兼容 points 和 pointsAmount 两个字段
         Integer pointsValue = 0;
         if (batch != null) {
             pointsValue = batch.getPointsAmount() != null ? batch.getPointsAmount() : batch.getPoints();
@@ -118,7 +120,6 @@ public class MerchantSubscriptionController {
         preview.put("status", activationCode.getStatus());
         preview.put("expireTime", activationCode.getExpireTime());
 
-        // 检查商户是否有活跃订阅（用于前端显示警告）
         if (!"points".equals(subscriptionType)) {
             List<Subscription> activeSubscriptions = subscriptionService.getActiveSubscriptions(merchantId);
             if (!activeSubscriptions.isEmpty()) {
@@ -138,7 +139,6 @@ public class MerchantSubscriptionController {
             preview.put("activeSubscriptionConflict", false);
         }
 
-        // VIP升级预览信息
         Merchant merchant = merchantMapper.selectById(merchantId);
         int currentVipLevel = merchant != null && merchant.getVipLevel() != null ? merchant.getVipLevel() : 0;
         MerchantBalance balance = balanceService.getByMerchantId(merchantId);
@@ -158,7 +158,6 @@ public class MerchantSubscriptionController {
             preview.put("vipUpgradeMessage", null);
         }
 
-        // 计算距离下一级还需多少点
         LambdaQueryWrapper<MerchantGroup> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(MerchantGroup::getStatus, "active")
                 .gt(MerchantGroup::getVipLevel, currentVipLevel)
@@ -190,6 +189,10 @@ public class MerchantSubscriptionController {
             return ApiResponse.error(404, "激活码不存在");
         }
 
+        if (!merchantId.equals(activationCode.getMerchantId())) {
+            return ApiResponse.error(403, "激活码不属于当前商户");
+        }
+
         if (!"unused".equals(activationCode.getStatus())) {
             return ApiResponse.error(400, "激活码已被使用");
         }
@@ -215,9 +218,7 @@ public class MerchantSubscriptionController {
         Object subscriptionResult = null;
 
         if ("points".equals(subscriptionType)) {
-            // 点数模式：增加余额
             if (batch != null) {
-                // 兼容 points 和 pointsAmount 两个字段
                 Integer pointsValue = batch.getPointsAmount() != null ? batch.getPointsAmount() : batch.getPoints();
                 if (pointsValue != null) {
                     pointsAdded = pointsValue;
@@ -227,10 +228,8 @@ public class MerchantSubscriptionController {
             result.put("type", "points");
             result.put("pointsAdded", pointsAdded);
         } else {
-            // 订阅模式：创建订阅记录（game_account -> account, window -> window, host -> host）
             String mappedType = mapSubscriptionType(subscriptionType);
 
-            // 完全互斥检查：检查商户是否有任何活跃订阅
             List<Subscription> activeSubscriptions = subscriptionService.getActiveSubscriptions(merchantId);
             if (!activeSubscriptions.isEmpty()) {
                 Subscription activeSub = activeSubscriptions.get(0);
@@ -241,7 +240,6 @@ public class MerchantSubscriptionController {
             if (batch != null) {
                 int durationDays = batch.getDurationDays() != null ? batch.getDurationDays() : 30;
 
-                // 创建订阅（激活码不扣点，因为是用激活码购买的）
                 subscriptionResult = subscriptionService.createSubscriptionWithoutDeduction(
                         merchantId,
                         userId,
@@ -251,7 +249,6 @@ public class MerchantSubscriptionController {
                         durationDays
                 );
 
-                // 将激活码点数价值计入VIP累计（用于VIP升级判定）
                 Integer pointsValue = batch.getPointsAmount() != null ? batch.getPointsAmount() : batch.getPoints();
                 if (pointsValue != null && pointsValue > 0) {
                     balanceService.recordActivationCodeValueForVipUpgrade(merchantId, pointsValue);
@@ -268,16 +265,12 @@ public class MerchantSubscriptionController {
         activationCode.setUsedTime(LocalDateTime.now());
         activationCodeMapper.updateById(activationCode);
 
-        // 重新从数据库获取最新的数据（包括VIP等级可能的变化）
         merchant = merchantMapper.selectById(merchantId);
         result.put("totalPoints", merchant.getTotalPoints());
         result.put("vipLevel", merchant.getVipLevel());
         return ApiResponse.success("激活成功", result);
     }
-    
-    /**
-     * 映射激活码订阅类型到内部订阅类型
-     */
+
     private String mapSubscriptionType(String type) {
         return switch (type) {
             case "game_account" -> "account";
@@ -286,10 +279,7 @@ public class MerchantSubscriptionController {
             default -> type;
         };
     }
-    
-    /**
-     * 获取订阅类型的中文名称
-     */
+
     private String getTypeName(String type) {
         return switch (type) {
             case "host" -> "主机";

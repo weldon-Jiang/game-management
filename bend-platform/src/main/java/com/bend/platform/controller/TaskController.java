@@ -194,6 +194,72 @@ public class TaskController {
     }
 
     /**
+     * 暂停任务
+     *
+     * @param id 任务ID
+     * @return 任务信息
+     */
+    @PostMapping("/{id}/pause")
+    public ApiResponse<Task> pause(@PathVariable String id) {
+        log.info("暂停任务 - TaskID: {}", id);
+        Task task = taskService.findById(id);
+        if (task == null) {
+            return ApiResponse.error(404, "任务不存在");
+        }
+
+        taskService.pause(id);
+
+        messageService.sendToAgent(task.getTargetAgentId(), "pause", Map.of("taskId", id));
+
+        task = taskService.findById(id);
+        return ApiResponse.success("任务已暂停", task);
+    }
+
+    /**
+     * 恢复任务
+     *
+     * @param id 任务ID
+     * @return 任务信息
+     */
+    @PostMapping("/{id}/resume")
+    public ApiResponse<Task> resume(@PathVariable String id) {
+        log.info("恢复任务 - TaskID: {}", id);
+        Task task = taskService.findById(id);
+        if (task == null) {
+            return ApiResponse.error(404, "任务不存在");
+        }
+
+        taskService.resume(id);
+
+        messageService.sendToAgent(task.getTargetAgentId(), "resume", Map.of("taskId", id));
+
+        task = taskService.findById(id);
+        return ApiResponse.success("任务已恢复", task);
+    }
+
+    /**
+     * 停止任务
+     *
+     * @param id 任务ID
+     * @return 任务信息
+     */
+    @PostMapping("/{id}/stop")
+    public ApiResponse<Task> stop(@PathVariable String id) {
+        log.info("停止任务 - TaskID: {}", id);
+        Task task = taskService.findById(id);
+        if (task == null) {
+            return ApiResponse.error(404, "任务不存在");
+        }
+
+        taskService.stop(id);
+
+        messageService.sendToAgent(task.getTargetAgentId(), "stop", Map.of("taskId", id));
+
+        task = taskService.findById(id);
+        return ApiResponse.success("任务已停止", task);
+    }
+
+    /**
      * 删除任务
      *
      * @param id 任务ID

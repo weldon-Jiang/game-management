@@ -110,6 +110,8 @@ public class AgentWebSocketEndpoint {
                 handleTaskResult(agentId, data);
             } else if ("status_report".equals(type)) {
                 handleStatusReport(agentId, data);
+            } else if ("task_progress".equals(type)) {
+                handleTaskProgress(agentId, data);
             } else if ("log".equals(type)) {
                 handleAgentLog(agentId, data);
             } else {
@@ -272,6 +274,33 @@ public class AgentWebSocketEndpoint {
         adminData.put("agentId", agentId);
         adminData.put("data", data.toString());
         broadcastToAdmins("status_report", adminData);
+    }
+
+    private void handleTaskProgress(String agentId, JsonNode data) {
+        try {
+            String taskId = data.has("taskId") ? data.get("taskId").asText() : null;
+            String step = data.has("step") ? data.get("step").asText() : null;
+            String status = data.has("status") ? data.get("status").asText() : null;
+            String message = data.has("message") ? data.get("message").asText() : null;
+            JsonNode extraData = data.has("extra_data") ? data.get("extra_data") : null;
+
+            log.info("Agent任务进度 - AgentID: {}, TaskID: {}, Step: {}, Status: {}, Message: {}",
+                    agentId, taskId, step, status, message);
+
+            Map<String, Object> adminData = new HashMap<>();
+            adminData.put("agentId", agentId);
+            adminData.put("taskId", taskId);
+            adminData.put("step", step);
+            adminData.put("status", status);
+            adminData.put("message", message);
+            adminData.put("extraData", extraData != null ? extraData.toString() : null);
+            adminData.put("timestamp", System.currentTimeMillis());
+
+            broadcastToAdmins("task_progress", adminData);
+
+        } catch (Exception e) {
+            log.error("处理任务进度失败 - AgentID: {}, Error: {}", agentId, e.getMessage());
+        }
     }
 
     private void handleAgentLog(String agentId, JsonNode data) {

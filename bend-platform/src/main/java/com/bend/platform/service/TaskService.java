@@ -173,6 +173,36 @@ public interface TaskService {
     Task retry(String taskId);
 
     /**
+     * 暂停任务
+     *
+     * <p>将 running 状态的任务转为 paused 状态。
+     *
+     * @param taskId 任务ID
+     * @return 暂停后的任务
+     */
+    void pause(String taskId);
+
+    /**
+     * 恢复任务
+     *
+     * <p>将 paused 状态的任务转为 running 状态。
+     *
+     * @param taskId 任务ID
+     * @return 恢复后的任务
+     */
+    void resume(String taskId);
+
+    /**
+     * 停止任务
+     *
+     * <p>将 running 或 paused 状态的任务强制停止，转为 stopped 状态。
+     *
+     * @param taskId 任务ID
+     * @return 停止后的任务
+     */
+    void stop(String taskId);
+
+    /**
      * 删除任务（软删除）
      *
      * <p>将任务的 deleted 标志设置为 true，不会真正从数据库删除。

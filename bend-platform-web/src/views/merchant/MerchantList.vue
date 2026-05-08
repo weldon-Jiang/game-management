@@ -1,6 +1,5 @@
 <template>
   <div class="page-container">
-    <!-- 页面标题栏 -->
     <div class="page-header">
       <div class="header-left">
         <h2>商户管理</h2>
@@ -14,7 +13,6 @@
       </div>
     </div>
 
-    <!-- 商户列表表格 -->
     <div class="content-card table-container">
       <el-table
         :data="tableData"
@@ -45,11 +43,6 @@
             <span class="points-text">{{ row.totalPoints || 0 }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="expireTime" label="有效期至" width="170">
-          <template #default="{ row }">
-            {{ row.expireTime ? formatDate(row.expireTime) : '永久' }}
-          </template>
-        </el-table-column>
         <el-table-column prop="createdTime" label="创建时间" width="170">
           <template #default="{ row }">
             {{ formatDate(row.createdTime) }}
@@ -61,7 +54,7 @@
               编辑
             </el-button>
             <el-button
-              v-if="isExpirable(row) && !row.isSystem"
+              v-if="!row.isSystem"
               :type="getActionBtnType(row)"
               link
               size="small"
@@ -76,7 +69,6 @@
         </el-table-column>
       </el-table>
 
-      <!-- 分页组件 -->
       <div class="pagination-wrap">
         <el-pagination
           v-model:current-page="pagination.pageNum"
@@ -90,7 +82,6 @@
       </div>
     </div>
 
-    <!-- 新增/编辑商户对话框 -->
     <el-dialog
       v-model="dialogVisible"
       :title="dialogType === 'add' ? '新增商户' : '编辑商户'"
@@ -133,55 +124,19 @@ import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 
-/**
- * 商户管理列表页面
- * 提供商户的增删改查功能
- */
-
-// ==================== 状态定义 ====================
-
-/**
- * 表格数据加载状态
- */
 const loading = ref(false)
-
-/**
- * 提交按钮加载状态
- */
 const submitLoading = ref(false)
-
-/**
- * 表格数据列表
- */
 const tableData = ref([])
-
-/**
- * 分页参数
- */
 const pagination = reactive({
   pageNum: 1,
   pageSize: 10,
   total: 0
 })
 
-/**
- * 对话框显示状态
- */
 const dialogVisible = ref(false)
-
-/**
- * 对话框类型: add-新增, edit-编辑
- */
 const dialogType = ref('add')
-
-/**
- * 表单引用
- */
 const formRef = ref(null)
 
-/**
- * 表单数据
- */
 const formData = reactive({
   id: '',
   name: '',
@@ -189,9 +144,6 @@ const formData = reactive({
   isSystem: false
 })
 
-/**
- * 表单验证规则
- */
 const formRules = {
   name: [
     { required: true, message: '请输入商户名称', trigger: 'blur' },
@@ -203,11 +155,6 @@ const formRules = {
   ]
 }
 
-// ==================== 方法定义 ====================
-
-/**
- * 加载商户列表数据
- */
 const loadData = async () => {
   loading.value = true
   try {
@@ -224,11 +171,6 @@ const loadData = async () => {
   }
 }
 
-/**
- * 显示新增/编辑对话框
- * @param {string} type - 对话框类型
- * @param {Object} row - 当前行数据（编辑时）
- */
 const showDialog = (type, row = null) => {
   dialogType.value = type
   if (type === 'edit' && row) {
@@ -245,9 +187,6 @@ const showDialog = (type, row = null) => {
   dialogVisible.value = true
 }
 
-/**
- * 提交表单数据
- */
 const handleSubmit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
@@ -278,20 +217,7 @@ const handleSubmit = async () => {
   }
 }
 
-/**
- * 更新商户状态
- * @param {Object} row - 当前行数据
- */
 const handleStatus = async (row) => {
-  // 如果是启用操作，检查是否已过期
-  if (row.status === 'suspended' || isExpired(row)) {
-    // 启用操作 - 检查是否已过期
-    if (isExpired(row)) {
-      ElMessage.warning('账号已过期，请先续费后再启用')
-      return
-    }
-  }
-
   const newStatus = row.status === 'active' ? 'suspended' : 'active'
   const actionText = newStatus === 'active' ? '启用' : '停用'
 
@@ -310,54 +236,16 @@ const handleStatus = async (row) => {
   }
 }
 
-/**
- * 判断商户是否已过期
- * @param {Object} row - 商户数据
- * @returns {boolean}
- */
-const isExpired = (row) => {
-  if (!row.expireTime) return false
-  return new Date(row.expireTime) < new Date()
-}
-
-/**
- * 判断是否显示启用/停用按钮（expireTime >= 当前时间才显示）
- * @param {Object} row - 商户数据
- * @returns {boolean}
- */
-const isExpirable = (row) => {
-  // 如果没有过期时间（永久），一直显示
-  if (!row.expireTime) return true
-  // 如果已过期，不显示按钮
-  if (isExpired(row)) return false
-
-  return true
-}
-
-/**
- * 获取操作按钮类型
- * @param {Object} row - 商户数据
- * @returns {string}
- */
 const getActionBtnType = (row) => {
   if (row.status === 'active') return 'warning'
   return 'success'
 }
 
-/**
- * 获取操作按钮文本
- * @param {Object} row - 商户数据
- * @returns {string}
- */
 const getActionBtnText = (row) => {
   if (row.status === 'active') return '停用'
   return '启用'
 }
 
-/**
- * 删除商户
- * @param {Object} row - 当前行数据
- */
 const handleDelete = async (row) => {
   await ElMessageBox.confirm(`确定要删除商户「${row.name}」吗？此操作不可恢复！`, '危险操作', {
     confirmButtonText: '确定删除',
@@ -374,43 +262,18 @@ const handleDelete = async (row) => {
   }
 }
 
-/**
- * 获取状态标签类型（根据status和expireTime综合判断）
- * @param {Object} row - 商户数据
- * @returns {string} 标签类型
- */
 const getStatusType = (row) => {
-  const { status, expireTime } = row
-  if (expireTime && new Date(expireTime) < new Date()) return 'warning'
-
-  if (status === 'active' && (!expireTime || new Date(expireTime) >= new Date())) return 'success'
-
-  if (status === 'suspended') return 'danger'
-
+  if (row.status === 'active') return 'success'
+  if (row.status === 'suspended') return 'danger'
   return 'info'
 }
 
-/**
- * 获取状态显示文本（根据status和expireTime综合判断）
- * @param {Object} row - 商户数据
- * @returns {string} 状态文本
- */
 const getStatusText = (row) => {
-  const { status, expireTime } = row
-  if (expireTime && new Date(expireTime) < new Date()) return '已过期'
-
-  if (status === 'active' && (!expireTime || new Date(expireTime) >= new Date())) return '正常'
-
-  if (status === 'suspended') return '已停用'
-
-  return status
+  if (row.status === 'active') return '正常'
+  if (row.status === 'suspended') return '已停用'
+  return row.status
 }
 
-/**
- * 格式化日期时间
- * @param {string} dateStr - 日期字符串
- * @returns {string} 格式化后的日期
- */
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
@@ -423,16 +286,12 @@ const formatDate = (dateStr) => {
   })
 }
 
-// ==================== 生命周期 ====================
-
 onMounted(() => {
   loadData()
 })
 </script>
 
 <style scoped>
-/* 组件特有样式，去除重复的全局样式覆盖 */
-
 .data-table {
   width: 100%;
 }

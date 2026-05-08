@@ -14,5 +14,8 @@ export const taskApi = {
   getTypes: () => request.get('/api/tasks/types'),
   getStatuses: () => request.get('/api/tasks/statuses'),
   listByAgent: (agentId) => request.get(`/api/tasks/agent/${agentId}`),
-  listPendingByAgent: (agentId) => request.get(`/api/tasks/agent/${agentId}/pending`)
+  listPendingByAgent: (agentId) => request.get(`/api/tasks/agent/${agentId}/pending`),
+  pause: (taskId) => request.post(`/api/tasks/${taskId}/pause`),
+  resume: (taskId) => request.post(`/api/tasks/${taskId}/resume`),
+  stop: (taskId) => request.post(`/api/tasks/${taskId}/stop`)
 }
