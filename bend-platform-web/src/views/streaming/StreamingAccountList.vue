@@ -405,7 +405,7 @@ import { ref, reactive, onMounted, nextTick, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Monitor } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi } from '@/api'
+import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi } from '@/api'
 import { getStreamingAccountStatusText, getStreamingAccountStatusType, TASK_TYPE_MAP } from '@/utils/constants'
 
 // ==================== 状态定义 ====================
@@ -545,12 +545,12 @@ const priority = ref(0)
 
 /**
  * 可用的任务类型列表
- * 根据商户分组的权限动态加载
+ * 根据VIP分组的权限动态加载
  */
 const availableTaskTypes = ref([])
 
 /**
- * 加载商户分组的功能权限
+ * 加载VIP分组的功能权限
  * 用于动态显示可用的任务类型
  * 如果商户没有VIP等级，默认只展示"串流控制"
  * @param {string} merchantId 商户ID
@@ -794,15 +794,31 @@ const handleSubmit = async () => {
  */
 const showStartAutomationDialog = async (row) => {
   try {
+    const subRes = await subscriptionApi.getStatus()
+    if (!subRes.data?.currentSubscription) {
+      ElMessage.warning('当前没有有效的包月，请先购买订阅')
+      return
+    }
+
     const res = await gameAccountApi.list({ streamingId: row.id, pageSize: 1000 })
     const boundAccounts = res.data?.records || []
     if (boundAccounts.length === 0) {
       ElMessage.warning('该流媒体账号下没有关联的游戏账号，请先关联游戏账号后再启动自动化')
       return
     }
+
+    const validateRes = await subscriptionApi.validateAutomationRequest({
+      streamingAccountId: row.id,
+      gameAccountIds: boundAccounts.map(acc => acc.id)
+    })
+
+    if (!validateRes.data?.canStart) {
+      ElMessage.warning(validateRes.data?.errors?.join('; ') || '无法启动自动化，请检查订阅状态')
+      return
+    }
   } catch (error) {
-    console.error('Failed to check bound game accounts:', error)
-    ElMessage.warning('检查关联游戏账号失败')
+    console.error('Failed to validate automation:', error)
+    ElMessage.warning('检查订阅状态失败')
     return
   }
 

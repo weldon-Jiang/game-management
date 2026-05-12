@@ -9,7 +9,6 @@ import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.MerchantService;
-import com.bend.platform.service.impl.VipLevelCalculator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,7 +42,6 @@ import java.util.List;
 public class MerchantServiceImpl implements MerchantService {
 
     private final MerchantMapper merchantMapper;
-    private final VipLevelCalculator vipLevelCalculator;
 
     /**
      * 创建商户
@@ -60,6 +58,10 @@ public class MerchantServiceImpl implements MerchantService {
         phoneWrapper.eq(Merchant::getPhone, phone);
         if (merchantMapper.selectCount(phoneWrapper) > 0) {
             throw new BusinessException(ResultCode.Merchant.PHONE_DUPLICATE);
+        }
+
+        if (isSystem != null && isSystem) {
+            switchSystemMerchant(null);
         }
 
         Merchant merchant = new Merchant();
@@ -81,14 +83,7 @@ public class MerchantServiceImpl implements MerchantService {
      */
     @Override
     public Merchant findById(String id) {
-        Merchant merchant = merchantMapper.selectById(id);
-        if (merchant != null) {
-            int calculatedVipLevel = vipLevelCalculator.calculateVipLevel(
-                    merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0
-            );
-            merchant.setVipLevel(calculatedVipLevel);
-        }
-        return merchant;
+        return merchantMapper.selectById(id);
     }
 
     /**
@@ -103,16 +98,7 @@ public class MerchantServiceImpl implements MerchantService {
         LambdaQueryWrapper<Merchant> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(Merchant::getCreatedTime);
         Page<Merchant> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
-        IPage<Merchant> result = merchantMapper.selectPage(page, wrapper);
-
-        for (Merchant merchant : result.getRecords()) {
-            int calculatedVipLevel = vipLevelCalculator.calculateVipLevel(
-                    merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0
-            );
-            merchant.setVipLevel(calculatedVipLevel);
-        }
-
-        return result;
+        return merchantMapper.selectPage(page, wrapper);
     }
 
     /**
@@ -124,16 +110,7 @@ public class MerchantServiceImpl implements MerchantService {
     public List<Merchant> findAllSimple() {
         LambdaQueryWrapper<Merchant> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByAsc(Merchant::getName);
-        List<Merchant> result = merchantMapper.selectList(wrapper);
-
-        for (Merchant merchant : result) {
-            int calculatedVipLevel = vipLevelCalculator.calculateVipLevel(
-                    merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0
-            );
-            merchant.setVipLevel(calculatedVipLevel);
-        }
-
-        return result;
+        return merchantMapper.selectList(wrapper);
     }
 
     /**
@@ -191,6 +168,10 @@ public class MerchantServiceImpl implements MerchantService {
             throw new BusinessException(ResultCode.Merchant.PHONE_DUPLICATE);
         }
 
+        if (isSystem != null && isSystem && !Boolean.TRUE.equals(merchant.getIsSystem())) {
+            switchSystemMerchant(id);
+        }
+
         merchant.setName(name);
         merchant.setPhone(phone);
         merchant.setIsSystem(isSystem != null && isSystem);
@@ -225,5 +206,26 @@ public class MerchantServiceImpl implements MerchantService {
      */
     private boolean isValidStatus(String status) {
         return "active".equals(status) || "expired".equals(status) || "suspended".equals(status);
+    }
+
+    /**
+     * 切换系统商户
+     * 将其他系统商户设置为非系统商户，确保只有一个系统商户
+     *
+     * @param excludeMerchantId 排除的商户ID（更新时传入自身ID）
+     */
+    private void switchSystemMerchant(String excludeMerchantId) {
+        LambdaQueryWrapper<Merchant> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Merchant::getIsSystem, true);
+        if (excludeMerchantId != null) {
+            wrapper.ne(Merchant::getId, excludeMerchantId);
+        }
+        List<Merchant> systemMerchants = merchantMapper.selectList(wrapper);
+
+        for (Merchant m : systemMerchants) {
+            m.setIsSystem(false);
+            merchantMapper.updateById(m);
+            log.info("切换系统商户 - 原系统商户: {}, 新系统商户ID: {}", m.getId(), excludeMerchantId);
+        }
     }
 }

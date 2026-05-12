@@ -3,10 +3,13 @@ Bend Agent - Main entry point
 """
 import asyncio
 import sys
+import os
 import argparse
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# 添加源代码目录到路径（仅在开发环境）
+if not getattr(sys, 'frozen', False):
+    sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.core.config import config
 from agent.core.logger import get_logger

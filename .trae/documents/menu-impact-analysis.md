@@ -15,7 +15,7 @@
 ├── Agent版本 (AgentVersionList)
 ├── 充值卡管理 (RechargeCardManagement)
 ├── 注册码管理 (RegistrationCodeList)
-└── 商户分组 (MerchantGroupList)
+└── VIP分组 (MerchantGroupList)
 ```
 
 ## 二、功能影响矩阵

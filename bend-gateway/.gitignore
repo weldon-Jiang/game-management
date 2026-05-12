@@ -1,0 +1,18 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+
+/BOOT-INF/
+/target/
+.idea/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+
+# Environment files (contains sensitive data)
+.env
+.env.local
+.env.dev
+.env.prod

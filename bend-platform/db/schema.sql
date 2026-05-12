@@ -12,9 +12,8 @@ CREATE TABLE IF NOT EXISTS `merchant` (
     `phone` VARCHAR(32) DEFAULT NULL COMMENT '联系电话',
     `name` VARCHAR(128) NOT NULL COMMENT '商户名称',
     `status` VARCHAR(16) DEFAULT NULL COMMENT '状态：active-正常,expired-过期,suspended-暂停',
-    `expire_time` DATETIME DEFAULT NULL COMMENT '过期时间',
     `is_system` TINYINT(1) DEFAULT 0 COMMENT '是否系统内置',
-    `total_points` INT DEFAULT 0 COMMENT '累计充值点数',
+    `total_amount` INT DEFAULT 0 COMMENT '累计消费金额',
     `vip_level` INT DEFAULT 0 COMMENT '当前VIP等级',
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -361,13 +360,13 @@ CREATE TABLE IF NOT EXISTS `system_alert` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统告警表';
 
 -- ---------------------------------------------
--- 商户分组表 (VIP等级配置)
+-- VIP分组表 (VIP等级配置)
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `merchant_group` (
     `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
     `name` VARCHAR(128) NOT NULL COMMENT '分组名称',
     `vip_level` INT DEFAULT NULL COMMENT 'VIP等级',
-    `points_threshold` INT DEFAULT 0 COMMENT '升级到此VIP等级需要的累计点数阈值',
+    `amount_threshold` INT DEFAULT 0 COMMENT '升级到此VIP等级需要的累计消费金额阈值',
     `discount_rate` DECIMAL(5,2) DEFAULT NULL COMMENT '扣点折扣比例',
     `unbind_refund_rate` DECIMAL(5,2) DEFAULT NULL COMMENT '解绑返还比例',
     `max_unbind_per_week` INT DEFAULT NULL COMMENT '每周解绑上限次数',
@@ -380,9 +379,9 @@ CREATE TABLE IF NOT EXISTS `merchant_group` (
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_vip_level` (`vip_level`),
-    KEY `idx_points_threshold` (`points_threshold`),
+    KEY `idx_amount_threshold` (`amount_threshold`),
     KEY `idx_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商户分组表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='VIP分组表';
 
 -- ---------------------------------------------
 -- 订阅表
@@ -391,7 +390,7 @@ CREATE TABLE IF NOT EXISTS `subscription` (
     `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
     `merchant_id` VARCHAR(64) DEFAULT NULL COMMENT '商户ID',
     `user_id` VARCHAR(64) DEFAULT NULL COMMENT '用户ID',
-    `group_id` VARCHAR(64) DEFAULT NULL COMMENT '商户分组ID',
+    `group_id` VARCHAR(64) DEFAULT NULL COMMENT 'VIP分组ID',
     `type` VARCHAR(32) DEFAULT NULL COMMENT '订阅类型',
     `target_id` VARCHAR(64) DEFAULT NULL COMMENT '目标ID',
     `target_name` VARCHAR(128) DEFAULT NULL COMMENT '目标名称',
@@ -418,7 +417,7 @@ CREATE TABLE IF NOT EXISTS `subscription` (
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `subscription_price` (
     `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
-    `group_id` VARCHAR(64) DEFAULT NULL COMMENT '商户分组ID',
+    `group_id` VARCHAR(64) DEFAULT NULL COMMENT 'VIP分组ID',
     `type` VARCHAR(32) DEFAULT NULL COMMENT '订阅类型',
     `price` INT DEFAULT NULL COMMENT '价格(点数)',
     `duration_days` INT DEFAULT NULL COMMENT '时长(天)',
@@ -638,13 +637,25 @@ CREATE TABLE IF NOT EXISTS `automation_usage` (
 -- =====================================================
 -- 初始化管理员数据
 -- =====================================================
+-- 初始化 VIP 分组数据
+-- =====================================================
+INSERT INTO bend_platform.merchant_group (id, name, vip_level, amount_threshold, discount_rate, unbind_refund_rate, max_unbind_per_week, features, host_price, window_price, account_price, status)
+VALUES
+    ('group_vip0', '普通用户', 0, 0, 1.00, 0.50, 1, '{"maxAgents": 2, "maxTasks": 5}', 10.00, 5.00, 8.00, 'active'),
+    ('group_vip1', 'VIP1', 1, 100, 0.95, 0.60, 2, '{"maxAgents": 5, "maxTasks": 20}', 9.50, 4.75, 7.60, 'active'),
+    ('group_vip2', 'VIP2', 2, 500, 0.90, 0.70, 3, '{"maxAgents": 10, "maxTasks": 50}', 9.00, 4.50, 7.20, 'active'),
+    ('group_vip3', 'VIP3', 3, 1000, 0.85, 0.80, 5, '{"maxAgents": 20, "maxTasks": 100}', 8.50, 4.25, 6.80, 'active');
+
+-- =====================================================
+-- 初始化管理员数据
+-- =====================================================
 -- 密码加密方式: AES-128-ECB ZeroPadding
 -- 加密密钥: bend-platform-se (16字节)
 -- 加密结果: HEX(AES_ENCRYPT(明文密码, 密钥))
 -- Java解密: 使用相同密钥解密后去除零填充
 -- 默认密码: 123456
-INSERT INTO bend_platform.merchant (id, phone, name, status, expire_time, created_time, updated_time, deleted, is_system, total_points, vip_level) 
-VALUES ('f5d927c40f87f57ef0f4a484d8a823e9', '13800138000', '系统管理员', 'active', '2099-12-31 23:59:59', '2026-04-16 17:21:58', '2026-04-23 11:16:44', 0, 1, 0, 0);
+INSERT INTO bend_platform.merchant (id, phone, name, status, created_time, updated_time, deleted, is_system, total_amount, vip_level)
+VALUES ('f5d927c40f87f57ef0f4a484d8a823e9', '13800138000', '系统管理员', 'active', '2026-04-16 17:21:58', '2026-04-23 11:16:44', 0, 1, 0, 0);
 
-INSERT INTO bend_platform.merchant_user (id, merchant_id, username, phone, password_hash, role, status, total_recharged, last_login_time, created_time, deleted) 
+INSERT INTO bend_platform.merchant_user (id, merchant_id, username, phone, password_hash, role, status, total_recharged, last_login_time, created_time, deleted)
 VALUES ('f5d927c40f87f57ef0f4a484d8a823f9', 'f5d927c40f87f57ef0f4a484d8a823e9', 'admin', '13800138000', 'bc9c6ebfa285976aa94186fe90103bc7', 'platform_admin', 'active', 0, '2026-05-07 10:52:43', '2026-04-16 17:21:58', 0);

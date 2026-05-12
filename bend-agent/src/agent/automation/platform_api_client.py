@@ -42,7 +42,7 @@ class PlatformApiClient:
         - base_url: Platform API基础URL
         """
         self.logger = get_logger('platform_api_client')
-        self.base_url = base_url or config.get('platform.api_url', 'http://localhost:8080/api')
+        self.base_url = base_url or config.get('platform.api_url', 'http://localhost:8060/api')
         self._session: Optional[aiohttp.ClientSession] = None
         self._retry_count = 3
         self._retry_delay = 1.0

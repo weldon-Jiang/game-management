@@ -38,6 +38,15 @@ public interface MerchantRegistrationCodeService {
     MerchantRegistrationCode validateCode(String code);
 
     /**
+     * 验证并消费注册码（一次性使用）
+     * 验证成功后会将注册码状态改为已使用
+     *
+     * @param code 注册码
+     * @return 激活结果，包含merchantId
+     */
+    ActivationResult validateAndConsume(String code);
+
+    /**
      * 分页查询商户的注册码
      *
      * @param merchantId 商户ID
@@ -88,20 +97,33 @@ public interface MerchantRegistrationCodeService {
     void resetCode(String id);
 
     /**
-     * 激活结果
+     * 检查注册码激活失败次数是否超限
+     * 用于防止暴力破解
+     *
+     * @param code 注册码
+     * @return true=超限，false=未超限
+     */
+    boolean isExcessiveAttempts(String code);
+
+    /**
+     * 记录注册码激活失败
+     * 用于限流
+     *
+     * @param code 注册码
+     */
+    void recordFailedAttempt(String code);
+
+    /**
+     * 激活结果（用于注册码验证）
      */
     class ActivationResult {
         private boolean success;
-        private String agentId;
-        private String agentSecret;
         private String merchantId;
         private String message;
 
-        public static ActivationResult success(String agentId, String agentSecret, String merchantId) {
+        public static ActivationResult success(String merchantId) {
             ActivationResult result = new ActivationResult();
             result.success = true;
-            result.agentId = agentId;
-            result.agentSecret = agentSecret;
             result.merchantId = merchantId;
             return result;
         }
@@ -115,10 +137,6 @@ public interface MerchantRegistrationCodeService {
 
         public boolean isSuccess() { return success; }
         public void setSuccess(boolean success) { this.success = success; }
-        public String getAgentId() { return agentId; }
-        public void setAgentId(String agentId) { this.agentId = agentId; }
-        public String getAgentSecret() { return agentSecret; }
-        public void setAgentSecret(String agentSecret) { this.agentSecret = agentSecret; }
         public String getMerchantId() { return merchantId; }
         public void setMerchantId(String merchantId) { this.merchantId = merchantId; }
         public String getMessage() { return message; }

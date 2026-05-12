@@ -110,6 +110,14 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     }
 
     @Override
+    public AgentInstance findByRegistrationCode(String registrationCode) {
+        LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AgentInstance::getRegistrationCode, registrationCode);
+        wrapper.eq(AgentInstance::getDeleted, false);
+        return agentInstanceMapper.selectOne(wrapper);
+    }
+
+    @Override
     public List<AgentInstance> findAll() {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getDeleted, false);

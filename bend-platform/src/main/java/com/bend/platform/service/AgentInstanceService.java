@@ -17,6 +17,8 @@ public interface AgentInstanceService {
 
     AgentInstance findByAgentId(String agentId);
 
+    AgentInstance findByRegistrationCode(String registrationCode);
+
     List<AgentInstance> findAll();
 
     IPage<AgentInstance> findAll(AgentInstancePageRequest request);

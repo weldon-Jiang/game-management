@@ -21,18 +21,18 @@ public class VipLevelCalculator {
     private final MerchantGroupMapper merchantGroupMapper;
 
     /**
-     * 根据累计点数计算VIP等级
-     * 查找 pointsThreshold <= totalPoints 的最高VIP等级
+     * 根据累计消费金额计算VIP等级
+     * 查找 amountThreshold <= totalAmount 的最高VIP等级
      *
-     * @param totalPoints 累计点数
+     * @param totalAmount 累计消费金额
      * @return VIP等级（0表示无等级）
      */
-    public int calculateVipLevel(int totalPoints) {
-        log.info("计算VIP等级，累计点数: {}", totalPoints);
-        
+    public int calculateVipLevel(int totalAmount) {
+        log.info("计算VIP等级，累计消费金额: {}", totalAmount);
+
         LambdaQueryWrapper<MerchantGroup> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(MerchantGroup::getStatus, "active")
-                .le(MerchantGroup::getPointsThreshold, totalPoints)
+                .le(MerchantGroup::getAmountThreshold, totalAmount)
                 .orderByDesc(MerchantGroup::getVipLevel)
                 .last("LIMIT 1");
 
@@ -42,8 +42,8 @@ public class VipLevelCalculator {
             log.info("未找到匹配的VIP分组，返回0");
             return 0;
         }
-        
-        log.info("找到VIP分组: {}, VIP等级: {}, 阈值: {}", group.getName(), group.getVipLevel(), group.getPointsThreshold());
+
+        log.info("找到VIP分组: {}, VIP等级: {}, 阈值: {}", group.getName(), group.getVipLevel(), group.getAmountThreshold());
         return group.getVipLevel();
     }
 
@@ -61,14 +61,14 @@ public class VipLevelCalculator {
      * 获取下一级VIP等级信息
      *
      * @param currentVipLevel 当前VIP等级
-     * @param currentTotalPoints 当前累计点数
+     * @param currentTotalAmount 当前累计消费金额
      * @return 下一级分组，如果没有更高等级则返回null
      */
-    public MerchantGroup getNextLevelGroup(int currentVipLevel, int currentTotalPoints) {
+    public MerchantGroup getNextLevelGroup(int currentVipLevel, int currentTotalAmount) {
         LambdaQueryWrapper<MerchantGroup> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(MerchantGroup::getStatus, "active")
                 .gt(MerchantGroup::getVipLevel, currentVipLevel)
-                .orderByAsc(MerchantGroup::getPointsThreshold)
+                .orderByAsc(MerchantGroup::getAmountThreshold)
                 .last("LIMIT 1");
         return merchantGroupMapper.selectOne(wrapper);
     }

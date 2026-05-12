@@ -296,7 +296,7 @@ const handleRetry = async (task) => {
 const connectWebSocket = () => {
   if (wsConnection) return
 
-  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws/admin'
+  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8060/ws/admin'
   wsConnection = new WebSocket(wsUrl)
 
   wsConnection.onmessage = (event) => {

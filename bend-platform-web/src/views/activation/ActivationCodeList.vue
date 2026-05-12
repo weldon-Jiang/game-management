@@ -13,7 +13,6 @@
       </div>
     </div>
 
-    <!-- 激活码列表 -->
     <div class="content-card">
       <div class="toolbar">
         <el-input
@@ -28,73 +27,60 @@
           </template>
         </el-input>
         <el-select
-          v-if="isPlatformAdmin"
-          v-model="searchMerchantId"
-          placeholder="选择商户"
-          style="width: 180px"
+          v-model="searchStatus"
+          placeholder="状态"
+          style="width: 120px"
           clearable
           @change="loadCodes"
         >
-          <el-option
-            v-for="merchant in merchantList"
-            :key="merchant.id"
-            :label="merchant.name"
-            :value="merchant.id"
-          />
+          <el-option label="全部" value="" />
+          <el-option label="未使用" value="unused" />
+          <el-option label="已使用" value="used" />
         </el-select>
         <el-button @click="loadCodes">
           <el-icon><Refresh /></el-icon>
         </el-button>
-        <el-button
-          v-if="authStore.isPlatformAdmin"
-          type="danger"
-          :disabled="selectedCodes.length === 0"
-          @click="handleBatchDelete"
-        >
-          <el-icon><Delete /></el-icon>
-          批量删除 ({{ selectedCodes.length }})
-        </el-button>
       </div>
 
-      <div class="table-container">
-        <el-table
-          :data="filteredCodes"
-          v-loading="loading"
-          class="data-table"
-          scrollbar-always-on
-          @selection-change="handleSelectionChange"
-        >
-        <el-table-column type="selection" width="50" />
-        <el-table-column prop="code" label="激活码" min-width="220">
+      <el-table
+        :data="tableData"
+        v-loading="loading"
+        class="data-table"
+        scrollbar-always-on
+      >
+        <el-table-column prop="code" label="激活码" min-width="150">
           <template #default="{ row }">
             <span class="code-text">{{ row.code }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" width="120" align="center">
-          <template #default="{ row }">
-            <span v-if="row.merchantName">{{ row.merchantName }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="subscriptionType" label="类型" width="100" align="center">
+        <el-table-column prop="subscriptionType" label="类型" width="140" align="center">
           <template #default="{ row }">
             <el-tag :type="getTypeTag(row.subscriptionType)" size="small">
               {{ getTypeName(row.subscriptionType) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="points" label="内容" min-width="180">
+        <el-table-column prop="boundResourceNames" label="绑定资源" min-width="150">
           <template #default="{ row }">
-            <template v-if="row.subscriptionType === 'points' || !row.subscriptionType">
-              <span class="points-value">{{ row.points || 0 }} 点</span>
-            </template>
-            <template v-else>
-              <div class="subscription-info">
-                <span>{{ row.targetName || '-' }}</span>
-                <br />
-                <small class="text-muted">{{ row.durationDays || 0 }}天</small>
-              </div>
-            </template>
+            <span v-if="row.boundResourceNames">{{ row.boundResourceNames }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="originalPrice" label="原价" width="100" align="right">
+          <template #default="{ row }">
+            <span v-if="row.originalPrice">{{ (row.originalPrice / 100).toFixed(2) }}元</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="discountPrice" label="折后价" width="100" align="right">
+          <template #default="{ row }">
+            <span v-if="row.discountPrice" class="price-discount">{{ (row.discountPrice / 100).toFixed(2) }}元</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="durationDays" label="时长" width="80" align="center">
+          <template #default="{ row }">
+            <span>{{ row.durationDays || 30 }}天</span>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100" align="center">
@@ -104,28 +90,25 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="usedByName" label="使用者" width="120" align="center">
+        <el-table-column prop="startTime" label="生效时间" width="110">
           <template #default="{ row }">
-            <span v-if="row.usedByName">{{ row.usedByName }}</span>
+            <span v-if="row.startTime">{{ formatDate(row.startTime) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="usedTime" label="使用时间" width="170">
+        <el-table-column prop="endTime" label="到期时间" width="110">
           <template #default="{ row }">
-            {{ row.usedTime ? formatDate(row.usedTime) : '-' }}
+            <span v-if="row.endTime">{{ formatDate(row.endTime) }}</span>
+            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="expireTime" label="过期时间" width="170">
+        <el-table-column prop="usedTime" label="使用时间" width="110">
           <template #default="{ row }">
-            {{ row.expireTime ? formatDate(row.expireTime) : '永不过期' }}
+            <span v-if="row.usedTime">{{ formatDate(row.usedTime) }}</span>
+            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdTime" label="创建时间" width="170">
-          <template #default="{ row }">
-            {{ formatDate(row.createdTime) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="80" fixed="right" align="center">
+        <el-table-column label="操作" width="120" fixed="right" align="center">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'unused'"
@@ -136,10 +119,18 @@
             >
               复制
             </el-button>
+            <el-button
+              v-if="row.status === 'unused'"
+              type="danger"
+              link
+              size="small"
+              @click="handleDelete(row)"
+            >
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
-      </div>
 
       <div class="pagination-wrap">
         <el-pagination
@@ -154,89 +145,153 @@
       </div>
     </div>
 
-    <!-- 生成激活码对话框 -->
     <el-dialog
       v-model="generateDialogVisible"
       title="生成激活码"
-      width="500px"
+      width="680px"
       :close-on-click-modal="false"
+      class="generate-dialog"
     >
       <el-form
         ref="generateFormRef"
         :model="generateFormData"
         :rules="generateFormRules"
-        label-width="90px"
+        label-width="100px"
         class="dialog-form"
       >
-        <el-form-item v-if="isPlatformAdmin" label="所属商户" prop="merchantId">
+        <el-form-item v-if="authStore.isPlatformAdmin" label="商户" prop="merchantId">
           <el-select
             v-model="generateFormData.merchantId"
             placeholder="请选择商户"
             style="width: 100%"
-            clearable
+            filterable
+            @change="handleMerchantChange"
           >
             <el-option
-              v-for="merchant in merchantList"
-              :key="merchant.id"
-              :label="merchant.name"
-              :value="merchant.id"
+              v-for="item in merchantList"
+              :key="item.id"
+              :label="item.name"
+              :value="item.id"
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="批次名称" prop="batchName">
-          <el-input v-model="generateFormData.batchName" placeholder="请输入批次名称（可选）" />
-        </el-form-item>
-        <el-form-item label="类型" prop="subscriptionType">
-          <el-radio-group v-model="generateFormData.subscriptionType" @change="handleTypeChange">
-            <el-radio v-for="type in filteredSubscriptionTypes" :key="type.value" :value="type.value">
-              {{ type.label }}
-            </el-radio>
-          </el-radio-group>
-          <div v-if="!generateFormData.merchantId" class="form-tip">请先选择商户</div>
-          <div v-else-if="filteredSubscriptionTypes.length === 1 && filteredSubscriptionTypes[0].value === 'points'" class="form-tip">当前商户无VIP等级，仅支持点数充值</div>
-        </el-form-item>
-        <template v-if="generateFormData.subscriptionType === 'points'">
-          <el-form-item label="充值点数" prop="points">
-            <el-input-number
-              v-model="generateFormData.points"
-              :min="1"
-              :max="1000000"
-              style="width: 100%"
+
+        <el-form-item label="订阅类型" prop="subscriptionType">
+          <el-select
+            v-model="generateFormData.subscriptionType"
+            placeholder="请选择订阅类型"
+            style="width: 100%"
+            @change="handleSubscriptionTypeChange"
+          >
+            <el-option
+              v-for="type in subscriptionTypes"
+              :key="type.value"
+              :label="type.label"
+              :value="type.value"
             />
-          </el-form-item>
-        </template>
-        <template v-else>
-          <el-form-item label="选择目标" prop="targetId">
+          </el-select>
+        </el-form-item>
+
+        <template v-if="generateFormData.subscriptionType === 'window_account'">
+          <el-form-item label="绑定流媒体账号" prop="boundResourceIds">
             <el-select
-              v-model="generateFormData.targetId"
-              placeholder="请选择目标"
+              v-model="generateFormData.boundResourceIds"
+              placeholder="请选择流媒体账号（可多选）"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
               style="width: 100%"
-              @visible-change="handleTargetVisibleChange"
+              @visible-change="handleStreamingAccountsVisibleChange"
             >
               <el-option
-                v-for="item in targetList"
+                v-for="item in streamingAccountList"
                 :key="item.id"
-                :label="item.name"
+                :label="item.username || item.name"
                 :value="item.id"
               />
             </el-select>
           </el-form-item>
-          <el-form-item label="时长">
-            <span class="duration-display">30 天（固定）</span>
-          </el-form-item>
-          <el-form-item label="消耗点数">
-            <span class="points-display">{{ generateFormData.points || '请先选择目标' }}</span>
-            <span v-if="generateFormData.points" class="form-tip">（单价 × 30天）</span>
+        </template>
+
+        <template v-if="generateFormData.subscriptionType === 'account'">
+          <el-form-item label="绑定游戏账号" prop="boundResourceIds">
+            <el-select
+              v-model="generateFormData.boundResourceIds"
+              placeholder="请选择游戏账号（可多选）"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              style="width: 100%"
+              @visible-change="handleGameAccountsVisibleChange"
+            >
+              <el-option
+                v-for="item in gameAccountList"
+                :key="item.id"
+                :label="item.xboxGameName || item.name || item.id"
+                :value="item.id"
+              />
+            </el-select>
           </el-form-item>
         </template>
-        <el-form-item label="生成数量" prop="count">
-          <el-input-number
-            v-model="generateFormData.count"
-            :min="1"
-            :max="100"
-            style="width: 100%"
-          />
-        </el-form-item>
+
+        <template v-if="generateFormData.subscriptionType === 'host'">
+          <el-form-item label="绑定Xbox主机" prop="boundResourceIds">
+            <el-select
+              v-model="generateFormData.boundResourceIds"
+              placeholder="请选择Xbox主机（可多选）"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              style="width: 100%"
+              @visible-change="handleXboxHostsVisibleChange"
+            >
+              <el-option
+                v-for="item in xboxHostList"
+                :key="item.id"
+                :label="item.name || `Xbox-${item.xboxId?.slice(-4)}`"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+        </template>
+
+        <template v-if="generateFormData.subscriptionType === 'points'">
+          <el-form-item label="充值点数" prop="pointsAmount">
+            <el-input-number
+              v-model="generateFormData.pointsAmount"
+              :min="1"
+              :max="1000000"
+              style="width: 100%"
+              @change="handlePointsAmountChange"
+            />
+          </el-form-item>
+        </template>
+
+        <el-divider content-position="left">价格信息</el-divider>
+
+        <div class="price-info-card">
+          <div class="price-row">
+            <span class="price-label">{{ generateFormData.subscriptionType === 'points' ? '单价' : '原价' }}</span>
+            <span class="price-value price-original">{{ formatPrice(generateFormData.originalPrice) }}</span>
+          </div>
+          <div v-if="generateFormData.subscriptionType === 'points' && generateFormData.pointsAmount" class="price-row">
+            <span class="price-label">总价</span>
+            <span class="price-value price-discount">{{ formatPrice(calculateTotalPrice) }}</span>
+          </div>
+          <div v-else class="price-row">
+            <span class="price-label">折后价</span>
+            <span class="price-value price-discount">{{ formatPrice(generateFormData.discountPrice) }}</span>
+          </div>
+        </div>
+
+        <div v-if="generateFormData.vipLevel > 0" class="vip-tip success">
+          <el-icon><SuccessFilled /></el-icon>
+          <span>当前VIP{{ generateFormData.vipLevel }}，已享受折扣价格</span>
+        </div>
+        <div v-else class="vip-tip info">
+          <el-icon><InfoFilled /></el-icon>
+          <span>当前无VIP等级，使用原价</span>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="generateDialogVisible = false">取消</el-button>
@@ -246,11 +301,10 @@
       </template>
     </el-dialog>
 
-    <!-- 生成的激活码展示对话框 -->
     <el-dialog
       v-model="showCodeDialogVisible"
       title="激活码生成成功"
-      width="420px"
+      width="450px"
     >
       <div class="generated-code-box">
         <p class="label">请妥善保存以下激活码：</p>
@@ -260,6 +314,11 @@
             <el-icon><CopyDocument /></el-icon>
           </el-button>
         </div>
+        <el-descriptions :column="1" border size="small" style="margin-top: 16px;">
+          <el-descriptions-item label="类型">{{ getTypeName(generatedCodeType) }}</el-descriptions-item>
+          <el-descriptions-item label="原价">{{ formatPrice(generatedCodeOriginalPrice) }}</el-descriptions-item>
+          <el-descriptions-item label="折后价">{{ formatPrice(generatedCodeDiscountPrice) }}</el-descriptions-item>
+        </el-descriptions>
         <p class="tip">激活码只显示一次，请及时保存！</p>
       </div>
       <template #footer>
@@ -270,166 +329,85 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, CopyDocument, Delete } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, CopyDocument, SuccessFilled, InfoFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { activationApi, merchantApi, gameAccountApi, streamingApi, xboxApi, merchantGroupApi } from '@/api'
+import { activationApi, streamingApi, gameAccountApi, xboxApi, merchantApi } from '@/api'
 import { getCodeStatusText, getCodeStatusType } from '@/utils/constants'
-
-/**
- * 激活码管理页面
- * 提供单个激活码的生成、查看、复制和删除功能
- * 激活码只能使用一次，使用后状态变为已使用
- */
-
-// ==================== 状态定义 ====================
 
 const authStore = useAuthStore()
 
-const isPlatformAdmin = computed(() => authStore.isPlatformAdmin)
-
-const merchantList = ref([])
-
-/**
- * 表格加载状态
- */
 const loading = ref(false)
-
-/**
- * 提交按钮加载状态
- */
 const submitLoading = ref(false)
-
-/**
- * 激活码列表数据
- */
 const tableData = ref([])
-
-/**
- * 选中的激活码列表
- */
-const selectedCodes = ref([])
-
-/**
- * 搜索关键词
- */
 const searchKeyword = ref('')
-
-/**
- * 商户查询条件
- */
-const searchMerchantId = ref('')
-
-/**
- * 分页参数
- */
+const searchStatus = ref('')
 const pagination = reactive({
   pageNum: 1,
   pageSize: 20,
   total: 0
 })
 
-/**
- * 过滤后的激活码列表
- */
-const filteredCodes = computed(() => {
-  if (!searchKeyword.value) return tableData.value
-  const keyword = searchKeyword.value.toLowerCase()
-  return tableData.value.filter(c =>
-    c.code.toLowerCase().includes(keyword)
-  )
-})
-
-/**
- * 生成对话框状态
- */
 const generateDialogVisible = ref(false)
 const generateFormRef = ref(null)
-
-/**
- * 目标列表（根据类型加载）
- */
-const targetList = ref([])
-
-/**
- * 生成表单数据
- */
+const merchantList = ref([])
 const generateFormData = reactive({
   merchantId: '',
-  batchName: '',
   subscriptionType: 'points',
-  targetId: '',
-  targetName: '',
-  points: null,
-  durationDays: 30,
-  count: 1
+  boundResourceIds: [],
+  boundResourceNames: [],
+  pointsAmount: null,
+  originalPrice: 0,
+  discountPrice: 0,
+  vipLevel: 0
 })
 
-/**
- * 生成表单验证规则（动态）
- */
+const streamingAccountList = ref([])
+const gameAccountList = ref([])
+const xboxHostList = ref([])
+
+const showCodeDialogVisible = ref(false)
+const generatedCode = ref('')
+const generatedCodeType = ref('')
+const generatedCodeOriginalPrice = ref(0)
+const generatedCodeDiscountPrice = ref(0)
+
+const subscriptionTypes = [
+  { value: 'window_account', label: '流媒体账号包月' },
+  { value: 'account', label: '游戏账号包月' },
+  { value: 'host', label: 'Xbox主机包月' },
+  { value: 'full', label: '全功能包月' },
+  { value: 'points', label: '点数充值' }
+]
+
+const calculateTotalPrice = computed(() => {
+  if (generateFormData.subscriptionType === 'points' && generateFormData.pointsAmount) {
+    return generateFormData.pointsAmount * generateFormData.discountPrice
+  }
+  return generateFormData.discountPrice
+})
+
 const generateFormRules = computed(() => {
-  const rules = {}
-  if (generateFormData.subscriptionType === 'points') {
-    rules.points = [
-      { required: true, message: '请输入充值点数', trigger: 'blur' }
+  const rules = {
+    subscriptionType: [{ required: true, message: '请选择订阅类型', trigger: 'change' }]
+  }
+  if (authStore.isPlatformAdmin) {
+    rules.merchantId = [{ required: true, message: '请选择商户', trigger: 'change' }]
+  }
+  if (['window_account', 'account', 'host'].includes(generateFormData.subscriptionType)) {
+    rules.boundResourceIds = [
+      { required: true, message: '请选择绑定的资源', trigger: 'change' }
     ]
-  } else {
-    rules.targetId = [
-      { required: true, message: '请选择目标', trigger: 'change' }
+  }
+  if (generateFormData.subscriptionType === 'points') {
+    rules.pointsAmount = [
+      { required: true, message: '请输入充值点数', trigger: 'blur' }
     ]
   }
   return rules
 })
 
-/**
- * 激活码展示对话框状态
- */
-const showCodeDialogVisible = ref(false)
-const generatedCode = ref('')
-
-/**
- * 商户VIP分组信息（用于确定允许的订阅类型）
- */
-const merchantGroupInfo = ref(null)
-
-/**
- * 允许的订阅类型列表（根据VIP等级和分组权限）
- * 如果商户有VIP等级分组，则允许所有订阅类型；否则仅允许点数充值
- */
-const allowedSubscriptionTypes = computed(() => {
-  if (!generateFormData.merchantId) {
-    return ['points']
-  }
-  if (!merchantGroupInfo.value || !merchantGroupInfo.value.vipLevel || merchantGroupInfo.value.vipLevel === 0) {
-    return ['points']
-  }
-  return ['points', 'account', 'window', 'host']
-})
-
-/**
- * 可用的订阅类型选项
- */
-const subscriptionTypeOptions = [
-  { value: 'points', label: '点数充值' },
-  { value: 'account', label: '游戏账号' },
-  { value: 'window', label: '窗口' },
-  { value: 'host', label: '主机' }
-]
-
-/**
- * 过滤后的订阅类型选项（仅显示允许的类型）
- */
-const filteredSubscriptionTypes = computed(() => {
-  return subscriptionTypeOptions.filter(opt => allowedSubscriptionTypes.value.includes(opt.value))
-})
-
-// ==================== 方法定义 ====================
-
-/**
- * 加载激活码列表
- */
 const loadCodes = async () => {
   loading.value = true
   try {
@@ -437,15 +415,12 @@ const loadCodes = async () => {
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize
     }
-    if (isPlatformAdmin.value && searchMerchantId.value) {
-      params.merchantId = searchMerchantId.value
-    }
-    if (searchKeyword.value) {
-      params.keyword = searchKeyword.value
+    if (searchStatus.value) {
+      params.status = searchStatus.value
     }
     const res = await activationApi.listCodes(params)
-    tableData.value = res.data.records || []
-    pagination.total = res.data.total || 0
+    tableData.value = res.data?.records || []
+    pagination.total = res.data?.total || 0
   } catch (error) {
     console.error('Failed to load activation codes:', error)
   } finally {
@@ -453,209 +428,161 @@ const loadCodes = async () => {
   }
 }
 
-/**
- * 加载商户列表
- */
-const loadMerchantList = async () => {
-  if (!isPlatformAdmin.value) {
-    merchantList.value = []
-    return
-  }
+const loadMerchants = async () => {
+  if (!authStore.isPlatformAdmin) return
   try {
     const res = await merchantApi.listAll()
     merchantList.value = res.data || []
   } catch (error) {
-    console.error('Failed to load merchant list:', error)
-    merchantList.value = []
+    console.error('Failed to load merchants:', error)
   }
 }
 
-/**
- * 显示生成对话框
- */
 const showGenerateDialog = async () => {
-  generateFormData.merchantId = ''
-  generateFormData.batchName = ''
+  generateFormData.merchantId = authStore.isPlatformAdmin ? '' : authStore.merchantId
   generateFormData.subscriptionType = 'points'
-  generateFormData.targetId = ''
-  generateFormData.targetName = ''
-  generateFormData.points = null
-  generateFormData.durationDays = 30
-  generateFormData.count = 1
-  targetList.value = []
-  merchantGroupInfo.value = null
-  await loadMerchantList()
+  generateFormData.boundResourceIds = []
+  generateFormData.boundResourceNames = []
+  generateFormData.pointsAmount = null
+  generateFormData.originalPrice = 0
+  generateFormData.discountPrice = 0
+  generateFormData.vipLevel = 0
+  await loadMerchants()
+  if (!authStore.isPlatformAdmin) {
+    await loadPrices()
+  }
   generateDialogVisible.value = true
 }
 
-/**
- * 类型变更处理
- */
-const handleTypeChange = () => {
-  generateFormData.targetId = ''
-  generateFormData.targetName = ''
-  targetList.value = []
-  calculatePoints()
-}
-
-/**
- * 监听商户变更，清空目标列表并获取VIP分组信息
- */
-watch(() => generateFormData.merchantId, async (newMerchantId) => {
-  generateFormData.targetId = ''
-  generateFormData.targetName = ''
-  targetList.value = []
-  merchantGroupInfo.value = null
-  generateFormData.points = null
-  generateFormData.durationDays = 30
-
-  if (newMerchantId) {
-    try {
-      const res = await merchantGroupApi.getByMerchantId(newMerchantId)
-      if (res.code === 200 && res.data) {
-        merchantGroupInfo.value = res.data
-        if (!allowedSubscriptionTypes.value.includes(generateFormData.subscriptionType)) {
-          generateFormData.subscriptionType = 'points'
-        }
-        calculatePoints()
-      }
-    } catch (error) {
-      console.error('Failed to load merchant group info:', error)
-    }
-  }
-})
-
-/**
- * 目标下拉框可见性变化处理
- */
-const handleTargetVisibleChange = (visible) => {
-  if (visible) {
-    loadTargets()
-  }
-}
-
-/**
- * 加载目标列表
- */
-const loadTargets = async () => {
-  if (!generateFormData.merchantId) {
-    ElMessage.warning('请先选择商户')
-    targetList.value = []
-    return
-  }
-
+const loadPrices = async () => {
   try {
-    const type = generateFormData.subscriptionType
-    const merchantId = generateFormData.merchantId
-    let res
-    if (type === 'account') {
-      res = await gameAccountApi.list({ merchantId, pageNum: 1, pageSize: 1000 })
-      targetList.value = (res.data?.records || []).map(item => ({
-        id: item.id,
-        name: item.xboxGameName || item.id
-      }))
-    } else if (type === 'window') {
-      res = await streamingApi.list({ merchantId, pageNum: 1, pageSize: 1000 })
-      targetList.value = (res.data?.records || []).map(item => ({
-        id: item.id,
-        name: item.username || item.name || 'Unknown'
-      }))
-    } else if (type === 'host') {
-      res = await xboxApi.listPage({ merchantId, pageNum: 1, pageSize: 1000 })
-      targetList.value = (res.data?.records || []).map(item => ({
-        id: item.id,
-        name: item.name || `Xbox-${item.xboxId?.slice(-4) || item.id?.slice(-4)}`
-      }))
+    const params = {}
+    if (generateFormData.merchantId) {
+      params.merchantId = generateFormData.merchantId
+    }
+    const res = await activationApi.getPrices(params)
+    if (res.code === 200) {
+      const prices = res.data
+      const vipLevel = prices.vipLevel || 0
+      generateFormData.vipLevel = vipLevel
+      if (generateFormData.subscriptionType === 'points') {
+        generateFormData.originalPrice = prices.pointsOriginalPrice || 500
+        generateFormData.discountPrice = prices.pointsDiscountPrice || 500
+      } else if (generateFormData.subscriptionType === 'window_account') {
+        generateFormData.originalPrice = prices.windowOriginalPrice || 10000
+        generateFormData.discountPrice = prices.windowDiscountPrice || 10000
+      } else if (generateFormData.subscriptionType === 'account') {
+        generateFormData.originalPrice = prices.accountOriginalPrice || 5000
+        generateFormData.discountPrice = prices.accountDiscountPrice || 5000
+      } else if (generateFormData.subscriptionType === 'host') {
+        generateFormData.originalPrice = prices.hostOriginalPrice || 20000
+        generateFormData.discountPrice = prices.hostDiscountPrice || 20000
+      } else if (generateFormData.subscriptionType === 'full') {
+        generateFormData.originalPrice = prices.fullOriginalPrice || 30000
+        generateFormData.discountPrice = prices.fullDiscountPrice || 30000
+      }
     }
   } catch (error) {
-    console.error('Failed to load targets:', error)
-    targetList.value = []
+    console.error('Failed to load prices:', error)
   }
 }
 
-/**
- * 根据商户VIP分组定价自动计算点数
- * 时长固定30天，点数 = 单价 × 30
- */
-const calculatePoints = () => {
-  const type = generateFormData.subscriptionType
-  const group = merchantGroupInfo.value
-
-  if (!group || type === 'points') {
-    generateFormData.points = null
-    generateFormData.durationDays = 30
-    return
-  }
-
-  let pricePerDay = 0
-  if (type === 'host') {
-    pricePerDay = parseFloat(group.hostPrice) || 0
-  } else if (type === 'window') {
-    pricePerDay = parseFloat(group.windowPrice) || 0
-  } else if (type === 'account') {
-    pricePerDay = parseFloat(group.accountPrice) || 0
-  }
-
-  const durationDays = 30
-  const totalPoints = Math.round(pricePerDay * durationDays * 100) / 100
-
-  generateFormData.points = totalPoints
-  generateFormData.durationDays = durationDays
+const handleMerchantChange = async () => {
+  generateFormData.boundResourceIds = []
+  generateFormData.boundResourceNames = []
+  await loadPrices()
 }
 
-/**
- * 监听目标变更，重新计算点数
- */
-watch(() => generateFormData.targetId, () => {
-  calculatePoints()
-})
+const handleSubscriptionTypeChange = async () => {
+  generateFormData.boundResourceIds = []
+  generateFormData.boundResourceNames = []
+  generateFormData.pointsAmount = null
+  await loadPrices()
+}
 
-/**
- * 生成激活码
- */
+const handlePointsAmountChange = () => {
+  // 价格会根据 calculateTotalPrice 自动更新
+}
+
+const handleStreamingAccountsVisibleChange = async (visible) => {
+  if (visible && generateFormData.merchantId) {
+    try {
+      const res = await streamingApi.list({ merchantId: generateFormData.merchantId, pageNum: 1, pageSize: 1000 })
+      streamingAccountList.value = res.data?.records || []
+    } catch (error) {
+      console.error('Failed to load streaming accounts:', error)
+    }
+  }
+}
+
+const handleGameAccountsVisibleChange = async (visible) => {
+  if (visible && generateFormData.merchantId) {
+    try {
+      const res = await gameAccountApi.list({ merchantId: generateFormData.merchantId, pageNum: 1, pageSize: 1000 })
+      gameAccountList.value = res.data?.records || []
+    } catch (error) {
+      console.error('Failed to load game accounts:', error)
+    }
+  }
+}
+
+const handleXboxHostsVisibleChange = async (visible) => {
+  if (visible && generateFormData.merchantId) {
+    try {
+      const res = await xboxApi.listPage({ merchantId: generateFormData.merchantId, pageNum: 1, pageSize: 1000 })
+      xboxHostList.value = res.data?.records || []
+    } catch (error) {
+      console.error('Failed to load Xbox hosts:', error)
+    }
+  }
+}
+
 const handleGenerate = async () => {
   const valid = await generateFormRef.value.validate().catch(() => false)
   if (!valid) return
 
-  if (generateFormData.subscriptionType !== 'points') {
-    if (!generateFormData.targetId) {
-      ElMessage.warning('请选择目标')
-      return
-    }
-    const selectedTarget = targetList.value.find(t => t.id === generateFormData.targetId)
-    if (selectedTarget) {
-      generateFormData.targetName = selectedTarget.name
-    }
-  }
-
   submitLoading.value = true
   try {
-    const requestData = {
-      merchantId: generateFormData.merchantId || null,
-      batchName: generateFormData.batchName || null,
-      subscriptionType: generateFormData.subscriptionType,
-      targetId: generateFormData.subscriptionType !== 'points' ? generateFormData.targetId : null,
-      targetName: generateFormData.subscriptionType !== 'points' ? generateFormData.targetName : null,
-      points: generateFormData.points || 0,
-      durationDays: generateFormData.subscriptionType !== 'points' ? generateFormData.durationDays : null,
-      count: generateFormData.count
+    let boundResourceNames = []
+    if (generateFormData.subscriptionType === 'window_account') {
+      boundResourceNames = streamingAccountList.value
+        .filter(item => generateFormData.boundResourceIds.includes(item.id))
+        .map(item => item.username || item.name)
+    } else if (generateFormData.subscriptionType === 'account') {
+      boundResourceNames = gameAccountList.value
+        .filter(item => generateFormData.boundResourceIds.includes(item.id))
+        .map(item => item.xboxGameName || item.name)
+    } else if (generateFormData.subscriptionType === 'host') {
+      boundResourceNames = xboxHostList.value
+        .filter(item => generateFormData.boundResourceIds.includes(item.id))
+        .map(item => item.name || `Xbox-${item.xboxId?.slice(-4)}`)
     }
-    const res = await activationApi.generateBatch(requestData)
-    generatedCode.value = res.data ? `批次 ${res.data.batchName || ''} 创建成功` : '创建成功'
-    generateDialogVisible.value = false
-    showCodeDialogVisible.value = true
-    loadCodes()
+
+    const requestData = {
+      merchantId: generateFormData.merchantId || undefined,
+      subscriptionType: generateFormData.subscriptionType,
+      boundResourceIds: generateFormData.boundResourceIds.length > 0 ? generateFormData.boundResourceIds : null,
+      boundResourceNames: boundResourceNames.length > 0 ? boundResourceNames : null,
+      pointsAmount: generateFormData.subscriptionType === 'points' ? generateFormData.pointsAmount : null
+    }
+
+    const res = await activationApi.createCode(requestData)
+    if (res.code === 200) {
+      generatedCode.value = res.data.code
+      generatedCodeType.value = res.data.subscriptionType
+      generatedCodeOriginalPrice.value = res.data.originalPrice
+      generatedCodeDiscountPrice.value = res.data.discountPrice
+      generateDialogVisible.value = false
+      showCodeDialogVisible.value = true
+      loadCodes()
+    }
   } catch (error) {
-    // 错误已在拦截器中处理
+    console.error('Failed to generate code:', error)
   } finally {
     submitLoading.value = false
   }
 }
 
-/**
- * 复制激活码
- * @param {string} code - 激活码
- */
 const copyCode = (code) => {
   navigator.clipboard.writeText(code).then(() => {
     ElMessage.success('激活码已复制到剪贴板')
@@ -664,120 +591,76 @@ const copyCode = (code) => {
   })
 }
 
-/**
- * 处理表格选择变化
- * @param {Array} selection - 选中的行数据
- */
-const handleSelectionChange = (selection) => {
-  selectedCodes.value = selection
-}
-
-/**
- * 批量删除激活码（仅能删除未使用的）
- */
-const handleBatchDelete = async () => {
-  if (selectedCodes.value.length === 0) {
-    ElMessage.warning('请先选择要删除的激活码')
-    return
-  }
-
-  const unusedCodes = selectedCodes.value.filter(item => item.status === 'unused')
-  if (unusedCodes.length === 0) {
-    ElMessage.warning('只能删除未使用的激活码')
-    return
-  }
-
-  const usedCount = selectedCodes.value.length - unusedCodes.length
-  const message = usedCount > 0
-    ? `选中了 ${selectedCodes.value.length} 个激活码，其中 ${usedCount} 个已使用将无法删除。确定删除 ${unusedCodes.length} 个未使用的激活码吗？`
-    : `确定要删除选中的 ${unusedCodes.length} 个未使用激活码吗？此操作不可恢复！`
-
-  await ElMessageBox.confirm(
-    message,
-    '确认删除',
-    {
-      confirmButtonText: '确定删除',
-      cancelButtonText: '取消',
-      type: 'warning'
-    }
-  )
-
+const handleDelete = async (row) => {
   try {
-    const ids = unusedCodes.map(item => item.id)
-    await activationApi.deleteBatch(ids)
-    ElMessage.success(`成功删除 ${ids.length} 个激活码`)
-    selectedCodes.value = []
+    await ElMessageBox.confirm('确定删除该激活码？删除后无法恢复。', '警告', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+    await activationApi.delete(row.id)
+    ElMessage.success('激活码删除成功')
     loadCodes()
   } catch (error) {
-    // 错误已在拦截器中处理
+    if (error !== 'cancel') {
+      console.error('Failed to delete:', error)
+    }
   }
 }
 
-/**
- * 格式化日期时间
- * @param {string} dateStr - 日期字符串
- * @returns {string} 格式化后的日期
- */
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
+  return date.toLocaleDateString('zh-CN')
 }
 
-/**
- * 获取类型标签颜色
- */
+const formatPrice = (cents) => {
+  if (!cents) return '-'
+  return (cents / 100).toFixed(2) + '元'
+}
+
 const getTypeTag = (type) => {
   const map = {
     'points': 'primary',
     'account': 'success',
-    'window': 'warning',
-    'host': 'danger'
+    'window_account': 'warning',
+    'host': 'danger',
+    'full': 'info'
   }
   return map[type] || 'info'
 }
 
-/**
- * 获取类型名称
- */
 const getTypeName = (type) => {
   const map = {
-    'points': '点数',
-    'account': '游戏账号',
-    'window': '窗口',
-    'host': '主机'
+    'points': '点数充值',
+    'account': '游戏账号包月',
+    'window_account': '流媒体账号包月',
+    'host': 'Xbox主机包月',
+    'full': '全功能包月'
   }
-  return map[type] || type || '点数'
+  return map[type] || type || '点数充值'
 }
-
-// ==================== 生命周期 ====================
 
 onMounted(() => {
   loadCodes()
-  if (isPlatformAdmin.value) {
-    loadMerchantList()
-  }
 })
 </script>
 
 <style scoped>
-/* 组件特有样式，去除重复的全局样式覆盖 */
-
 .code-text {
   font-family: var(--font-mono);
   color: #a78bfa;
   font-size: var(--font-size-sm);
 }
 
-.points-value {
-  color: var(--warning);
-  font-weight: 500;
+.price-discount {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.price-original {
+  color: var(--text-muted);
+  text-decoration: line-through;
 }
 
 .generated-code-box {
@@ -814,30 +697,64 @@ onMounted(() => {
 .generated-code-box .tip {
   color: var(--warning);
   font-size: var(--font-size-xs);
+  margin-top: var(--spacing-md);
 }
 
-.subscription-info {
-  line-height: 1.4;
+.generate-dialog .price-info-card {
+  background: #f5f7fa;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
 }
 
-.subscription-info small {
-  font-size: 11px;
+.generate-dialog .price-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
 }
 
-.form-tip {
-  color: var(--text-muted);
-  font-size: var(--font-size-xs);
-  margin-top: var(--spacing-sm);
+.generate-dialog .price-row:not(:last-child) {
+  border-bottom: 1px solid #e4e7ed;
 }
 
-.duration-display {
-  color: var(--text-primary);
-  font-weight: 500;
+.generate-dialog .price-label {
+  color: #606266;
+  font-size: 14px;
 }
 
-.points-display {
-  color: var(--warning);
+.generate-dialog .price-value {
+  font-size: 18px;
   font-weight: 600;
-  font-size: var(--font-size-lg);
+}
+
+.generate-dialog .price-value.price-original {
+  color: #909399;
+  text-decoration: line-through;
+}
+
+.generate-dialog .price-value.price-discount {
+  color: #67c23a;
+}
+
+.generate-dialog .vip-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.generate-dialog .vip-tip.success {
+  background: #f0f9eb;
+  color: #67c23a;
+  border: 1px solid #d4edda;
+}
+
+.generate-dialog .vip-tip.info {
+  background: #f4f4f5;
+  color: #909399;
+  border: 1px solid #e4e7ed;
 }
 </style>

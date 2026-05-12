@@ -1,7 +1,7 @@
 <template>
   <div class="page-container merchant-group-list">
     <div class="page-header">
-      <h2>商户分组管理</h2>
+      <h2>VIP分组管理</h2>
       <el-button v-if="authStore.isPlatformAdmin" type="primary" @click="showDialog('add')">
         添加分组
       </el-button>
@@ -9,48 +9,60 @@
 
     <div class="content-card">
       <el-table :data="tableData" v-loading="loading" class="data-table">
-        <el-table-column prop="name" label="分组名称" />
-        <el-table-column prop="vipLevel" label="VIP等级" width="100">
+        <el-table-column prop="name" label="分组名称" width="120"/>
+        <el-table-column prop="vipLevel" label="VIP等级" width="80">
           <template #default="{ row }">
             VIP{{ row.vipLevel }}
           </template>
         </el-table-column>
-        <el-table-column prop="pointsThreshold" label="升级门槛" width="120" align="right">
+        <el-table-column prop="amountThreshold" label="升级门槛" width="120" align="right">
           <template #default="{ row }">
-            {{ row.pointsThreshold || 0 }} 点
+            {{ formatPrice(row.amountThreshold) }}
           </template>
         </el-table-column>
-        <el-table-column label="扣点折扣" width="100">
+        <el-table-column label="流媒体账号包月" width="180" align="right">
+          <template #header>
+            流媒体账号包月<br/>
+            <span class="price-label">(原价/折后价)元</span>
+          </template>
           <template #default="{ row }">
-            {{ (row.discountRate * 100).toFixed(0) }}折
+            {{ formatPrice(row.windowOriginalPrice) }} / {{ formatPrice(row.windowDiscountPrice) }}
           </template>
         </el-table-column>
-        <el-table-column label="解绑返还" width="100">
+        <el-table-column label="游戏账号包月" width="180" align="right">
+          <template #header>
+            游戏账号包月<br/>
+            <span class="price-label">(原价/折后价)元</span>
+          </template>
           <template #default="{ row }">
-            {{ (row.unbindRefundRate * 100).toFixed(0) }}%
+            {{ formatPrice(row.accountOriginalPrice) }} / {{ formatPrice(row.accountDiscountPrice) }}
           </template>
         </el-table-column>
-        <el-table-column prop="maxUnbindPerWeek" label="每周解绑上限" width="120" />
-        <el-table-column label="主机单价" width="100">
+        <el-table-column label="Xbox主机包月" width="180" align="right">
+          <template #header>
+            Xbox主机包月<br/>
+            <span class="price-label">(原价/折后价)元</span>
+          </template>
           <template #default="{ row }">
-            {{ row.hostPrice }}点/台/月
+            {{ formatPrice(row.hostOriginalPrice) }} / {{ formatPrice(row.hostDiscountPrice) }}
           </template>
         </el-table-column>
-        <el-table-column label="窗口单价" width="100">
+        <el-table-column label="全功能包月" width="180" align="right">
+          <template #header>
+            全功能包月<br/>
+            <span class="price-label">(原价/折后价)元</span>
+          </template>
           <template #default="{ row }">
-            {{ row.windowPrice }}点/个/月
+            {{ formatPrice(row.fullOriginalPrice) }} / {{ formatPrice(row.fullDiscountPrice) }}
           </template>
         </el-table-column>
-        <el-table-column label="游戏号单价" width="110">
-          <template #default="{ row }">
-            {{ row.accountPrice }}点/个/月
+        <el-table-column label="点数单价" width="170" align="right">
+          <template #header>
+            点数单价<br/>
+            <span class="price-label">(原价/折后价)元</span>
           </template>
-        </el-table-column>
-        <el-table-column prop="features" label="功能权限" min-width="150">
           <template #default="{ row }">
-            <el-tag v-for="f in parseFeatures(row.features)" :key="f" size="small" class="feature-tag">
-              {{ getFeatureName(f) }}
-            </el-tag>
+            {{ formatPrice(row.pointsOriginalPrice) }} / {{ formatPrice(row.pointsDiscountPrice) }}
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="80">
@@ -70,43 +82,79 @@
     </div>
 
     <el-dialog v-model="dialogVisible" :title="dialogType === 'add' ? '添加分组' : '编辑分组'" width="600px">
-      <el-form ref="formRef" :model="formData" :rules="formRules" label-width="100px">
+      <el-form ref="formRef" :model="formData" :rules="formRules" label-width="110px">
         <el-form-item label="分组名称" prop="name">
           <el-input v-model="formData.name" placeholder="请输入分组名称" />
         </el-form-item>
         <el-form-item label="VIP等级">
-          <el-input-number v-model="formData.vipLevel" :min="1" :max="10" />
+          <span v-if="dialogType === 'add'" class="vip-level-auto">
+            将自动分配为 VIP{{ nextVipLevel }}
+          </span>
+          <span v-else class="vip-level-display">VIP{{ formData.vipLevel }}</span>
         </el-form-item>
         <el-form-item label="升级门槛">
-          <el-input-number v-model="formData.pointsThreshold" :min="0" :step="100" />
-          <span class="field-hint">累计充值达到此点数时，自动升级到该VIP等级</span>
+          <el-input-number v-model="formData.amountThreshold" :min="0" :precision="2" />
+          <span class="field-hint">累计消费金额达到此数值时，自动升级到该VIP等级</span>
         </el-form-item>
-        <el-form-item label="扣点折扣">
-          <el-slider v-model="formData.discountRate" :min="0.5" :max="1" :step="0.01" show-stops />
-          <span>{{ (formData.discountRate * 100).toFixed(0) }}折</span>
+        <el-form-item label="流媒体账号" prop="windowDiscountPrice" :rules="formRules.windowDiscountPrice">
+          <div class="price-row">
+            <div class="price-item">
+              <span class="price-label">原价(元):</span>
+              <el-input-number v-model="formData.windowOriginalPrice" :min="0" :precision="2" />
+            </div>
+            <div class="price-item">
+              <span class="price-label">折后(元):</span>
+              <el-input-number v-model="formData.windowDiscountPrice" :min="0" :precision="2" />
+            </div>
+          </div>
         </el-form-item>
-        <el-form-item label="解绑返还比例">
-          <el-slider v-model="formData.unbindRefundRate" :min="0" :max="1" :step="0.1" show-stops />
-          <span>{{ (formData.unbindRefundRate * 100).toFixed(0) }}%</span>
+        <el-form-item label="游戏账号" prop="accountDiscountPrice" :rules="formRules.accountDiscountPrice">
+          <div class="price-row">
+            <div class="price-item">
+              <span class="price-label">原价(元):</span>
+              <el-input-number v-model="formData.accountOriginalPrice" :min="0" :precision="2" />
+            </div>
+            <div class="price-item">
+              <span class="price-label">折后(元):</span>
+              <el-input-number v-model="formData.accountDiscountPrice" :min="0" :precision="2" />
+            </div>
+          </div>
         </el-form-item>
-        <el-form-item label="每周解绑上限">
-          <el-input-number v-model="formData.maxUnbindPerWeek" :min="0" :max="10" />
+        <el-form-item label="Xbox主机" prop="hostDiscountPrice" :rules="formRules.hostDiscountPrice">
+          <div class="price-row">
+            <div class="price-item">
+              <span class="price-label">原价(元):</span>
+              <el-input-number v-model="formData.hostOriginalPrice" :min="0" :precision="2" />
+            </div>
+            <div class="price-item">
+              <span class="price-label">折后(元):</span>
+              <el-input-number v-model="formData.hostDiscountPrice" :min="0" :precision="2" />
+            </div>
+          </div>
         </el-form-item>
-        <el-form-item label="主机单价">
-          <el-input-number v-model="formData.hostPrice" :min="0" :precision="2" /> 点/台/月
+        <el-form-item label="全功能" prop="fullDiscountPrice" :rules="formRules.fullDiscountPrice">
+          <div class="price-row">
+            <div class="price-item">
+              <span class="price-label">原价(元):</span>
+              <el-input-number v-model="formData.fullOriginalPrice" :min="0" :precision="2" />
+            </div>
+            <div class="price-item">
+              <span class="price-label">折后(元):</span>
+              <el-input-number v-model="formData.fullDiscountPrice" :min="0" :precision="2" />
+            </div>
+          </div>
         </el-form-item>
-        <el-form-item label="窗口单价">
-          <el-input-number v-model="formData.windowPrice" :min="0" :precision="2" /> 点/个/月
-        </el-form-item>
-        <el-form-item label="游戏号单价">
-          <el-input-number v-model="formData.accountPrice" :min="0" :precision="2" /> 点/个
-        </el-form-item>
-        <el-form-item label="功能权限">
-          <el-checkbox-group v-model="selectedFeatures">
-            <el-checkbox v-for="feature in featureOptions" :key="feature.code" :label="feature.code">
-              {{ feature.name }}
-            </el-checkbox>
-          </el-checkbox-group>
+        <el-form-item label="点数" prop="pointsDiscountPrice" :rules="formRules.pointsDiscountPrice">
+          <div class="price-row">
+            <div class="price-item">
+              <span class="price-label">原价(元):</span>
+              <el-input-number v-model="formData.pointsOriginalPrice" :min="0" :precision="2" />
+            </div>
+            <div class="price-item">
+              <span class="price-label">折后(元):</span>
+              <el-input-number v-model="formData.pointsDiscountPrice" :min="0" :precision="2" />
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="formData.status" active-value="active" inactive-value="inactive" />
@@ -121,11 +169,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { merchantGroupApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
-import { FEATURE_CODE_MAP } from '@/utils/constants'
 
 const authStore = useAuthStore()
 const loading = ref(false)
@@ -134,47 +181,79 @@ const dialogVisible = ref(false)
 const dialogType = ref('add')
 const submitLoading = ref(false)
 const formRef = ref(null)
-const selectedFeatures = ref(['stream_control', 'sqb', 'dr'])
-
-const featureOptions = Object.entries(FEATURE_CODE_MAP).map(([code, name]) => ({ code, name }))
 
 const formData = reactive({
   id: '',
   name: '',
-  vipLevel: 1,
-  discountRate: 1,
-  unbindRefundRate: 0.5,
-  maxUnbindPerWeek: 2,
-  hostPrice: 20,
-  windowPrice: 15,
-  accountPrice: 10,
-  features: '[]',
+  vipLevel: 0,
+  amountThreshold: 0,
+  windowOriginalPrice: 10000,
+  windowDiscountPrice: 10000,
+  accountOriginalPrice: 5000,
+  accountDiscountPrice: 5000,
+  hostOriginalPrice: 20000,
+  hostDiscountPrice: 20000,
+  fullOriginalPrice: 30000,
+  fullDiscountPrice: 30000,
+  pointsOriginalPrice: 500,
+  pointsDiscountPrice: 500,
   status: 'active'
 })
 
 const formRules = {
   name: [{ required: true, message: '请输入分组名称', trigger: 'blur' }],
-  vipLevel: [{ required: true, message: '请输入VIP等级', trigger: 'blur' }]
+  vipLevel: [{ required: true, message: '请输入VIP等级', trigger: 'blur' }],
+  windowDiscountPrice: [
+    { validator: (rule, value, callback) => {
+      if (value > formData.windowOriginalPrice) {
+        callback(new Error('折后价不能大于原价'))
+      } else {
+        callback()
+      }
+    }, trigger: 'change' }
+  ],
+  accountDiscountPrice: [
+    { validator: (rule, value, callback) => {
+      if (value > formData.accountOriginalPrice) {
+        callback(new Error('折后价不能大于原价'))
+      } else {
+        callback()
+      }
+    }, trigger: 'change' }
+  ],
+  hostDiscountPrice: [
+    { validator: (rule, value, callback) => {
+      if (value > formData.hostOriginalPrice) {
+        callback(new Error('折后价不能大于原价'))
+      } else {
+        callback()
+      }
+    }, trigger: 'change' }
+  ],
+  fullDiscountPrice: [
+    { validator: (rule, value, callback) => {
+      if (value > formData.fullOriginalPrice) {
+        callback(new Error('折后价不能大于原价'))
+      } else {
+        callback()
+      }
+    }, trigger: 'change' }
+  ],
+  pointsDiscountPrice: [
+    { validator: (rule, value, callback) => {
+      if (value > formData.pointsOriginalPrice) {
+        callback(new Error('折后价不能大于原价'))
+      } else {
+        callback()
+      }
+    }, trigger: 'change' }
+  ]
 }
 
-const getFeatureName = (code) => FEATURE_CODE_MAP[code] || code
-
-const OLD_TO_NEW_CODE_MAP = {
-  '1': 'stream_control',
-  '2': 'sqb',
-  '3': 'dr',
-  '4': 'rush',
-  '5': 'transfer'
-}
-
-const parseFeatures = (features) => {
-  try {
-    const parsed = JSON.parse(features || '[]')
-    return parsed.map(f => OLD_TO_NEW_CODE_MAP[f] || f)
-  } catch {
-    return []
-  }
-}
+const nextVipLevel = computed(() => {
+  const maxVip = tableData.value.reduce((max, item) => Math.max(max, item.vipLevel || 0), 0)
+  return maxVip + 1
+})
 
 const loadData = async () => {
   loading.value = true
@@ -191,24 +270,41 @@ const loadData = async () => {
 const showDialog = (type, row = null) => {
   dialogType.value = type
   if (type === 'edit' && row) {
-    Object.assign(formData, row)
-    selectedFeatures.value = parseFeatures(row.features)
+    Object.assign(formData, {
+      id: row.id,
+      name: row.name,
+      vipLevel: row.vipLevel,
+      amountThreshold: row.amountThreshold ? row.amountThreshold / 100 : 0,
+      windowOriginalPrice: row.windowOriginalPrice ? row.windowOriginalPrice / 100 : 0,
+      windowDiscountPrice: row.windowDiscountPrice ? row.windowDiscountPrice / 100 : 0,
+      accountOriginalPrice: row.accountOriginalPrice ? row.accountOriginalPrice / 100 : 0,
+      accountDiscountPrice: row.accountDiscountPrice ? row.accountDiscountPrice / 100 : 0,
+      hostOriginalPrice: row.hostOriginalPrice ? row.hostOriginalPrice / 100 : 0,
+      hostDiscountPrice: row.hostDiscountPrice ? row.hostDiscountPrice / 100 : 0,
+      fullOriginalPrice: row.fullOriginalPrice ? row.fullOriginalPrice / 100 : 0,
+      fullDiscountPrice: row.fullDiscountPrice ? row.fullDiscountPrice / 100 : 0,
+      pointsOriginalPrice: row.pointsOriginalPrice ? row.pointsOriginalPrice / 100 : 0,
+      pointsDiscountPrice: row.pointsDiscountPrice ? row.pointsDiscountPrice / 100 : 0,
+      status: row.status
+    })
   } else {
     Object.assign(formData, {
       id: '',
       name: '',
-      vipLevel: 1,
-      pointsThreshold: 0,
-      discountRate: 1,
-      unbindRefundRate: 0.5,
-      maxUnbindPerWeek: 2,
-      hostPrice: 20,
-      windowPrice: 15,
-      accountPrice: 10,
-      features: '[]',
+      vipLevel: 0,
+      amountThreshold: 0,
+      windowOriginalPrice: 100,
+      windowDiscountPrice: 100,
+      accountOriginalPrice: 50,
+      accountDiscountPrice: 50,
+      hostOriginalPrice: 200,
+      hostDiscountPrice: 200,
+      fullOriginalPrice: 300,
+      fullDiscountPrice: 300,
+      pointsOriginalPrice: 5,
+      pointsDiscountPrice: 5,
       status: 'active'
     })
-    selectedFeatures.value = ['stream_control', 'sqb', 'dr']
   }
   dialogVisible.value = true
 }
@@ -219,12 +315,29 @@ const handleSubmit = async () => {
 
   submitLoading.value = true
   try {
-    formData.features = JSON.stringify(selectedFeatures.value)
+    const submitData = {
+      name: formData.name,
+      amountThreshold: Math.round(formData.amountThreshold * 100),
+      windowOriginalPrice: Math.round(formData.windowOriginalPrice * 100),
+      windowDiscountPrice: Math.round(formData.windowDiscountPrice * 100),
+      accountOriginalPrice: Math.round(formData.accountOriginalPrice * 100),
+      accountDiscountPrice: Math.round(formData.accountDiscountPrice * 100),
+      hostOriginalPrice: Math.round(formData.hostOriginalPrice * 100),
+      hostDiscountPrice: Math.round(formData.hostDiscountPrice * 100),
+      fullOriginalPrice: Math.round(formData.fullOriginalPrice * 100),
+      fullDiscountPrice: Math.round(formData.fullDiscountPrice * 100),
+      pointsOriginalPrice: Math.round(formData.pointsOriginalPrice * 100),
+      pointsDiscountPrice: Math.round(formData.pointsDiscountPrice * 100),
+      status: formData.status || 'active'
+    }
     if (dialogType.value === 'add') {
-      await merchantGroupApi.create(formData)
+      submitData.vipLevel = nextVipLevel.value
+      await merchantGroupApi.create(submitData)
       ElMessage.success('分组创建成功')
     } else {
-      await merchantGroupApi.update(formData.id, formData)
+      submitData.id = formData.id
+      submitData.vipLevel = formData.vipLevel
+      await merchantGroupApi.update(submitData.id, submitData)
       ElMessage.success('分组更新成功')
     }
     dialogVisible.value = false
@@ -249,6 +362,11 @@ const handleDelete = async (row) => {
   }
 }
 
+const formatPrice = (cents) => {
+  if (!cents) return '-'
+  return (cents / 100).toFixed(2) + '元'
+}
+
 onMounted(() => {
   loadData()
 })
@@ -262,10 +380,43 @@ onMounted(() => {
   margin-bottom: 20px;
 }
 
+.price-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.price-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.price-item .price-label {
+  min-width: 70px;
+}
+
 .field-hint {
   margin-left: 12px;
   color: #8a8a8a;
   font-size: 12px;
+}
+
+.vip-level-auto {
+  color: #67c23a;
+  font-weight: 500;
+}
+
+.vip-level-display {
+  color: #409eff;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.price-label {
+  margin-right: 4px;
+  color: #606266;
 }
 
 .page-header h2 {
@@ -273,10 +424,5 @@ onMounted(() => {
   font-weight: 600;
   color: #ffffff;
   margin: 0;
-}
-
-.feature-tag {
-  margin-right: 4px;
-  margin-bottom: 2px;
 }
 </style>

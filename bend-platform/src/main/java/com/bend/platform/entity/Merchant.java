@@ -17,7 +17,6 @@ public class Merchant {
     private String phone;
     private String name;
     private String status;
-    private LocalDateTime expireTime;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdTime;
     @TableField(fill = FieldFill.INSERT_UPDATE)
@@ -28,6 +27,6 @@ public class Merchant {
     @TableLogic
     private Boolean deleted;
 
-    private Integer totalPoints;
+    private Integer totalAmount;
     private Integer vipLevel;
 }

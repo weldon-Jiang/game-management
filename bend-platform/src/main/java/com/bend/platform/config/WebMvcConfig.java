@@ -14,20 +14,19 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        // 限流拦截器 - 对所有 API 生效
         registry.addInterceptor(rateLimitInterceptor)
                 .addPathPatterns("/api/**");
 
+        // JWT 认证拦截器 - 对所有 API 生效，但排除公开接口
         registry.addInterceptor(jwtAuthInterceptor)
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
                         "/api/auth/**",
+                        "/api/agents/**",
                         "/api/agent-callback/**",
                         "/api/monitoring/**",
-                        "/api/agents/register",
-                        "/api/agents/heartbeat",
-                        "/api/agents/status",
-                        "/api/agents/uninstall",
-                        "/api/agents/offline"
+                        "/api/registration-codes/**"
                 );
     }
 }

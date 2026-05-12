@@ -88,6 +88,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if (path.contains("/api/auth/register")) {
             return 3;
         }
+        if (path.contains("/api/registration-codes/activate")) {
+            return 5;
+        }
         return DEFAULT_LIMIT;
     }
 
@@ -96,6 +99,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             return 60;
         }
         if (path.contains("/api/auth/register")) {
+            return 60;
+        }
+        if (path.contains("/api/registration-codes/activate")) {
             return 60;
         }
         return DEFAULT_WINDOW;

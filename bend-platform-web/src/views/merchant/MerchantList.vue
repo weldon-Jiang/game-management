@@ -38,9 +38,10 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="totalPoints" label="累计点数" width="120" align="right">
+        <el-table-column prop="isSystem" label="系统商户" width="100" align="center">
           <template #default="{ row }">
-            <span class="points-text">{{ row.totalPoints || 0 }}</span>
+            <el-tag v-if="row.isSystem" type="success" size="small">是</el-tag>
+            <span v-else class="text-muted">否</span>
           </template>
         </el-table-column>
         <el-table-column prop="createdTime" label="创建时间" width="170">

@@ -9,7 +9,7 @@
 # 服务器配置
 # ----------------------------------------------
 server:
-  port: ${SERVER_PORT:8090}
+  port: ${SERVER_PORT:8061}
 
 # ----------------------------------------------
 # Spring框架配置
@@ -26,7 +26,7 @@ spring:
       enabled: true
       host: ${REDIS_HOST:127.0.0.1}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
+      password: ${REDIS_PASSWORD:D$U@GAMECeKfi}  # 本地开发和 Docker 都用这个密码
       database: ${REDIS_DATABASE:0}
       timeout: ${REDIS_TIMEOUT:5000}
       lettuce:
@@ -42,7 +42,7 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/bend_platform?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:}
+    password: ${DB_PASSWORD:D$U@GAMECeKfidb}
     driver-class-name: com.mysql.cj.jdbc.Driver
     type: com.zaxxer.hikari.HikariDataSource
     hikari:
@@ -97,8 +97,11 @@ management:
 
 # ----------------------------------------------
 # CORS跨域配置
+# - 本地开发（Gateway模式）：false（由 Gateway 统一处理）
+# - 本地直连后端调试：true
 # ----------------------------------------------
 cors:
+  enabled: ${CORS_ENABLED:false}
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3090}
   allowed-methods: GET,POST,PUT,DELETE,OPTIONS
   allowed-headers: "*"

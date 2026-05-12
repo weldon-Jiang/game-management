@@ -1,344 +1,336 @@
 package com.bend.platform.controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.bend.platform.dto.ActivationCodeBatchCodesPageRequest;
-import com.bend.platform.dto.ActivationCodeBatchPageRequest;
-import com.bend.platform.dto.ActivationCodeDto;
-import com.bend.platform.dto.ActivationCodePageRequest;
-import com.bend.platform.dto.ActivationCodeRequest;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.ActivationCode;
 import com.bend.platform.entity.ActivationCodeBatch;
 import com.bend.platform.entity.Merchant;
-import com.bend.platform.entity.MerchantUser;
-import com.bend.platform.exception.BusinessException;
-import com.bend.platform.exception.ResultCode;
+import com.bend.platform.entity.MerchantGroup;
 import com.bend.platform.repository.ActivationCodeBatchMapper;
 import com.bend.platform.repository.ActivationCodeMapper;
+import com.bend.platform.repository.MerchantGroupMapper;
 import com.bend.platform.repository.MerchantMapper;
-import com.bend.platform.repository.MerchantUserMapper;
 import com.bend.platform.service.ActivationCodeService;
+import com.bend.platform.service.impl.VipLevelService;
 import com.bend.platform.util.UserContext;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.util.CollectionUtils;
-import org.springframework.util.StringUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
-import jakarta.validation.Valid;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.*;
 
 /**
- * 激活码控制器
+ * 激活码管理控制器
  *
  * 功能说明：
- * - 管理VIP激活码
- * - 支持单个和批量生成激活码
+ * - 生成激活码（平台管理员可为商户生成）
+ * - 查看激活码列表
+ * - 预览激活码信息
+ * - 获取VIP价格配置
+ * - 删除未使用的激活码
  *
- * 主要功能：
- * - 生成单个激活码
- * - 批量生成激活码
- * - 查询激活码列表（分页）
- * - 使用激活码
- * - 删除激活码
+ * 订阅类型：
+ * - window_account: 流媒体账号包月
+ * - account: 游戏账号包月
+ * - host: Xbox主机包月
+ * - full: 全功能包月
+ * - points: 点数充值
+ *
+ * 价格说明：
+ * - 根据商户VIP等级获取对应的原价/折扣价
+ * - 生成激活码时记录价格，激活时不再重新计算
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/activation-codes")
 @RequiredArgsConstructor
 public class ActivationCodeController {
 
-    private final ActivationCodeService activationCodeService;
     private final ActivationCodeMapper activationCodeMapper;
     private final ActivationCodeBatchMapper activationCodeBatchMapper;
     private final MerchantMapper merchantMapper;
-    private final MerchantUserMapper merchantUserMapper;
-
-    /**
-     * 生成单个激活码
-     *
-     * @param request 激活码请求（包含vipType、merchantId等）
-     * @return 创建的激活码
-     */
-    @PostMapping("/single")
-    public ApiResponse<ActivationCode> generateSingle(@Valid @RequestBody ActivationCodeRequest request) {
-        String currentMerchantId = UserContext.getMerchantId();
-
-        String targetMerchantId;
-        if (UserContext.isPlatformAdmin()) {
-            targetMerchantId = request.getMerchantId() != null ? request.getMerchantId() : currentMerchantId;
-        } else {
-            targetMerchantId = currentMerchantId;
-        }
-
-        ActivationCodeBatch batch = activationCodeService.generateBatch(
-                targetMerchantId,
-                "SINGLE-" + System.currentTimeMillis(),
-                request.getPoints(),
-                1,
-                request.getExpireTime()
-        );
-        LambdaQueryWrapper<ActivationCode> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ActivationCode::getBatchId, batch.getId());
-        ActivationCode code = activationCodeMapper.selectOne(wrapper);
-        return ApiResponse.success("生成成功", code);
-    }
+    private final MerchantGroupMapper merchantGroupMapper;
+    private final ActivationCodeService activationCodeService;
+    private final VipLevelService vipLevelService;
+    private final ObjectMapper objectMapper;
 
     /**
      * 分页查询激活码列表
      *
-     * @param request 分页请求参数
+     * @param pageNum  页码，默认1
+     * @param pageSize 每页数量，默认10
+     * @param status   状态筛选，可选：unused/used/expired
      * @return 激活码分页列表
+     *
+     * 说明：
+     * - 平台管理员返回所有激活码
+     * - 普通商户只返回自己商户的激活码
      */
     @GetMapping("/list")
-    public ApiResponse<IPage<ActivationCodeDto>> listCodes(ActivationCodePageRequest request) {
-
-        if (!UserContext.isPlatformAdmin()) {
-            request.setMerchantId(UserContext.getMerchantId());
-        }
-
-        IPage<ActivationCode> page = activationCodeService.findByMerchantId(
-                request.getMerchantId(),
-                request.getKeyword(),
-                request);
-        IPage<ActivationCodeDto> dtoPage = convertToDtoPage(page);
-        return ApiResponse.success(dtoPage);
-    }
-
-    /**
-     * 批量生成激活码
-     *
-     * @param request 批量生成请求（包含points、count、batchName等）
-     * @return 创建的批次信息
-     */
-    @PostMapping("/batch")
-    public ApiResponse<ActivationCodeBatch> generateBatch(@Valid @RequestBody ActivationCodeRequest request) {
-        String currentMerchantId = UserContext.getMerchantId();
-
-        String targetMerchantId;
+    public ApiResponse<IPage<ActivationCode>> listCodes(
+            @RequestParam(defaultValue = "1") int pageNum,
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(required = false) String status) {
+        String merchantId = UserContext.getMerchantId();
+        IPage<ActivationCode> pageResult;
         if (UserContext.isPlatformAdmin()) {
-            targetMerchantId = request.getMerchantId() != null ? request.getMerchantId() : currentMerchantId;
+            pageResult = activationCodeService.pageAll(pageNum, pageSize, status);
         } else {
-            targetMerchantId = currentMerchantId;
+            pageResult = activationCodeService.pageByMerchant(merchantId, pageNum, pageSize, status);
         }
-
-        String batchName = StringUtils.hasText(request.getBatchName())
-                ? request.getBatchName()
-                : "BATCH-" + System.currentTimeMillis();
-
-        String subscriptionType = request.getSubscriptionType();
-        if (!StringUtils.hasText(subscriptionType)) {
-            subscriptionType = "points";
-        }
-
-        ActivationCodeBatch batch = activationCodeService.generateBatch(
-                targetMerchantId,
-                batchName,
-                subscriptionType,
-                request.getTargetId(),
-                request.getTargetName(),
-                request.getPoints(),
-                request.getDurationDays(),
-                request.getDailyPrice(),
-                request.getCount() != null ? request.getCount() : 1,
-                request.getExpireTime()
-        );
-        return ApiResponse.success("生成成功", batch);
+        return ApiResponse.success(pageResult);
     }
 
     /**
-     * 获取所有激活码批次
-     *
-     * @return 批次列表
-     */
-    @GetMapping("/batches")
-    public ApiResponse<List<ActivationCodeBatch>> listBatches() {
-        String merchantId = UserContext.isPlatformAdmin() ? null : UserContext.getMerchantId();
-        List<ActivationCodeBatch> batches = activationCodeService.findAllBatchesByMerchantId(merchantId);
-        return ApiResponse.success(batches);
-    }
-
-    /**
-     * 分页查询激活码批次
-     *
-     * @param request 分页请求参数
-     * @return 批次分页列表
-     */
-    @GetMapping("/batches/page")
-    public ApiResponse<IPage<ActivationCodeBatch>> listBatchesPage(ActivationCodeBatchPageRequest request) {
-        String merchantId = UserContext.isPlatformAdmin() ? null : UserContext.getMerchantId();
-        IPage<ActivationCodeBatch> page = activationCodeService.findBatchesByMerchantId(
-                merchantId,
-                request);
-        return ApiResponse.success(page);
-    }
-
-    /**
-     * 获取批次详情
-     *
-     * @param batchId 批次ID
-     * @return 批次信息
-     */
-    @GetMapping("/batch/{batchId}")
-    public ApiResponse<ActivationCodeBatch> getBatchById(@PathVariable String batchId) {
-        ActivationCodeBatch batch = activationCodeService.findBatchById(batchId);
-        if (batch == null) {
-            throw new BusinessException(ResultCode.ActivationCode.BATCH_NOT_FOUND);
-        }
-
-        if (!UserContext.isPlatformAdmin() && !batch.getMerchantId().equals(UserContext.getMerchantId())) {
-            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
-        }
-
-        return ApiResponse.success(batch);
-    }
-
-    /**
-     * 获取批次下的激活码列表
-     *
-     * @param batchId 批次ID
-     * @param request 分页请求参数
-     * @return 激活码分页列表
-     */
-    @GetMapping("/batch/{batchId}/codes")
-    public ApiResponse<IPage<ActivationCode>> listCodesByBatch(
-            @PathVariable String batchId,
-            ActivationCodeBatchCodesPageRequest request) {
-        ActivationCodeBatch batch = activationCodeService.findBatchById(batchId);
-        if (batch == null) {
-            throw new BusinessException(ResultCode.ActivationCode.BATCH_NOT_FOUND);
-        }
-
-        if (!UserContext.isPlatformAdmin() && !batch.getMerchantId().equals(UserContext.getMerchantId())) {
-            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
-        }
-
-        IPage<ActivationCode> page = activationCodeService.findByBatchId(batchId, request);
-        return ApiResponse.success(page);
-    }
-
-    /**
-     * 使用激活码
-     * 商户用户调用，将激活码标记为已使用
+     * 预览激活码信息
      *
      * @param code 激活码
-     * @return 使用后的激活码信息
+     * @return 激活码详细信息（不含敏感信息）
+     *
+     * 说明：
+     * - 只能预览属于当前商户的激活码
+     * - 返回激活码的基本信息和价格
      */
-    @PostMapping("/use")
-    public ApiResponse<ActivationCode> useCode(@RequestParam String code) {
-        String userId = UserContext.getUserId();
-        ActivationCode result = activationCodeService.useCode(code, userId);
-        return ApiResponse.success("激活成功", result);
+    @GetMapping("/preview")
+    public ApiResponse<Map<String, Object>> previewCode(@RequestParam String code) {
+        String merchantId = UserContext.getMerchantId();
+
+        ActivationCode activationCode = activationCodeMapper.selectOne(
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ActivationCode>()
+                .eq(ActivationCode::getCode, code)
+        );
+
+        if (activationCode == null) {
+            return ApiResponse.error(404, "激活码不存在");
+        }
+
+        if (!merchantId.equals(activationCode.getMerchantId())) {
+            return ApiResponse.error(403, "激活码不属于当前商户");
+        }
+
+        Map<String, Object> preview = new HashMap<>();
+        preview.put("code", activationCode.getCode());
+        preview.put("subscriptionType", activationCode.getSubscriptionType());
+        preview.put("boundResourceType", activationCode.getBoundResourceType());
+        preview.put("boundResourceNames", activationCode.getBoundResourceNames());
+        preview.put("durationDays", activationCode.getDurationDays());
+        preview.put("originalPrice", activationCode.getOriginalPrice());
+        preview.put("discountPrice", activationCode.getDiscountPrice());
+        preview.put("status", activationCode.getStatus());
+
+        return ApiResponse.success(preview);
+    }
+
+    /**
+     * 生成激活码
+     *
+     * @param request 请求参数
+     *               - merchantId: 商户ID（平台管理员可选，普通商户不传）
+     *               - subscriptionType: 订阅类型
+     *               - boundResourceIds: 绑定资源ID列表
+     *               - boundResourceNames: 绑定资源名称列表
+     *               - pointsAmount: 点数数量（仅points类型）
+     * @return 生成的激活码信息
+     *
+     * 说明：
+     * - 根据商户VIP等级计算价格
+     * - 生成激活码时累加商户累计消费，更新VIP等级
+     * - 激活码生成时不设置生效时间，激活时才计算
+     */
+    @SuppressWarnings("unchecked")
+    @PostMapping
+    public ApiResponse<Map<String, Object>> createCode(@RequestBody Map<String, Object> request) {
+        String merchantId = UserContext.getMerchantId();
+
+        String subscriptionType = (String) request.get("subscriptionType");
+        List<String> boundResourceIds = (List<String>) request.get("boundResourceIds");
+        List<String> boundResourceNames = (List<String>) request.get("boundResourceNames");
+        Integer pointsAmount = request.get("pointsAmount") != null
+            ? ((Number) request.get("pointsAmount")).intValue() : null;
+
+        if (request.get("merchantId") != null && !((String) request.get("merchantId")).isEmpty()) {
+            merchantId = (String) request.get("merchantId");
+        }
+
+        Merchant merchant = merchantMapper.selectById(merchantId);
+        int vipLevel = merchant != null && merchant.getVipLevel() != null ? merchant.getVipLevel() : 0;
+
+        MerchantGroup group = merchantGroupMapper.selectOne(
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<MerchantGroup>()
+                .eq(MerchantGroup::getVipLevel, vipLevel)
+                .eq(MerchantGroup::getStatus, "active")
+                .last("LIMIT 1")
+        );
+
+        int originalPrice = 0;
+        int discountPrice = 0;
+        String boundResourceType = null;
+
+        switch (subscriptionType) {
+            case "window_account":
+                boundResourceType = "streaming_account";
+                originalPrice = group != null ? group.getWindowOriginalPrice() : 10000;
+                discountPrice = group != null ? group.getWindowDiscountPrice() : 10000;
+                break;
+            case "account":
+                boundResourceType = "game_account";
+                originalPrice = group != null ? group.getAccountOriginalPrice() : 5000;
+                discountPrice = group != null ? group.getAccountDiscountPrice() : 5000;
+                break;
+            case "host":
+                boundResourceType = "xbox_host";
+                originalPrice = group != null ? group.getHostOriginalPrice() : 20000;
+                discountPrice = group != null ? group.getHostDiscountPrice() : 20000;
+                break;
+            case "full":
+                boundResourceType = "all";
+                originalPrice = group != null ? group.getFullOriginalPrice() : 30000;
+                discountPrice = group != null ? group.getFullDiscountPrice() : 30000;
+                break;
+            case "points":
+                boundResourceType = null;
+                int unitOriginalPrice = group != null ? group.getPointsOriginalPrice() : 500;
+                int unitDiscountPrice = group != null ? group.getPointsDiscountPrice() : 500;
+                if (pointsAmount != null && pointsAmount > 0) {
+                    originalPrice = unitOriginalPrice * pointsAmount;
+                    discountPrice = unitDiscountPrice * pointsAmount;
+                } else {
+                    originalPrice = unitOriginalPrice;
+                    discountPrice = unitDiscountPrice;
+                }
+                break;
+            default:
+                return ApiResponse.error(400, "不支持的订阅类型");
+        }
+
+        String boundResourceIdsJson = null;
+        String boundResourceNamesJson = null;
+        if (boundResourceIds != null && !boundResourceIds.isEmpty()) {
+            try {
+                boundResourceIdsJson = objectMapper.writeValueAsString(boundResourceIds);
+                boundResourceNamesJson = objectMapper.writeValueAsString(boundResourceNames != null ? boundResourceNames : boundResourceIds);
+            } catch (JsonProcessingException e) {
+                log.error("序列化绑定资源失败", e);
+            }
+        }
+
+        ActivationCode activationCode = activationCodeService.generateCode(
+            merchantId,
+            subscriptionType,
+            boundResourceType,
+            boundResourceIdsJson,
+            boundResourceNamesJson,
+            30,
+            originalPrice,
+            discountPrice,
+            null
+        );
+
+        if (originalPrice > 0) {
+            int newTotalAmount = (merchant.getTotalAmount() != null ? merchant.getTotalAmount() : 0) + originalPrice;
+            merchant.setTotalAmount(newTotalAmount);
+
+            int newVipLevel = vipLevelService.calculateVipLevel(newTotalAmount);
+            if (newVipLevel != merchant.getVipLevel()) {
+                merchant.setVipLevel(newVipLevel);
+            }
+            merchantMapper.updateById(merchant);
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", activationCode.getId());
+        result.put("code", activationCode.getCode());
+        result.put("subscriptionType", activationCode.getSubscriptionType());
+        result.put("originalPrice", activationCode.getOriginalPrice());
+        result.put("discountPrice", activationCode.getDiscountPrice());
+        result.put("durationDays", activationCode.getDurationDays());
+
+        return ApiResponse.success(result);
+    }
+
+    /**
+     * 查询激活码批次列表
+     *
+     * @param pageNum  页码
+     * @param pageSize 每页数量
+     * @return 批次分页列表
+     */
+    @GetMapping("/batch/list")
+    public ApiResponse<IPage<ActivationCodeBatch>> listBatches(
+            @RequestParam(defaultValue = "1") int pageNum,
+            @RequestParam(defaultValue = "10") int pageSize) {
+        String merchantId = UserContext.getMerchantId();
+        var pageResult = activationCodeService.pageBatchesByMerchant(merchantId, pageNum, pageSize);
+        return ApiResponse.success(pageResult);
+    }
+
+    /**
+     * 获取商户VIP价格配置
+     *
+     * @param merchantId 商户ID（可选，不传则取当前商户）
+     * @return 各订阅类型的原价和折扣价
+     *
+     * 说明：
+     * - 根据商户的VIP等级获取对应的价格配置
+     * - 返回流媒体账号、游戏账号、Xbox主机、全功能包月及点数的原价和折后价
+     */
+    @GetMapping("/prices")
+    public ApiResponse<Map<String, Object>> getPrices(
+            @RequestParam(required = false) String merchantId) {
+        String currentMerchantId = merchantId != null ? merchantId : UserContext.getMerchantId();
+        Merchant merchant = merchantMapper.selectById(currentMerchantId);
+        int vipLevel = merchant != null && merchant.getVipLevel() != null ? merchant.getVipLevel() : 0;
+
+        MerchantGroup group = merchantGroupMapper.selectOne(
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<MerchantGroup>()
+                .eq(MerchantGroup::getVipLevel, vipLevel)
+                .eq(MerchantGroup::getStatus, "active")
+                .last("LIMIT 1")
+        );
+
+        Map<String, Object> prices = new HashMap<>();
+        if (group != null) {
+            prices.put("windowOriginalPrice", group.getWindowOriginalPrice());
+            prices.put("windowDiscountPrice", group.getWindowDiscountPrice());
+            prices.put("accountOriginalPrice", group.getAccountOriginalPrice());
+            prices.put("accountDiscountPrice", group.getAccountDiscountPrice());
+            prices.put("hostOriginalPrice", group.getHostOriginalPrice());
+            prices.put("hostDiscountPrice", group.getHostDiscountPrice());
+            prices.put("fullOriginalPrice", group.getFullOriginalPrice());
+            prices.put("fullDiscountPrice", group.getFullDiscountPrice());
+            prices.put("pointsOriginalPrice", group.getPointsOriginalPrice());
+            prices.put("pointsDiscountPrice", group.getPointsDiscountPrice());
+        } else {
+            prices.put("windowOriginalPrice", 10000);
+            prices.put("windowDiscountPrice", 10000);
+            prices.put("accountOriginalPrice", 5000);
+            prices.put("accountDiscountPrice", 5000);
+            prices.put("hostOriginalPrice", 20000);
+            prices.put("hostDiscountPrice", 20000);
+            prices.put("fullOriginalPrice", 30000);
+            prices.put("fullDiscountPrice", 30000);
+            prices.put("pointsOriginalPrice", 500);
+            prices.put("pointsDiscountPrice", 500);
+        }
+
+        return ApiResponse.success(prices);
     }
 
     /**
      * 删除激活码
-     * 仅平台管理员可操作
      *
-     * @param ids 激活码ID列表
+     * @param id 激活码ID
      * @return 操作结果
-     */
-    @DeleteMapping
-    public ApiResponse<Void> deleteCodes(@RequestBody List<String> ids) {
-        if (!UserContext.isPlatformAdmin()) {
-            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
-        }
-        activationCodeService.deleteByIds(ids);
-        return ApiResponse.success("删除成功", null);
-    }
-
-    /**
-     * 转换为DTO分页
      *
-     * @param page 原始分页
-     * @return DTO分页
+     * 说明：
+     * - 只能删除未使用的激活码
+     * - 已使用或已过期的激活码无法删除
      */
-    private IPage<ActivationCodeDto> convertToDtoPage(IPage<ActivationCode> page) {
-        List<ActivationCode> records = page.getRecords();
-        if (CollectionUtils.isEmpty(records)) {
-            return new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
-        }
-
-        List<String> merchantIds = records.stream()
-                .map(ActivationCode::getMerchantId)
-                .filter(StringUtils::hasText)
-                .distinct()
-                .collect(Collectors.toList());
-
-        List<String> userIds = records.stream()
-                .map(ActivationCode::getUsedBy)
-                .filter(StringUtils::hasText)
-                .distinct()
-                .collect(Collectors.toList());
-
-        Map<String, String> merchantNameMap = new HashMap<>();
-        if (!CollectionUtils.isEmpty(merchantIds)) {
-            LambdaQueryWrapper<Merchant> wrapper = new LambdaQueryWrapper<>();
-            wrapper.in(Merchant::getId, merchantIds);
-            merchantMapper.selectList(wrapper).forEach(m -> merchantNameMap.put(m.getId(), m.getName()));
-        }
-
-        Map<String, String> userNameMap = new HashMap<>();
-        if (!CollectionUtils.isEmpty(userIds)) {
-            LambdaQueryWrapper<MerchantUser> wrapper = new LambdaQueryWrapper<>();
-            wrapper.in(MerchantUser::getId, userIds);
-            merchantUserMapper.selectList(wrapper).forEach(u -> userNameMap.put(u.getId(), u.getUsername()));
-        }
-
-        List<String> batchIds = records.stream()
-                .map(ActivationCode::getBatchId)
-                .filter(StringUtils::hasText)
-                .distinct()
-                .collect(Collectors.toList());
-
-        Map<String, ActivationCodeBatch> batchMap = new HashMap<>();
-        if (!CollectionUtils.isEmpty(batchIds)) {
-            LambdaQueryWrapper<ActivationCodeBatch> batchWrapper = new LambdaQueryWrapper<>();
-            batchWrapper.in(ActivationCodeBatch::getId, batchIds);
-            activationCodeBatchMapper.selectList(batchWrapper).forEach(b -> batchMap.put(b.getId(), b));
-        }
-
-        List<ActivationCodeDto> dtos = records.stream().map(code -> {
-            ActivationCodeDto dto = new ActivationCodeDto();
-            dto.setId(code.getId());
-            dto.setMerchantId(code.getMerchantId());
-            dto.setBatchId(code.getBatchId());
-            dto.setCode(code.getCode());
-            dto.setStatus(code.getStatus());
-            dto.setUsedBy(code.getUsedBy());
-            dto.setUsedTime(code.getUsedTime());
-            dto.setExpireTime(code.getExpireTime());
-            dto.setGeneratedTime(code.getGeneratedTime());
-            dto.setCreatedTime(code.getCreatedTime());
-            dto.setUpdatedTime(code.getUpdatedTime());
-            dto.setMerchantName(merchantNameMap.get(code.getMerchantId()));
-            dto.setUsedByName(userNameMap.get(code.getUsedBy()));
-
-            ActivationCodeBatch batch = batchMap.get(code.getBatchId());
-            if (batch != null) {
-                dto.setPoints(batch.getPoints());
-                dto.setPointsAmount(batch.getPointsAmount());
-                dto.setSubscriptionType(batch.getSubscriptionType());
-                dto.setTargetId(batch.getTargetId());
-                dto.setTargetName(batch.getTargetName());
-                dto.setDurationDays(batch.getDurationDays());
-                dto.setDailyPrice(batch.getDailyPrice());
-            } else {
-                dto.setSubscriptionType(code.getSubscriptionType());
-                dto.setTargetId(code.getTargetId());
-                dto.setTargetName(code.getTargetName());
-                dto.setDurationDays(code.getDurationDays());
-                dto.setDailyPrice(code.getDailyPrice());
-                dto.setPointsAmount(code.getPointsAmount());
-            }
-            return dto;
-        }).collect(Collectors.toList());
-
-        Page<ActivationCodeDto> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
-        result.setRecords(dtos);
-        return result;
+    @DeleteMapping("/{id}")
+    public ApiResponse<Void> deleteCode(@PathVariable String id) {
+        activationCodeService.deleteById(id);
+        return ApiResponse.success("激活码删除成功", null);
     }
 }

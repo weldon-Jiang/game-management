@@ -22,6 +22,8 @@ import os
 import yaml
 from typing import Any, Dict, Optional
 
+from .paths import get_base_dir, get_config_path
+
 
 class Config:
     """
@@ -64,12 +66,8 @@ class Config:
         2. 如果文件不存在，使用默认配置
         """
         if config_path is None:
-            # 默认配置文件路径：项目根目录/configs/agent.yaml
-            config_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                'configs',
-                'agent.yaml'
-            )
+            # 默认配置文件路径：exe 或脚本所在目录/agent.yaml
+            config_path = get_config_path()
 
         if os.path.exists(config_path):
             # 读取YAML配置文件
@@ -86,7 +84,7 @@ class Config:
         当配置文件不存在或解析失败时使用此默认配置
 
         默认配置内容：
-        - backend: 后端服务地址（localhost:8080）
+        - backend: 后端服务地址（localhost:8061）
         - agent: Agent基本参数（心跳间隔30秒等）
         - video: 视频捕获参数（fps=10）
         - template: 模板匹配参数（阈值0.8）
@@ -98,8 +96,8 @@ class Config:
         """
         return {
             'backend': {
-                'base_url': 'http://localhost:8080',       # 后端HTTP地址
-                'ws_url': 'ws://localhost:8080/ws/agents',  # WebSocket地址
+                'base_url': 'http://localhost:8060',       # 后端HTTP地址
+                'ws_url': 'ws://localhost:8060/ws/agents',  # WebSocket地址
                 'api_prefix': '/api'                        # API路由前缀
             },
             'agent': {
@@ -184,18 +182,18 @@ class Config:
         """
         获取后端服务器HTTP地址
 
-        返回值：后端服务器URL，默认 'http://localhost:8080'
+        返回值：后端服务器URL，默认 'http://localhost:8060'
         """
-        return self.get('backend.base_url', 'http://localhost:8080')
+        return self.get('backend.base_url', 'http://localhost:8060')
 
     @property
     def ws_url(self) -> str:
         """
         获取WebSocket服务器地址
 
-        返回值：WebSocket服务器URL，默认 'ws://localhost:8080'
+        返回值：WebSocket服务器URL，默认 'ws://localhost:8060'
         """
-        return self.get('backend.ws_url', 'ws://localhost:8080')
+        return self.get('backend.ws_url', 'ws://localhost:8060')
 
     @property
     def heartbeat_interval(self) -> int:

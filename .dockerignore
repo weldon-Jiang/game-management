@@ -1,0 +1,60 @@
+# ============================================
+# Docker 构建忽略文件
+# ============================================
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 文档
+*.md
+docs/
+*.txt
+
+# 测试
+**/*test*
+**/test/
+**/tests/
+**/__tests__/
+*.test.js
+*.test.ts
+*.spec.js
+*.spec.ts
+
+# 本地配置
+.env
+.env.*
+!.env.example
+
+# 日志
+*.log
+logs/
+**/logs/
+
+# 临时文件
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Node_modules (会在 Docker 构建中重新安装)
+bend-platform-web/node_modules/
+
+# 构建产物 (会在 Docker 构建中重新生成)
+bend-platform-web/dist/
+bend-platform/target/
+
+# Docker 文件 (不要忽略)
+!docker-compose*.yml
+!Dockerfile*
+
+# 其他
+*.bak
+*.backup
+.DS_Store
+Thumbs.db

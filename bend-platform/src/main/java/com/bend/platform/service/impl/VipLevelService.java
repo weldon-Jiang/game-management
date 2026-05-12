@@ -1,150 +1,197 @@
 package com.bend.platform.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.bend.platform.entity.Merchant;
-import com.bend.platform.entity.MerchantBalance;
-import com.bend.platform.exception.BusinessException;
-import com.bend.platform.exception.ResultCode;
+import com.bend.platform.entity.MerchantGroup;
+import com.bend.platform.repository.MerchantGroupMapper;
 import com.bend.platform.repository.MerchantMapper;
-import com.bend.platform.service.MerchantBalanceService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * VIP等级自动升级服务
- * 根据商户累计充值点数，自动计算并升级VIP等级
- */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class VipLevelService {
 
+    private final MerchantGroupMapper merchantGroupMapper;
     private final MerchantMapper merchantMapper;
-    private final VipLevelCalculator vipLevelCalculator;
-    private final ObjectProvider<MerchantBalanceService> merchantBalanceServiceProvider;
 
-    /**
-     * 根据累计充值点数检查VIP升级
-     * 注意：totalPoints应由调用方计算后传入，避免循环依赖
-     *
-     * @param merchantId 商户ID
-     * @param totalPoints 当前累计点数（应在调用前由调用方计算）
-     * @return 升级后的VIP等级，如果没有升级则返回null
-     */
-    @Transactional
-    public Integer checkUpgrade(String merchantId, int totalPoints) {
+    public int calculateVipLevel(int totalAmount) {
+        LambdaQueryWrapper<MerchantGroup> wrapper = new LambdaQueryWrapper<>();
+        wrapper.le(MerchantGroup::getAmountThreshold, totalAmount)
+               .eq(MerchantGroup::getStatus, "active")
+               .orderByDesc(MerchantGroup::getVipLevel)
+               .last("LIMIT 1");
+        MerchantGroup group = merchantGroupMapper.selectOne(wrapper);
+        return group != null ? group.getVipLevel() : 0;
+    }
+
+    public MerchantGroup getMerchantGroupByVipLevel(int vipLevel) {
+        LambdaQueryWrapper<MerchantGroup> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(MerchantGroup::getVipLevel, vipLevel)
+               .eq(MerchantGroup::getStatus, "active")
+               .last("LIMIT 1");
+        return merchantGroupMapper.selectOne(wrapper);
+    }
+
+    public Integer checkUpgrade(String merchantId, int newTotalRecharged) {
         Merchant merchant = merchantMapper.selectById(merchantId);
         if (merchant == null) {
-            throw new BusinessException(ResultCode.Merchant.NOT_FOUND);
+            return null;
         }
 
-        int oldVipLevel = merchant.getVipLevel() != null ? merchant.getVipLevel() : 0;
-        int newVipLevel = vipLevelCalculator.calculateVipLevel(totalPoints);
+        int currentVipLevel = merchant.getVipLevel() != null ? merchant.getVipLevel() : 0;
+        int newVipLevel = calculateVipLevel(newTotalRecharged);
 
-        if (newVipLevel > oldVipLevel) {
-            merchant.setVipLevel(newVipLevel);
-            merchantMapper.updateById(merchant);
-            log.info("商户 {} VIP等级升级: {} -> {}, 累计点数: {}",
-                    merchantId, oldVipLevel, newVipLevel, totalPoints);
+        if (newVipLevel > currentVipLevel) {
+            LambdaUpdateWrapper<Merchant> updateWrapper = new LambdaUpdateWrapper<>();
+            updateWrapper.eq(Merchant::getId, merchantId)
+                    .set(Merchant::getVipLevel, newVipLevel);
+            merchantMapper.update(null, updateWrapper);
             return newVipLevel;
         }
 
         return null;
     }
 
-    /**
-     * 根据商户ID检查VIP升级（兼容旧接口，内部获取totalPoints）
-     * @deprecated 请使用 checkUpgrade(String merchantId, int totalPoints) 避免循环依赖
-     */
-    @Transactional
-    public Integer checkUpgrade(String merchantId) {
-        MerchantBalance balance = merchantBalanceServiceProvider.getObject().getByMerchantId(merchantId);
-        int totalPoints = balance != null && balance.getTotalRecharged() != null ? balance.getTotalRecharged() : 0;
-        return checkUpgrade(merchantId, totalPoints);
-    }
-
-    /**
-     * 根据累计点数计算VIP等级
-     */
-    public int calculateVipLevel(int totalPoints) {
-        return vipLevelCalculator.calculateVipLevel(totalPoints);
-    }
-
-    /**
-     * 获取商户当前VIP信息
-     */
     public VipInfo getVipInfo(String merchantId) {
         Merchant merchant = merchantMapper.selectById(merchantId);
         if (merchant == null) {
-            throw new BusinessException(ResultCode.Merchant.NOT_FOUND);
+            return null;
         }
 
-        // 优先使用 merchant.totalPoints，如果没有则尝试从 balance 获取
-        int totalPoints = merchant.getTotalPoints() != null ? merchant.getTotalPoints() : 0;
-        log.info("商户 {} 的 merchant.totalPoints: {}", merchantId, totalPoints);
-        
-        if (totalPoints == 0) {
-            MerchantBalance balance = merchantBalanceServiceProvider.getObject().getByMerchantId(merchantId);
-            totalPoints = balance != null && balance.getTotalRecharged() != null ? balance.getTotalRecharged() : 0;
-            log.info("商户 {} 的 balance.totalRecharged: {}", merchantId, totalPoints);
+        VipInfo vipInfo = new VipInfo();
+        vipInfo.setMerchantId(merchant.getId());
+        vipInfo.setMerchantName(merchant.getName());
+        vipInfo.setVipLevel(merchant.getVipLevel() != null ? merchant.getVipLevel() : 0);
+        vipInfo.setTotalAmount(merchant.getTotalAmount() != null ? merchant.getTotalAmount() : 0);
+
+        MerchantGroup currentGroup = getMerchantGroupByVipLevel(vipInfo.getVipLevel());
+        if (currentGroup != null) {
+            vipInfo.setCurrentGroupName(currentGroup.getName());
+            vipInfo.setNextGroupName(getNextGroupName(vipInfo.getVipLevel()));
+            vipInfo.setAmountToNextLevel(getAmountToNextLevel(vipInfo.getVipLevel(), vipInfo.getTotalAmount()));
         }
 
-        // 根据累计点数计算实际的VIP等级（而不是使用存储的vipLevel字段）
-        int currentVipLevel = vipLevelCalculator.calculateVipLevel(totalPoints);
-        log.info("商户 {} 的累计点数: {}, 计算的VIP等级: {}", merchantId, totalPoints, currentVipLevel);
-
-        VipInfo info = new VipInfo();
-        info.setMerchantId(merchantId);
-        info.setTotalPoints(totalPoints);
-        info.setCurrentVipLevel(currentVipLevel);
-        info.setNextVipLevel(currentVipLevel + 1);
-
-        var nextGroup = vipLevelCalculator.getNextLevelGroup(currentVipLevel, totalPoints);
-        if (nextGroup != null) {
-            info.setNextVipLevel(nextGroup.getVipLevel());
-            info.setPointsToNextLevel(nextGroup.getPointsThreshold() - totalPoints);
-        } else {
-            info.setNextVipLevel(currentVipLevel);
-            info.setPointsToNextLevel(0);
-        }
-
-        return info;
+        return vipInfo;
     }
 
-    /**
-     * 获取所有VIP等级配置
-     */
-    public java.util.List<VipLevelInfo> getAllVipLevels() {
-        return vipLevelCalculator.getAllActiveGroups().stream().map(g -> {
-            VipLevelInfo levelInfo = new VipLevelInfo();
-            levelInfo.setVipLevel(g.getVipLevel());
-            levelInfo.setGroupName(g.getName());
-            levelInfo.setPointsThreshold(g.getPointsThreshold() != null ? g.getPointsThreshold() : 0);
-            return levelInfo;
+    public List<VipLevelInfo> getAllVipLevels() {
+        LambdaQueryWrapper<MerchantGroup> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(MerchantGroup::getStatus, "active")
+               .orderByAsc(MerchantGroup::getVipLevel);
+        List<MerchantGroup> groups = merchantGroupMapper.selectList(wrapper);
+
+        return groups.stream().map(group -> {
+            VipLevelInfo info = new VipLevelInfo();
+            info.setVipLevel(group.getVipLevel());
+            info.setGroupName(group.getName());
+            info.setAmountThreshold(group.getAmountThreshold());
+            info.setWindowOriginalPrice(group.getWindowOriginalPrice());
+            info.setWindowDiscountPrice(group.getWindowDiscountPrice());
+            info.setAccountOriginalPrice(group.getAccountOriginalPrice());
+            info.setAccountDiscountPrice(group.getAccountDiscountPrice());
+            info.setHostOriginalPrice(group.getHostOriginalPrice());
+            info.setHostDiscountPrice(group.getHostDiscountPrice());
+            info.setFullOriginalPrice(group.getFullOriginalPrice());
+            info.setFullDiscountPrice(group.getFullDiscountPrice());
+            info.setPointsOriginalPrice(group.getPointsOriginalPrice());
+            info.setPointsDiscountPrice(group.getPointsDiscountPrice());
+            return info;
         }).collect(Collectors.toList());
     }
 
-    /**
-     * VIP信息DTO
-     */
-    @lombok.Data
-    public static class VipInfo {
-        private String merchantId;
-        private int totalPoints;
-        private int currentVipLevel;
-        private int nextVipLevel;
-        private int pointsToNextLevel;
+    private String getNextGroupName(int currentLevel) {
+        LambdaQueryWrapper<MerchantGroup> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(MerchantGroup::getStatus, "active")
+               .gt(MerchantGroup::getVipLevel, currentLevel)
+               .orderByAsc(MerchantGroup::getVipLevel)
+               .last("LIMIT 1");
+        MerchantGroup nextGroup = merchantGroupMapper.selectOne(wrapper);
+        return nextGroup != null ? nextGroup.getName() : null;
     }
 
-    @lombok.Data
+    private Integer getAmountToNextLevel(int currentLevel, int totalAmount) {
+        LambdaQueryWrapper<MerchantGroup> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(MerchantGroup::getStatus, "active")
+               .gt(MerchantGroup::getVipLevel, currentLevel)
+               .orderByAsc(MerchantGroup::getVipLevel)
+               .last("LIMIT 1");
+        MerchantGroup nextGroup = merchantGroupMapper.selectOne(wrapper);
+        if (nextGroup == null) {
+            return null;
+        }
+        int amountNeeded = nextGroup.getAmountThreshold() - totalAmount;
+        return amountNeeded > 0 ? amountNeeded : 0;
+    }
+
+    public static class VipInfo {
+        private String merchantId;
+        private String merchantName;
+        private Integer vipLevel;
+        private Integer totalAmount;
+        private String currentGroupName;
+        private String nextGroupName;
+        private Integer amountToNextLevel;
+
+        public String getMerchantId() { return merchantId; }
+        public void setMerchantId(String merchantId) { this.merchantId = merchantId; }
+        public String getMerchantName() { return merchantName; }
+        public void setMerchantName(String merchantName) { this.merchantName = merchantName; }
+        public Integer getVipLevel() { return vipLevel; }
+        public void setVipLevel(Integer vipLevel) { this.vipLevel = vipLevel; }
+        public Integer getTotalAmount() { return totalAmount; }
+        public void setTotalAmount(Integer totalAmount) { this.totalAmount = totalAmount; }
+        public String getCurrentGroupName() { return currentGroupName; }
+        public void setCurrentGroupName(String currentGroupName) { this.currentGroupName = currentGroupName; }
+        public String getNextGroupName() { return nextGroupName; }
+        public void setNextGroupName(String nextGroupName) { this.nextGroupName = nextGroupName; }
+        public Integer getAmountToNextLevel() { return amountToNextLevel; }
+        public void setAmountToNextLevel(Integer amountToNextLevel) { this.amountToNextLevel = amountToNextLevel; }
+    }
+
     public static class VipLevelInfo {
-        private int vipLevel;
+        private Integer vipLevel;
         private String groupName;
-        private int pointsThreshold;
+        private Integer amountThreshold;
+        private Integer windowOriginalPrice;
+        private Integer windowDiscountPrice;
+        private Integer accountOriginalPrice;
+        private Integer accountDiscountPrice;
+        private Integer hostOriginalPrice;
+        private Integer hostDiscountPrice;
+        private Integer fullOriginalPrice;
+        private Integer fullDiscountPrice;
+        private Integer pointsOriginalPrice;
+        private Integer pointsDiscountPrice;
+
+        public Integer getVipLevel() { return vipLevel; }
+        public void setVipLevel(Integer vipLevel) { this.vipLevel = vipLevel; }
+        public String getGroupName() { return groupName; }
+        public void setGroupName(String groupName) { this.groupName = groupName; }
+        public Integer getAmountThreshold() { return amountThreshold; }
+        public void setAmountThreshold(Integer amountThreshold) { this.amountThreshold = amountThreshold; }
+        public Integer getWindowOriginalPrice() { return windowOriginalPrice; }
+        public void setWindowOriginalPrice(Integer windowOriginalPrice) { this.windowOriginalPrice = windowOriginalPrice; }
+        public Integer getWindowDiscountPrice() { return windowDiscountPrice; }
+        public void setWindowDiscountPrice(Integer windowDiscountPrice) { this.windowDiscountPrice = windowDiscountPrice; }
+        public Integer getAccountOriginalPrice() { return accountOriginalPrice; }
+        public void setAccountOriginalPrice(Integer accountOriginalPrice) { this.accountOriginalPrice = accountOriginalPrice; }
+        public void setAccountDiscountPrice(Integer accountDiscountPrice) { this.accountDiscountPrice = accountDiscountPrice; }
+        public Integer getHostOriginalPrice() { return hostOriginalPrice; }
+        public void setHostOriginalPrice(Integer hostOriginalPrice) { this.hostOriginalPrice = hostOriginalPrice; }
+        public Integer getHostDiscountPrice() { return hostDiscountPrice; }
+        public void setHostDiscountPrice(Integer hostDiscountPrice) { this.hostDiscountPrice = hostDiscountPrice; }
+        public Integer getFullOriginalPrice() { return fullOriginalPrice; }
+        public void setFullOriginalPrice(Integer fullOriginalPrice) { this.fullOriginalPrice = fullOriginalPrice; }
+        public Integer getFullDiscountPrice() { return fullDiscountPrice; }
+        public void setFullDiscountPrice(Integer fullDiscountPrice) { this.fullDiscountPrice = fullDiscountPrice; }
+        public Integer getPointsOriginalPrice() { return pointsOriginalPrice; }
+        public void setPointsOriginalPrice(Integer pointsOriginalPrice) { this.pointsOriginalPrice = pointsOriginalPrice; }
+        public Integer getPointsDiscountPrice() { return pointsDiscountPrice; }
+        public void setPointsDiscountPrice(Integer pointsDiscountPrice) { this.pointsDiscountPrice = pointsDiscountPrice; }
     }
 }

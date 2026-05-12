@@ -96,14 +96,17 @@ const routes = [
         path: 'merchant-groups',
         name: 'MerchantGroups',
         component: () => import('@/views/merchant/MerchantGroupList.vue'),
-        meta: { title: '商户分组', icon: 'User', requiresAdmin: true }
+        meta: { title: 'VIP分组', icon: 'User', requiresAdmin: true }
       },
+      // 暂时隐藏充值卡管理路由
+      /*
       {
         path: 'recharge-cards',
         name: 'RechargeCards',
         component: () => import('@/views/recharge/RechargeCardManagement.vue'),
         meta: { title: '充值卡管理', icon: 'Tickets' }
       }
+      */
     ]
   },
   {

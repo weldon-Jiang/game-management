@@ -2,43 +2,28 @@ package com.bend.platform.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-/**
- * 商户权限分组实体
- * 定义不同VIP等级的功能权限和定价
- */
 @Data
 @TableName("merchant_group")
 public class MerchantGroup {
-
     @TableId(type = IdType.ASSIGN_UUID)
     private String id;
 
     private String name;
-
+    private String description;
     private Integer vipLevel;
-
-    /**
-     * 升级到此VIP等级需要的累计点数阈值
-     */
-    private Integer pointsThreshold;
-
-    private BigDecimal discountRate;
-
-    private BigDecimal unbindRefundRate;
-
-    private Integer maxUnbindPerWeek;
-
-    private String features;
-
-    private BigDecimal hostPrice;
-
-    private BigDecimal windowPrice;
-
-    private BigDecimal accountPrice;
-
+    private Integer amountThreshold;
+    private Integer windowOriginalPrice;
+    private Integer windowDiscountPrice;
+    private Integer accountOriginalPrice;
+    private Integer accountDiscountPrice;
+    private Integer hostOriginalPrice;
+    private Integer hostDiscountPrice;
+    private Integer fullOriginalPrice;
+    private Integer fullDiscountPrice;
+    private Integer pointsOriginalPrice;
+    private Integer pointsDiscountPrice;
     private String status;
 
     @TableField(fill = FieldFill.INSERT)

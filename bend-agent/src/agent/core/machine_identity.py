@@ -20,6 +20,7 @@ class MachineIdentity:
 
     REGISTRY_PATH = r"SOFTWARE\BendPlatform\Agent"
     MACHINE_ID_KEY = "MachineId"
+    FILE_PATH = None  # Will be set to exe directory in get_machine_id()
 
     def __init__(self):
         self.logger = get_logger('machine_identity')
@@ -47,10 +48,10 @@ class MachineIdentity:
         return new_id
 
     def _load_from_registry(self) -> Optional[str]:
-        """Load machine ID from Windows Registry"""
+        """Load machine ID from Windows Registry (current user, no admin needed)"""
         try:
             key = winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
+                winreg.HKEY_CURRENT_USER,
                 self.REGISTRY_PATH,
                 0,
                 winreg.KEY_READ
@@ -66,10 +67,10 @@ class MachineIdentity:
             return None
 
     def _save_to_registry(self, machine_id: str) -> bool:
-        """Save machine ID to Windows Registry"""
+        """Save machine ID to Windows Registry (current user, no admin needed)"""
         try:
             key = winreg.CreateKey(
-                winreg.HKEY_LOCAL_MACHINE,
+                winreg.HKEY_CURRENT_USER,
                 self.REGISTRY_PATH
             )
             winreg.SetValueEx(key, self.MACHINE_ID_KEY, 0, winreg.REG_SZ, machine_id)
@@ -150,7 +151,7 @@ class MachineIdentity:
         """
         try:
             key = winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
+                winreg.HKEY_CURRENT_USER,
                 self.REGISTRY_PATH,
                 0,
                 winreg.KEY_WRITE

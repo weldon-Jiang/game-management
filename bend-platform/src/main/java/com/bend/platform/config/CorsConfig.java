@@ -1,6 +1,7 @@
 package com.bend.platform.config;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.CorsConfiguration;
@@ -12,8 +13,11 @@ import java.util.stream.Collectors;
 
 /**
  * 跨域配置
+ * - 生产环境（Docker部署）：通过 Gateway 统一处理，禁用此配置
+ * - 本地开发直接访问后端：可以启用此配置
  */
 @Configuration
+@ConditionalOnProperty(name = "cors.enabled", havingValue = "true", matchIfMissing = true)
 public class CorsConfig {
 
     @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3090}")

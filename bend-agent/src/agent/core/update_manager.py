@@ -12,6 +12,7 @@ from enum import Enum
 
 from ..core.config import config
 from ..core.logger import get_logger
+from ..core.paths import get_base_dir
 
 
 class UpdateStatus(Enum):
@@ -106,7 +107,7 @@ class UpdateManager:
 
         self._notify_status(UpdateStatus.DOWNLOADING, 0)
 
-        temp_dir = config.get('agent.update_temp_dir', os.path.join(os.path.dirname(__file__), '../../temp'))
+        temp_dir = config.get('agent.update_temp_dir', os.path.join(get_base_dir(), 'temp'))
         os.makedirs(temp_dir, exist_ok=True)
 
         self._download_path = os.path.join(temp_dir, f"agent_{update_info.latest_version}.zip")
@@ -177,7 +178,7 @@ class UpdateManager:
         try:
             import shutil
             current_exe = sys.executable
-            backup_dir = config.get('agent.backup_dir', os.path.join(os.path.dirname(__file__), '../../backup'))
+            backup_dir = config.get('agent.backup_dir', os.path.join(get_base_dir(), 'backup'))
             os.makedirs(backup_dir, exist_ok=True)
 
             backup_path = os.path.join(backup_dir, f"agent_backup_{self.current_version}.exe")
@@ -192,7 +193,7 @@ class UpdateManager:
         """Perform hot update without restart"""
         try:
             update_script = config.get('agent.update_script',
-                os.path.join(os.path.dirname(__file__), '../../scripts/hot_update.py'))
+                os.path.join(get_base_dir(), 'scripts', 'hot_update.py'))
             if os.path.exists(update_script):
                 result = subprocess.run(
                     [sys.executable, update_script, self._download_path],
@@ -208,7 +209,7 @@ class UpdateManager:
         """Schedule update to run on next restart"""
         try:
             update_batch = config.get('agent.update_batch',
-                os.path.join(os.path.dirname(__file__), '../../scripts/update.bat'))
+                os.path.join(get_base_dir(), 'scripts', 'update.bat'))
 
             batch_content = f"""@echo off
 timeout /t 2 /nobreak > nul

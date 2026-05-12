@@ -481,12 +481,16 @@ public interface ResultCode {
     }
 
     enum MerchantGroup implements ResultCode {
-        NOT_FOUND(24001, "商户分组不存在"),
+        NOT_FOUND(24001, "VIP分组不存在"),
         NAME_DUPLICATE(24002, "分组名称已存在"),
         CREATE_FAILED(24003, "创建分组失败"),
         UPDATE_FAILED(24004, "更新分组失败"),
         DELETE_FAILED(24005, "删除分组失败"),
-        HAS_MERCHANT(24006, "分组下存在商户，无法删除");
+        HAS_MERCHANT(24006, "分组下存在商户，无法删除"),
+        CANNOT_DELETE_VIP0(24007, "VIP0分组不允许删除"),
+        HAS_MERCHANT_OR_HIGHER(24008, "存在商户属于该等级或更高等级，无法删除"),
+        VIP_LEVEL_NOT_SEQUENTIAL(24009, "VIP等级必须连续"),
+        NOT_HIGHEST_LEVEL(24010, "只能删除最高VIP等级，不能删除中间等级");
 
         private final int code;
         private final String message;

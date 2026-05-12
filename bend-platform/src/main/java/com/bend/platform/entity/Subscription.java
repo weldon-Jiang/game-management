@@ -1,13 +1,12 @@
 package com.bend.platform.entity;
 
-import com.baomidou.mybatisplus.annotation.*;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+
 import java.time.LocalDateTime;
 
-/**
- * 订阅实体
- * 按主机/窗口/号计费的订阅记录
- */
 @Data
 @TableName("subscription")
 public class Subscription {
@@ -19,35 +18,27 @@ public class Subscription {
 
     private String userId;
 
-    private String groupId;
+    private String activationCodeId;
 
-    private String type;
+    private String subscriptionType;
 
-    private String targetId;
+    private String boundResourceType;
 
-    private String targetName;
+    private String boundResourceIds;
 
-    private Integer pointsCost;
-
-    private Integer durationDays;
+    private String boundResourceNames;
 
     private LocalDateTime startTime;
 
-    private LocalDateTime expireTime;
+    private LocalDateTime endTime;
+
+    private Integer originalPrice;
+
+    private Integer discountPrice;
 
     private String status;
 
-    private Boolean autoRenew;
-
-    private LocalDateTime unboundTime;
-
-    private Integer refundPoints;
-
-    private String remark;
-
-    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdTime;
 
-    @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedTime;
 }

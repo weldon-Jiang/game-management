@@ -39,7 +39,7 @@
         </el-menu-item>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="MerchantGroups" @click="router.push('/merchant-groups')">
           <el-icon><Collection /></el-icon>
-          <template #title>商户分组</template>
+          <template #title>VIP分组</template>
         </el-menu-item>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="ActivationCodes" @click="router.push('/activation-codes')">
           <el-icon><Key /></el-icon>
@@ -79,10 +79,13 @@
           <el-icon><Wallet /></el-icon>
           <template #title>订阅管理</template>
         </el-menu-item>
+        <!-- 暂时隐藏充值卡管理菜单 -->
+        <!--
         <el-menu-item v-if="authStore.isPlatformAdmin" index="RechargeCards" @click="router.push('/recharge-cards')">
           <el-icon><Tickets /></el-icon>
           <template #title>充值卡管理</template>
         </el-menu-item>
+        -->
       </el-menu>
     </el-aside>
 

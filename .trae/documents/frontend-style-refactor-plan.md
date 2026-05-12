@@ -101,7 +101,7 @@ Element Plus 表格横向滚动时，`fixed="right"` 的操作列有白色阴影
 8. `XboxHostList.vue` - Xbox 主机
 9. `AgentList.vue` - Agent 管理
 10. `AgentVersionList.vue` - Agent 版本
-11. `MerchantGroupList.vue` - 商户分组
+11. `MerchantGroupList.vue` - VIP分组
 12. `RechargeCardManagement.vue` - 充值卡
 13. `RegistrationCodeList.vue` - 注册码
 14. `TaskList.vue` - 任务列表

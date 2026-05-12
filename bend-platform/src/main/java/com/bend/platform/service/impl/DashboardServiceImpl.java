@@ -62,7 +62,9 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     private Long getMerchantCount() {
-        return merchantMapper.selectCount(null);
+        LambdaQueryWrapper<Merchant> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Merchant::getIsSystem, false);
+        return merchantMapper.selectCount(wrapper);
     }
 
     private Long getMerchantUserCount() {

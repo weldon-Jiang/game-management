@@ -81,7 +81,7 @@ class ApiClient:
         self._session: Optional[aiohttp.ClientSession] = None     # HTTP会话
         self._headers = {                              # 请求头
             'Content-Type': 'application/json',       # JSON内容类型
-            'X-Agent-ID': agent_id,                   # Agent标识
+            'X-Agent-Id': agent_id,                   # Agent标识
             'X-Agent-Secret': agent_secret            # Agent密钥
         }
         self.logger = get_logger('api')                # 日志记录器

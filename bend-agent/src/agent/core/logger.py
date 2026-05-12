@@ -19,6 +19,8 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pythonjsonlogger import jsonlogger
 
+from .paths import get_logs_dir_fallback
+
 
 class AgentLogger:
     """
@@ -75,10 +77,7 @@ class AgentLogger:
         logger.addHandler(console_handler)
 
         # 文件处理器 - 日志轮转
-        log_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-            'logs'
-        )
+        log_dir = get_logs_dir_fallback()
         os.makedirs(log_dir, exist_ok=True)  # 确保日志目录存在
         log_file = os.path.join(log_dir, 'agent.log')
 

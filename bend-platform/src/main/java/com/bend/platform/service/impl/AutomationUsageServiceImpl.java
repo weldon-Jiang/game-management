@@ -45,9 +45,9 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         Merchant merchant = merchantMapper.selectById(merchantId);
         MerchantGroup group = getMerchantGroup(merchant);
 
-        int windowPrice = group != null && group.getWindowPrice() != null ? group.getWindowPrice().intValue() : 10;
-        int accountPrice = group != null && group.getAccountPrice() != null ? group.getAccountPrice().intValue() : 5;
-        int hostPrice = group != null && group.getHostPrice() != null ? group.getHostPrice().intValue() : 20;
+        int windowPrice = group != null && group.getWindowDiscountPrice() != null ? group.getWindowDiscountPrice().intValue() : 10;
+        int accountPrice = group != null && group.getAccountDiscountPrice() != null ? group.getAccountDiscountPrice().intValue() : 5;
+        int hostPrice = group != null && group.getHostDiscountPrice() != null ? group.getHostDiscountPrice().intValue() : 20;
 
         Map<String, Object> windowMonthlyUsage = checkMonthlyUsage(merchantId, "window", streamingAccountId);
         Map<String, Object> accountMonthlyUsage = checkMonthlyUsage(merchantId, "account",
@@ -83,7 +83,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         if (hasWindowSubscription) {
             totalPoints = 0;
             chargeType = "subscription_window";
-            message.append("使用流媒体账号月度订阅，不扣点");
+            message.append("使用流媒体账号包月，不扣点");
         } else if (windowMonthlyFree) {
             totalPoints = 0;
             chargeType = "monthly_window";
@@ -91,7 +91,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         } else if (hasAccountSubscription) {
             totalPoints = 0;
             chargeType = "subscription_account";
-            message.append("使用游戏账号月度订阅，不扣点");
+            message.append("使用游戏账号包月，不扣点");
         } else if (accountMonthlyFree) {
             totalPoints = 0;
             chargeType = "monthly_account";
@@ -99,7 +99,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         } else if (hasHostSubscription) {
             totalPoints = 0;
             chargeType = "subscription_host";
-            message.append("使用Xbox主机月度订阅，不扣点");
+            message.append("使用Xbox主机包月，不扣点");
         } else if (hostMonthlyFree) {
             totalPoints = 0;
             chargeType = "monthly_host";
@@ -259,7 +259,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
             return false;
         }
         for (Subscription sub : subscriptions) {
-            if (type.equals(sub.getType()) && targetId.equals(sub.getTargetId())) {
+            if (type.equals(sub.getSubscriptionType()) && targetId.equals(sub.getBoundResourceIds())) {
                 return true;
             }
         }
