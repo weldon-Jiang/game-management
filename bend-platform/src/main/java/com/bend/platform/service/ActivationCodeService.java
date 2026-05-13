@@ -16,7 +16,7 @@ public interface ActivationCodeService {
      */
     ActivationCode generateCode(String merchantId, String subscriptionType, String boundResourceType,
                                 String boundResourceIds, String boundResourceNames,
-                                int durationDays, int originalPrice, int discountPrice, Integer pointsAmount);
+                                Integer durationDays, int originalPrice, int discountPrice, Integer pointsAmount);
 
     /**
      * 分页查询激活码

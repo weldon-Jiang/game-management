@@ -8,6 +8,9 @@
         <span class="header-desc">管理流媒体平台账号</span>
       </div>
       <div class="header-right">
+        <el-button @click="loadData">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
         <!-- 新增账号按钮 -->
         <el-button @click="showImportDialog">
           批量导入
@@ -61,7 +64,7 @@
           </template>
         </el-table-column>
         <!-- 操作列 -->
-        <el-table-column label="操作" width="280" fixed="right" align="center">
+        <el-table-column label="操作" width="280" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <!-- 启动自动化按钮（非busy状态显示） -->
             <el-button
@@ -403,7 +406,7 @@
  */
 import { ref, reactive, onMounted, nextTick, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Monitor } from '@element-plus/icons-vue'
+import { Plus, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi } from '@/api'
 import { getStreamingAccountStatusText, getStreamingAccountStatusType, TASK_TYPE_MAP } from '@/utils/constants'

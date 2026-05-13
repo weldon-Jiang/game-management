@@ -103,21 +103,6 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
 
         log.info("增加点数 - merchantId: {}, points: {}, oldBalance: {}, newBalance: {}",
                 merchantId, points, oldBalance, balance.getBalance());
-
-        if (("recharge".equals(type) || "activation_code".equals(type)) && points > 0) {
-            // 同步更新 merchant 表的 totalPoints（作为缓存字段）
-            LambdaUpdateWrapper<Merchant> merchantUpdateWrapper = new LambdaUpdateWrapper<>();
-            merchantUpdateWrapper.eq(Merchant::getId, merchantId)
-                    .setSql("total_points = COALESCE(total_points, 0) + " + points);
-            merchantMapper.update(null, merchantUpdateWrapper);
-
-            // 计算新的累计点数并传入，避免循环依赖
-            int newTotalRecharged = (balance.getTotalRecharged() != null ? balance.getTotalRecharged() : 0) + points;
-            Integer newVipLevel = vipLevelService.checkUpgrade(merchantId, newTotalRecharged);
-            if (newVipLevel != null) {
-                log.info("商户 {} VIP等级已升级到 {}", merchantId, newVipLevel);
-            }
-        }
     }
 
     @Override
@@ -139,17 +124,8 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
                 .setSql("total_recharged = COALESCE(total_recharged, 0) + " + points);
         balanceMapper.update(null, balanceUpdateWrapper);
 
-        // 同步更新 merchant 表的 total_points
-        LambdaUpdateWrapper<Merchant> merchantUpdateWrapper = new LambdaUpdateWrapper<>();
-        merchantUpdateWrapper.eq(Merchant::getId, merchantId)
-                .setSql("total_points = COALESCE(total_points, 0) + " + points);
-        merchantMapper.update(null, merchantUpdateWrapper);
-
-        // 检查VIP升级，传入新的累计点数避免循环依赖
-        Integer newVipLevel = vipLevelService.checkUpgrade(merchantId, newTotalRecharged);
-        if (newVipLevel != null) {
-            log.info("商户 {} 激活码消费 {} 点，VIP等级已升级到 {}", merchantId, points, newVipLevel);
-        }
+        // 注意：total_amount 的更新在 MerchantSubscriptionController.activate 方法中处理
+        // 使用的是 discount_price（价格），而不是 points（点数数量）
     }
 
     @Override

@@ -93,7 +93,7 @@
             {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80" fixed="right" align="center">
+        <el-table-column label="操作" width="80" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'unused'"

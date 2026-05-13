@@ -5,13 +5,16 @@ import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.*;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
+import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.*;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 计费管理控制器
@@ -34,17 +37,36 @@ public class BillingController {
     private final MerchantBalanceService balanceService;
     private final SubscriptionService subscriptionService;
     private final RechargeCardService rechargeCardService;
+    private final MerchantMapper merchantMapper;
 
     /**
      * 获取商户余额信息
      *
-     * @return 商户余额（包含累计充值、当前余额、累计消耗）
+     * @return 商户余额（包含累计充值、当前余额、累计消耗、VIP等级）
      */
     @GetMapping("/balance")
-    public ApiResponse<MerchantBalance> getBalance() {
+    public ApiResponse<Map<String, Object>> getBalance() {
         String merchantId = UserContext.getMerchantId();
         MerchantBalance balance = balanceService.getByMerchantId(merchantId);
-        return ApiResponse.success(balance);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", balance.getId());
+        result.put("merchantId", balance.getMerchantId());
+        result.put("balance", balance.getBalance());
+        result.put("totalRecharged", balance.getTotalRecharged());
+        result.put("totalConsumed", balance.getTotalConsumed());
+        result.put("version", balance.getVersion());
+
+        Merchant merchant = merchantMapper.selectById(merchantId);
+        if (merchant != null) {
+            result.put("vipLevel", merchant.getVipLevel() != null ? merchant.getVipLevel() : 0);
+            result.put("totalAmount", merchant.getTotalAmount());
+        } else {
+            result.put("vipLevel", 0);
+            result.put("totalAmount", 0);
+        }
+
+        return ApiResponse.success(result);
     }
 
     /**

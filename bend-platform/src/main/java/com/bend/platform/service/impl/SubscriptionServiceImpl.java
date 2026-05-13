@@ -45,6 +45,9 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                                          String boundResourceIds, String boundResourceNames,
                                          LocalDateTime startTime, LocalDateTime endTime,
                                          Integer originalPrice, Integer discountPrice) {
+        log.info("createSubscription 开始 - merchantId: {}, activationCodeId: {}, type: {}, startTime: {}, endTime: {}",
+                merchantId, activationCodeId, subscriptionType, startTime, endTime);
+
         Subscription subscription = new Subscription();
         subscription.setMerchantId(merchantId);
         subscription.setUserId(userId);
@@ -58,10 +61,10 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         subscription.setOriginalPrice(originalPrice);
         subscription.setDiscountPrice(discountPrice);
         subscription.setStatus("active");
-        subscriptionMapper.insert(subscription);
 
-        log.info("创建订阅记录 - merchantId: {}, type: {}, startTime: {}, endTime: {}",
-                merchantId, subscriptionType, startTime, endTime);
+        log.info("createSubscription 插入记录 - subscription: {}", subscription);
+        subscriptionMapper.insert(subscription);
+        log.info("createSubscription 完成 - id: {}, merchantId: {}, type: {}", subscription.getId(), merchantId, subscriptionType);
 
         return subscription;
     }

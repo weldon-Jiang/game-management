@@ -6,6 +6,9 @@
         <span class="header-desc">管理Agent版本和更新</span>
       </div>
       <div class="header-right">
+        <el-button @click="loadData">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
         <el-button type="primary" @click="openCreateDialog">
           <el-icon><Plus /></el-icon>
           发布新版本
@@ -53,7 +56,7 @@
             {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right" align="center">
+        <el-table-column label="操作" width="280" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 1"
@@ -161,7 +164,7 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 import { agentVersionApi } from '@/api'
 
 const loading = ref(false)

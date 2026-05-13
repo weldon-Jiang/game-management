@@ -6,6 +6,9 @@
         <span class="header-desc">管理Xbox游戏账号</span>
       </div>
       <div class="header-right">
+        <el-button @click="loadData">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
         <el-button @click="showImportDialog">
           批量导入
         </el-button>
@@ -65,7 +68,7 @@
             {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right" align="center">
+        <el-table-column label="操作" width="180" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="showEditDialog(row)">
               编辑
@@ -220,7 +223,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 import { gameAccountApi, merchantApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 

@@ -28,7 +28,7 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
     @Transactional(rollbackFor = Exception.class)
     public ActivationCode generateCode(String merchantId, String subscriptionType, String boundResourceType,
                                     String boundResourceIds, String boundResourceNames,
-                                    int durationDays, int originalPrice, int discountPrice, Integer pointsAmount) {
+                                    Integer durationDays, int originalPrice, int discountPrice, Integer pointsAmount) {
         String code = generateUniqueCode();
 
         ActivationCode activationCode = new ActivationCode();

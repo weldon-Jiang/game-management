@@ -6,6 +6,9 @@
         <span class="header-desc">管理平台所有商户信息</span>
       </div>
       <div class="header-right">
+        <el-button @click="loadData">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
         <el-button type="primary" @click="showDialog('add')">
           <el-icon><Plus /></el-icon>
           新增商户
@@ -38,6 +41,11 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
+        <el-table-column prop="totalAmount" label="累计消费" width="120" align="right">
+          <template #default="{ row }">
+            <span class="amount-text">{{ formatAmount(row.totalAmount) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="isSystem" label="系统商户" width="100" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.isSystem" type="success" size="small">是</el-tag>
@@ -49,7 +57,7 @@
             {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right" align="center">
+        <el-table-column label="操作" width="200" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="showDialog('edit', row)">
               编辑
@@ -119,7 +127,7 @@
 <script setup>
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 import { merchantApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 
@@ -287,6 +295,11 @@ const formatDate = (dateStr) => {
   })
 }
 
+const formatAmount = (amount) => {
+  if (!amount) return '0元'
+  return (amount / 100).toFixed(2) + '元'
+}
+
 onMounted(() => {
   loadData()
 })
@@ -295,6 +308,11 @@ onMounted(() => {
 <style scoped>
 .data-table {
   width: 100%;
+}
+
+.amount-text {
+  color: var(--success);
+  font-weight: 500;
 }
 
 .points-text {

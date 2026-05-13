@@ -53,11 +53,19 @@
             <span class="code-text">{{ row.code }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="subscriptionType" label="类型" width="140" align="center">
+        <el-table-column prop="subscriptionType" label="类型" width="160" align="center">
           <template #default="{ row }">
             <el-tag :type="getTypeTag(row.subscriptionType)" size="small">
               {{ getTypeName(row.subscriptionType) }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="pointsAmount" label="点数" width="100" align="right">
+          <template #default="{ row }">
+            <span v-if="row.subscriptionType === 'points' && row.pointsAmount" class="points-text">
+              {{ row.pointsAmount }}点
+            </span>
+            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="boundResourceNames" label="绑定资源" min-width="150">
@@ -66,13 +74,13 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="originalPrice" label="原价" width="100" align="right">
+        <el-table-column prop="originalPrice" label="原价" width="90" align="right">
           <template #default="{ row }">
             <span v-if="row.originalPrice">{{ (row.originalPrice / 100).toFixed(2) }}元</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="discountPrice" label="折后价" width="100" align="right">
+        <el-table-column prop="discountPrice" label="实付" width="90" align="right">
           <template #default="{ row }">
             <span v-if="row.discountPrice" class="price-discount">{{ (row.discountPrice / 100).toFixed(2) }}元</span>
             <span v-else class="text-muted">-</span>
@@ -80,26 +88,15 @@
         </el-table-column>
         <el-table-column prop="durationDays" label="时长" width="80" align="center">
           <template #default="{ row }">
-            <span>{{ row.durationDays || 30 }}天</span>
+            <span v-if="row.subscriptionType !== 'points'">{{ row.durationDays || 30 }}天</span>
+            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column prop="status" label="状态" width="90" align="center">
           <template #default="{ row }">
             <el-tag :type="getCodeStatusType(row.status)" size="small">
               {{ getCodeStatusText(row.status) }}
             </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="startTime" label="生效时间" width="110">
-          <template #default="{ row }">
-            <span v-if="row.startTime">{{ formatDate(row.startTime) }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="endTime" label="到期时间" width="110">
-          <template #default="{ row }">
-            <span v-if="row.endTime">{{ formatDate(row.endTime) }}</span>
-            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="usedTime" label="使用时间" width="110">
@@ -108,7 +105,7 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right" align="center">
+        <el-table-column label="操作" width="180" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'unused'"
@@ -156,7 +153,7 @@
         ref="generateFormRef"
         :model="generateFormData"
         :rules="generateFormRules"
-        label-width="100px"
+        label-width="150px"
         class="dialog-form"
       >
         <el-form-item v-if="authStore.isPlatformAdmin" label="商户" prop="merchantId">
@@ -270,18 +267,28 @@
         <el-divider content-position="left">价格信息</el-divider>
 
         <div class="price-info-card">
-          <div class="price-row">
-            <span class="price-label">{{ generateFormData.subscriptionType === 'points' ? '单价' : '原价' }}</span>
-            <span class="price-value price-original">{{ formatPrice(generateFormData.originalPrice) }}</span>
-          </div>
-          <div v-if="generateFormData.subscriptionType === 'points' && generateFormData.pointsAmount" class="price-row">
-            <span class="price-label">总价</span>
-            <span class="price-value price-discount">{{ formatPrice(calculateTotalPrice) }}</span>
-          </div>
-          <div v-else class="price-row">
-            <span class="price-label">折后价</span>
-            <span class="price-value price-discount">{{ formatPrice(generateFormData.discountPrice) }}</span>
-          </div>
+          <template v-if="generateFormData.subscriptionType === 'points'">
+            <div class="price-row">
+              <span class="price-label">单价</span>
+              <span class="price-value price-original">{{ formatPrice(generateFormData.originalPrice) }}/点</span>
+              <span class="price-value price-discount">{{ formatPrice(generateFormData.discountPrice) }}/点</span>
+            </div>
+            <div v-if="generateFormData.pointsAmount" class="price-row">
+              <span class="price-label">总计</span>
+              <span class="price-value price-original">{{ formatPrice(generateFormData.originalPrice * generateFormData.pointsAmount) }}</span>
+              <span class="price-value price-discount">{{ formatPrice(calculateTotalPrice) }}</span>
+            </div>
+          </template>
+          <template v-else>
+            <div class="price-row">
+              <span class="price-label">原价</span>
+              <span class="price-value price-original">{{ formatPrice(generateFormData.originalPrice) }}</span>
+            </div>
+            <div class="price-row">
+              <span class="price-label">折后价</span>
+              <span class="price-value price-discount">{{ formatPrice(generateFormData.discountPrice) }}</span>
+            </div>
+          </template>
         </div>
 
         <div v-if="generateFormData.vipLevel > 0" class="vip-tip success">
@@ -651,6 +658,11 @@ onMounted(() => {
   font-family: var(--font-mono);
   color: #a78bfa;
   font-size: var(--font-size-sm);
+}
+
+.points-text {
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .price-discount {

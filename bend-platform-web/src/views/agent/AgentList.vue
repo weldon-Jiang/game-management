@@ -55,7 +55,7 @@
             {{ row.lastHeartbeat ? formatDate(row.lastHeartbeat) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="showTaskDialog(row)">
               查看任务

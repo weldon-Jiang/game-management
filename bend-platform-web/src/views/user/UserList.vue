@@ -6,6 +6,9 @@
         <span class="header-desc">管理商户用户信息</span>
       </div>
       <div class="header-right">
+        <el-button @click="loadData">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
         <el-button type="primary" @click="showAddDialog">
           <el-icon><Plus /></el-icon>
           新增用户
@@ -48,7 +51,7 @@
             {{ formatDate(row.createdTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right" align="center">
+        <el-table-column label="操作" width="180" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="showEditDialog(row)">
               编辑
@@ -243,7 +246,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { userApi, merchantApi } from '@/api'
 

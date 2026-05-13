@@ -1,5 +1,6 @@
 package com.bend.platform.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.ActivationCode;
@@ -158,7 +159,7 @@ public class ActivationCodeController {
         int vipLevel = merchant != null && merchant.getVipLevel() != null ? merchant.getVipLevel() : 0;
 
         MerchantGroup group = merchantGroupMapper.selectOne(
-            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<MerchantGroup>()
+            new LambdaQueryWrapper<MerchantGroup>()
                 .eq(MerchantGroup::getVipLevel, vipLevel)
                 .eq(MerchantGroup::getStatus, "active")
                 .last("LIMIT 1")
@@ -222,14 +223,14 @@ public class ActivationCodeController {
             boundResourceType,
             boundResourceIdsJson,
             boundResourceNamesJson,
-            30,
+                "points".equals(subscriptionType) ? null : 30,
             originalPrice,
             discountPrice,
-            null
+            pointsAmount
         );
 
-        if (originalPrice > 0) {
-            int newTotalAmount = (merchant.getTotalAmount() != null ? merchant.getTotalAmount() : 0) + originalPrice;
+        if (discountPrice > 0) {
+            int newTotalAmount = (merchant.getTotalAmount() != null ? merchant.getTotalAmount() : 0) + discountPrice;
             merchant.setTotalAmount(newTotalAmount);
 
             int newVipLevel = vipLevelService.calculateVipLevel(newTotalAmount);

@@ -2,9 +2,14 @@
   <div class="page-container merchant-group-list">
     <div class="page-header">
       <h2>VIP分组管理</h2>
-      <el-button v-if="authStore.isPlatformAdmin" type="primary" @click="showDialog('add')">
-        添加分组
-      </el-button>
+      <div class="header-right">
+        <el-button @click="loadData">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
+        <el-button v-if="authStore.isPlatformAdmin" type="primary" @click="showDialog('add')">
+          添加分组
+        </el-button>
+      </div>
     </div>
 
     <div class="content-card">
@@ -72,7 +77,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="authStore.isPlatformAdmin" label="操作" width="120" fixed="right">
+        <el-table-column v-if="authStore.isPlatformAdmin" label="操作" width="120" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="showDialog('edit', row)">编辑</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
@@ -171,6 +176,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
 import { merchantGroupApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 

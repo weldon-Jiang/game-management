@@ -96,7 +96,7 @@
             {{ row.assignedTime ? formatDate(row.assignedTime) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'pending'"

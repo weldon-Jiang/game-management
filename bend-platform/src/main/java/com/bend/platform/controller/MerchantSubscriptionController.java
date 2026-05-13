@@ -15,6 +15,7 @@ import com.bend.platform.service.impl.VipLevelService;
 import com.bend.platform.util.UserContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -45,6 +46,7 @@ import java.util.*;
  * - 包月类型：从当前最晚到期的订阅结束日期+1天开始顺延30天
  * - 同一时间只能有一个生效中的包月订阅
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/merchant-subscription")
 @RequiredArgsConstructor
@@ -198,28 +200,38 @@ public class MerchantSubscriptionController {
         String merchantId = UserContext.getMerchantId();
         String userId = UserContext.getUserId();
 
+        log.info("开始激活激活码 - code: {}, merchantId: {}, userId: {}", code, merchantId, userId);
+
         ActivationCode activationCode = activationCodeMapper.selectOne(
             new LambdaQueryWrapper<ActivationCode>()
                 .eq(ActivationCode::getCode, code)
         );
 
         if (activationCode == null) {
+            log.warn("激活码不存在 - code: {}", code);
             return ApiResponse.error(404, "激活码不存在");
         }
 
         if (!merchantId.equals(activationCode.getMerchantId())) {
+            log.warn("激活码不属于当前商户 - code: {}, merchantId: {}, activationCodeMerchantId: {}",
+                    code, merchantId, activationCode.getMerchantId());
             return ApiResponse.error(403, "激活码不属于当前商户");
         }
 
         if (!"unused".equals(activationCode.getStatus())) {
+            log.warn("激活码已被使用 - code: {}, status: {}", code, activationCode.getStatus());
             return ApiResponse.error(400, "激活码已被使用");
         }
+
+        log.info("激活码信息 - code: {}, type: {}, pointsAmount: {}, durationDays: {}",
+                code, activationCode.getSubscriptionType(), activationCode.getPointsAmount(), activationCode.getDurationDays());
 
         Map<String, Object> result = new HashMap<>();
         result.put("subscriptionType", activationCode.getSubscriptionType());
 
         // 点数类型：直接增加余额
         if ("points".equals(activationCode.getSubscriptionType())) {
+            log.info("点数类型激活码 - code: {}, points: {}", code, activationCode.getPointsAmount());
             balanceService.addPoints(merchantId,
                     activationCode.getPointsAmount() != null ? activationCode.getPointsAmount() : 0,
                     userId, "activation_code", activationCode.getId(), "激活码充值点数");
@@ -228,23 +240,32 @@ public class MerchantSubscriptionController {
             result.put("endTime", "永久有效");
         } else {
             // 包月类型：计算顺延时间
+            log.info("包月类型激活码 - code: {}, 开始计算顺延时间", code);
             Subscription latestSubscription = subscriptionService.getLatestActiveNonPointsSubscription(merchantId);
             LocalDate calculatedStartTime;
             LocalDate calculatedEndTime;
 
             if (latestSubscription == null) {
                 calculatedStartTime = LocalDate.now();
+                log.info("无现有订阅，从今天开始 - code: {}, startTime: {}", code, calculatedStartTime);
             } else {
                 calculatedStartTime = latestSubscription.getEndTime().toLocalDate().plusDays(1);
+                log.info("有现有订阅，从订阅到期日+1天开始 - code: {}, latestEndTime: {}, calculatedStartTime: {}",
+                        code, latestSubscription.getEndTime(), calculatedStartTime);
             }
             calculatedEndTime = calculatedStartTime.plusDays(activationCode.getDurationDays() - 1);
 
             if (latestSubscription != null && latestSubscription.getEndTime().toLocalDate().isAfter(calculatedStartTime)) {
+                log.warn("与当前订阅时间冲突 - code: {}, latestEndTime: {}, calculatedStartTime: {}",
+                        code, latestSubscription.getEndTime(), calculatedStartTime);
                 return ApiResponse.error(400, "与当前订阅时间冲突，无法激活");
             }
 
             LocalDateTime startDateTime = calculatedStartTime.atStartOfDay();
             LocalDateTime endDateTime = calculatedEndTime.atTime(23, 59, 59);
+
+            log.info("创建订阅记录 - merchantId: {}, type: {}, startTime: {}, endTime: {}",
+                    merchantId, activationCode.getSubscriptionType(), startDateTime, endDateTime);
 
             // 创建订阅记录
             subscriptionService.createSubscription(
@@ -260,24 +281,23 @@ public class MerchantSubscriptionController {
                 activationCode.getOriginalPrice(),
                 activationCode.getDiscountPrice()
             );
-
-            // 更新激活码状态
-            activationCode.setStatus("used");
-            activationCode.setUsedBy(userId);
-            activationCode.setUsedTime(LocalDateTime.now());
             activationCode.setStartTime(startDateTime);
             activationCode.setEndTime(endDateTime);
-            activationCodeMapper.updateById(activationCode);
-
             result.put("startTime", startDateTime);
             result.put("endTime", endDateTime);
         }
-
+        // 更新激活码状态
+        activationCode.setStatus("used");
+        activationCode.setUsedBy(userId);
+        activationCode.setUsedTime(LocalDateTime.now());
+        int updatedRows = activationCodeMapper.updateById(activationCode);
+        log.info("更新激活码状态 - code: {}, updatedRows: {}", code, updatedRows);
         // 返回商户当前信息
         Merchant merchant = merchantMapper.selectById(merchantId);
         result.put("totalAmount", merchant.getTotalAmount());
         result.put("vipLevel", merchant.getVipLevel());
 
+        log.info("激活成功 - code: {}, result: {}", code, result);
         return ApiResponse.success("激活成功", result);
     }
 

@@ -29,13 +29,13 @@
         <el-divider style="margin: 8px 0; border-color: rgba(255,255,255,0.06);" />
 
         <div class="menu-group-title" v-if="!isCollapse && showUserManagementGroup">账号管理</div>
-        <el-menu-item v-if="authStore.hasManagementPermission" index="Users" @click="router.push('/users')">
-          <el-icon><User /></el-icon>
-          <template #title>用户管理</template>
-        </el-menu-item>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="Merchants" @click="router.push('/merchants')">
           <el-icon><OfficeBuilding /></el-icon>
           <template #title>商户管理</template>
+        </el-menu-item>
+        <el-menu-item v-if="authStore.hasManagementPermission" index="Users" @click="router.push('/users')">
+          <el-icon><User /></el-icon>
+          <template #title>用户管理</template>
         </el-menu-item>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="MerchantGroups" @click="router.push('/merchant-groups')">
           <el-icon><Collection /></el-icon>

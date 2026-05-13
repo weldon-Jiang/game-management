@@ -95,11 +95,16 @@
     <div class="history-section">
       <div class="section-header">
         <span class="section-title">订阅记录</span>
-        <el-radio-group v-model="historyFilter" size="small">
-          <el-radio-button value="all">全部</el-radio-button>
-          <el-radio-button value="active">有效</el-radio-button>
-          <el-radio-button value="expired">已过期</el-radio-button>
-        </el-radio-group>
+        <div class="section-actions">
+          <el-button @click="loadSubscriptions" :loading="loading">
+            <el-icon><Refresh /></el-icon>
+          </el-button>
+          <el-radio-group v-model="historyFilter" size="small">
+            <el-radio-button value="all">全部</el-radio-button>
+            <el-radio-button value="active">有效</el-radio-button>
+            <el-radio-button value="expired">已过期</el-radio-button>
+          </el-radio-group>
+        </div>
       </div>
 
       <div class="content-card">
@@ -153,20 +158,6 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right" align="center">
-            <template #default="{ row }">
-              <el-button
-                v-if="row.status === 'active'"
-                type="danger"
-                link
-                size="small"
-                @click="handleCancel(row)"
-              >
-                取消订阅
-              </el-button>
-              <span v-else class="text-muted">-</span>
-            </template>
-          </el-table-column>
         </el-table>
 
         <div class="pagination-wrap">
@@ -187,7 +178,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Tickets } from '@element-plus/icons-vue'
+import { Tickets, Refresh } from '@element-plus/icons-vue'
 import { subscriptionApi, billingApi, activationApi } from '@/api'
 
 const loading = ref(false)
@@ -558,7 +549,7 @@ onMounted(() => {
 
 /* 历史记录区域 */
 .history-section {
-  margin-top: var(--spacing-xxl);
+  margin-top: 48px;
 }
 
 .section-header {
@@ -566,6 +557,12 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--spacing-lg);
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
 }
 
 .section-title {
