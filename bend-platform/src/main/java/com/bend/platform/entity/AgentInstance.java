@@ -101,6 +101,12 @@ public class AgentInstance {
     private String currentTaskId;
 
     /**
+     * 最大并发任务数
+     * Agent同时执行的最大任务数量
+     */
+    private Integer maxConcurrentTasks;
+
+    /**
      * 最后心跳时间
      * Agent发送心跳的最新时间
      * 用于判断Agent是否存活

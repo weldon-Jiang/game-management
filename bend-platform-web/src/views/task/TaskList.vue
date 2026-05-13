@@ -68,6 +68,14 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="游戏账号进度" width="140" align="center">
+          <template #default="{ row }">
+            <span v-if="row.result && row.result.includes('/')">
+              {{ row.result }}
+            </span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="agentId" label="执行Agent" width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.agentName">{{ row.agentName }}</span>
@@ -526,5 +534,24 @@ onMounted(() => {
 
 :deep(.el-pagination .el-pagination__total) {
   color: #6b7280;
+}
+
+.data-table {
+  width: 100%;
+}
+
+/* 固定列hover不变透明 */
+.data-table >>> .el-table__fixed-right:hover,
+.data-table >>> .el-table__fixed:hover {
+  background-color: #0f0f1a !important;
+}
+
+.data-table >>> .el-table__fixed-right .el-table__row:hover td,
+.data-table >>> .el-table__fixed .el-table__row:hover td {
+  background-color: #0f0f1a !important;
+}
+
+.data-table >>> .el-table__body-wrapper .el-table__row:hover td.el-table__cell {
+  background-color: #1a1a2e !important;
 }
 </style>

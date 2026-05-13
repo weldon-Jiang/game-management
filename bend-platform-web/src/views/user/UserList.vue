@@ -642,4 +642,19 @@ onMounted(() => {
 .data-table {
   width: 100%;
 }
+
+/* 固定列hover不变透明 */
+.data-table >>> .el-table__fixed-right:hover,
+.data-table >>> .el-table__fixed:hover {
+  background-color: #0f0f1a !important;
+}
+
+.data-table >>> .el-table__fixed-right .el-table__row:hover td,
+.data-table >>> .el-table__fixed .el-table__row:hover td {
+  background-color: #0f0f1a !important;
+}
+
+.data-table >>> .el-table__body-wrapper .el-table__row:hover td.el-table__cell {
+  background-color: #1a1a2e !important;
+}
 </style>

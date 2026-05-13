@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.dto.TaskPageRequest;
 import com.bend.platform.entity.Task;
+import com.bend.platform.entity.TaskGameAccountStatus;
 import com.bend.platform.service.TaskService;
+import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.util.UserContext;
 import com.bend.platform.websocket.WebSocketMessageService;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +47,7 @@ import java.util.Map;
 public class TaskController {
 
     private final TaskService taskService;
+    private final TaskGameAccountStatusService statusService;
     private final WebSocketMessageService messageService;
 
     /**
@@ -108,6 +111,13 @@ public class TaskController {
     @GetMapping("/page")
     public ApiResponse<IPage<Task>> page(TaskPageRequest request) {
         IPage<Task> page = taskService.findPage(request);
+        for (Task task : page.getRecords()) {
+            int completed = statusService.getCompletedCount(task.getId());
+            int total = statusService.getTotalCount(task.getId());
+            if (total > 0) {
+                task.setResult(completed + "/" + total);
+            }
+        }
         return ApiResponse.success(page);
     }
 
@@ -294,5 +304,11 @@ public class TaskController {
         return ApiResponse.success(Arrays.asList(
             "pending", "running", "completed", "failed", "cancelled"
         ));
+    }
+
+    @GetMapping("/{id}/game-account-status")
+    public ApiResponse<List<TaskGameAccountStatus>> getGameAccountStatus(@PathVariable String id) {
+        List<TaskGameAccountStatus> statuses = statusService.findByTaskId(id);
+        return ApiResponse.success(statuses);
     }
 }

@@ -213,6 +213,31 @@
   background-color: #0f0f1a !important;
 }
 
+/* ==================== 表格 - 固定列Hover修复 ==================== */
+
+/* 固定列hover时保持背景色 */
+.el-table__fixed:hover,
+.el-table__fixed-right:hover {
+  background-color: #0f0f1a !important;
+}
+
+/* 固定列行hover时保持背景色 */
+.el-table__fixed .el-table__row:hover > td.el-table__cell,
+.el-table__fixed-right .el-table__row:hover > td.el-table__cell {
+  background-color: #0f0f1a !important;
+}
+
+/* 固定列单元格hover时保持背景色 */
+.el-table__fixed td.el-table__cell:hover,
+.el-table__fixed-right td.el-table__cell:hover {
+  background-color: #0f0f1a !important;
+}
+
+/* 表格行hover时非固定列的背景色 */
+.el-table__body-wrapper .el-table__row:hover > td.el-table__cell {
+  background-color: #1a1a2e !important;
+}
+
 /* ==================== 分页 ==================== */
 .el-pagination {
   --el-pagination-bg-color: transparent;

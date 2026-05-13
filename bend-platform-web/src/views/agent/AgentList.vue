@@ -214,6 +214,20 @@ onMounted(() => {
   background: rgba(99, 102, 241, 0.15) !important;
 }
 
+:deep(.el-table__fixed-right:hover),
+:deep(.el-table__fixed:hover) {
+  background-color: #0f0f1a !important;
+}
+
+:deep(.el-table__fixed-right .el-table__row:hover td),
+:deep(.el-table__fixed .el-table__row:hover td) {
+  background-color: #0f0f1a !important;
+}
+
+:deep(.el-table__body-wrapper .el-table__row:hover td.el-table__cell) {
+  background-color: #1a1a2e !important;
+}
+
 :deep(.el-table th.el-table__cell) {
   font-weight: 500;
   font-size: 13px;

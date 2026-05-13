@@ -7,6 +7,7 @@ import com.bend.platform.entity.AgentInstance;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.AgentInstanceService;
+import com.bend.platform.service.AgentLoadControlService;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -32,6 +33,7 @@ import java.util.List;
 public class AgentInstanceController {
 
     private final AgentInstanceService agentInstanceService;
+    private final AgentLoadControlService loadControlService;
 
     /**
      * 查询Agent列表
@@ -91,5 +93,41 @@ public class AgentInstanceController {
             @RequestParam String status) {
         agentInstanceService.updateStatus(id, status);
         return ApiResponse.success("状态更新成功", null);
+    }
+
+    @GetMapping("/{id}/load")
+    public ApiResponse<AgentLoadInfo> getAgentLoad(@PathVariable String id) {
+        AgentInstance instance = agentInstanceService.findById(id);
+        if (instance == null) {
+            throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
+        }
+        int currentTasks = loadControlService.getCurrentTaskCount(instance.getAgentId());
+        int maxTasks = instance.getMaxConcurrentTasks() != null ? instance.getMaxConcurrentTasks() : 5;
+        String loadStatus;
+        if (currentTasks == 0) {
+            loadStatus = "idle";
+        } else if (currentTasks < maxTasks) {
+            loadStatus = "busy";
+        } else {
+            loadStatus = "full";
+        }
+        AgentLoadInfo info = new AgentLoadInfo();
+        info.setCurrentTasks(currentTasks);
+        info.setMaxTasks(maxTasks);
+        info.setLoadStatus(loadStatus);
+        return ApiResponse.success(info);
+    }
+
+    public static class AgentLoadInfo {
+        private int currentTasks;
+        private int maxTasks;
+        private String loadStatus;
+
+        public int getCurrentTasks() { return currentTasks; }
+        public void setCurrentTasks(int currentTasks) { this.currentTasks = currentTasks; }
+        public int getMaxTasks() { return maxTasks; }
+        public void setMaxTasks(int maxTasks) { this.maxTasks = maxTasks; }
+        public String getLoadStatus() { return loadStatus; }
+        public void setLoadStatus(String loadStatus) { this.loadStatus = loadStatus; }
     }
 }

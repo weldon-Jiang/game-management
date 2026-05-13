@@ -1,6 +1,5 @@
 package com.bend.platform.service.impl;
 
-import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.dto.StartAutomationRequest;
 import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.StreamingAccount;
@@ -8,15 +7,7 @@ import com.bend.platform.entity.Task;
 import com.bend.platform.entity.XboxHost;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
-import com.bend.platform.service.AgentInstanceService;
-import com.bend.platform.service.AutomationService;
-import com.bend.platform.service.AutomationUsageService;
-import com.bend.platform.service.CredentialTokenService;
-import com.bend.platform.service.GameAccountService;
-import com.bend.platform.service.StreamingAccountService;
-import com.bend.platform.service.TaskService;
-import com.bend.platform.service.XboxHostService;
-import com.bend.platform.util.UserContext;
+import com.bend.platform.service.*;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +28,8 @@ public class AutomationServiceImpl implements AutomationService {
     private final CredentialTokenService credentialTokenService;
     private final XboxHostService xboxHostService;
     private final AutomationUsageService automationUsageService;
+    private final TaskExecutorService taskExecutorService;
+    private final AgentLoadControlService loadControlService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -45,6 +38,10 @@ public class AutomationServiceImpl implements AutomationService {
 
         if (!AgentWebSocketEndpoint.isAgentOnline(agentId)) {
             throw new BusinessException(400, "Agent不在线");
+        }
+
+        if (!loadControlService.canAcceptTask(agentId)) {
+            throw new BusinessException(400, "Agent已达到最大并发任务数，请稍后再试");
         }
 
         if (!credentialTokenService.isRedisEnabled()) {
@@ -70,7 +67,6 @@ public class AutomationServiceImpl implements AutomationService {
             List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
             List<XboxHost> xboxHosts = xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
 
-            // 校验并计算需要的点数
             Map<String, Object> validationResult = automationUsageService.validateAndCalculatePoints(
                     merchantId, streamingAccountId, gameAccounts, xboxHosts);
 
@@ -104,11 +100,11 @@ public class AutomationServiceImpl implements AutomationService {
             task.setParams(toJson(taskParams));
             task.setCreatedBy(userId);
             task.setStatus("pending");
+            task.setTimeoutSeconds(3600);
 
             Task created = taskService.create(task);
             createdTaskIds.add(created.getId());
 
-            // 扣点并记录使用情况
             automationUsageService.deductPointsAndRecordUsage(
                     merchantId, userId, created.getId(),
                     streamingAccountId, streamingAccount.getName(),
@@ -119,13 +115,7 @@ public class AutomationServiceImpl implements AutomationService {
                 gameAccountService.updateAgentId(ga.getId(), agentId);
             }
 
-            Map<String, Object> taskData = new HashMap<>();
-            taskData.put("taskId", created.getId());
-            taskData.put("name", created.getName());
-            taskData.put("type", created.getType());
-            taskData.put("params", taskParams);
-
-            AgentWebSocketEndpoint.sendTaskToAgent(agentId, created.getId(), taskData);
+            taskExecutorService.executeTaskAsync(created);
 
             Map<String, Object> result = new HashMap<>();
             result.put("streamingAccountId", streamingAccountId);

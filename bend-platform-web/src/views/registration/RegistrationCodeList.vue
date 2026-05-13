@@ -565,4 +565,17 @@ onMounted(() => {
   font-size: 12px;
   margin-top: 16px;
 }
+:deep(.el-table__fixed-right:hover),
+:deep(.el-table__fixed:hover) {
+  background-color: #0f0f1a !important;
+}
+
+:deep(.el-table__fixed-right .el-table__row:hover td),
+:deep(.el-table__fixed .el-table__row:hover td) {
+  background-color: #0f0f1a !important;
+}
+
+:deep(.el-table__body-wrapper .el-table__row:hover td.el-table__cell) {
+  background-color: #1a1a2e !important;
+}
 </style>

@@ -2,7 +2,10 @@ package com.bend.platform.task;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bend.platform.entity.Task;
+import com.bend.platform.entity.TaskGameAccountStatus;
 import com.bend.platform.repository.TaskMapper;
+import com.bend.platform.service.AgentLoadControlService;
+import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.service.TaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +23,8 @@ public class TaskTimeoutChecker {
 
     private final TaskMapper taskMapper;
     private final TaskService taskService;
+    private final TaskGameAccountStatusService statusService;
+    private final AgentLoadControlService loadControlService;
 
     @Value("${task.timeout_check_interval:60000}")
     private long timeoutCheckInterval;
@@ -59,12 +64,21 @@ public class TaskTimeoutChecker {
 
     private void handleTaskTimeout(Task task) {
         try {
-            task.setStatus("failed");
-            task.setErrorMessage("Task execution timeout after " + task.getTimeoutSeconds() + " seconds");
+            task.setStatus("cancelled");
+            task.setErrorMessage("Task timeout after " + task.getTimeoutSeconds() + " seconds");
             task.setCompletedTime(LocalDateTime.now());
             taskMapper.updateById(task);
 
-            log.info("Task marked as failed due to timeout - ID: {}", task.getId());
+            List<TaskGameAccountStatus> statuses = statusService.findByTaskId(task.getId());
+            for (TaskGameAccountStatus status : statuses) {
+                if ("pending".equals(status.getStatus()) || "running".equals(status.getStatus())) {
+                    statusService.updateStatus(task.getId(), status.getGameAccountId(), "skipped");
+                }
+            }
+
+            loadControlService.decrementTaskCount(task.getTargetAgentId(), task.getId());
+
+            log.info("Task cancelled due to timeout - ID: {}", task.getId());
         } catch (Exception e) {
             log.error("Failed to handle task timeout - ID: {}", task.getId(), e);
         }
