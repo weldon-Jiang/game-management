@@ -12,13 +12,13 @@ WORKDIR /app
 RUN echo 'https://mirrors.aliyun.com' > /etc/apk/repositories
 
 # 复制 package.json
-COPY bend-platform-web/package*.json ./
+COPY package*.json ./
 
 # 安装依赖
 RUN npm install --registry=https://registry.npmmirror.com
 
 # 复制源代码
-COPY bend-platform-web/ ./
+COPY . .
 
 # 构建应用
 ENV NODE_ENV=production
@@ -39,7 +39,7 @@ RUN rm -rf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # 复制 Nginx 配置
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY ../docker/nginx.conf /etc/nginx/conf.d/default.conf
 
 # 暴露端口
 EXPOSE 80

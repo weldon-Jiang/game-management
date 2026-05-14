@@ -5,12 +5,13 @@
 ## 目录
 
 1. [环境要求](#环境要求)
-2. [快速部署](#快速部署)
-3. [部署步骤详解](#部署步骤详解)
-4. [停止服务](#停止服务)
-5. [常用命令](#常用命令)
-6. [数据管理](#数据管理)
-7. [常见问题](#常见问题)
+2. [项目结构](#项目结构)
+3. [快速部署](#快速部署)
+4. [部署步骤详解](#部署步骤详解)
+5. [停止服务](#停止服务)
+6. [常用命令](#常用命令)
+7. [数据管理](#数据管理)
+8. [常见问题](#常见问题)
 
 ---
 
@@ -26,8 +27,39 @@
 **验证安装：**
 ```bash
 docker --version
-docker-compose --version
+docker compose version
 ```
+
+---
+
+## 项目结构
+
+```
+team-management/
+├── docker/
+│   ├── docker-compose.yml    # Docker Compose 配置（统一管理所有服务）
+│   ├── nginx.conf            # Nginx 配置
+│   ├── .env.example           # 环境变量模板
+│   └── DEPLOY.md              # 本部署文档
+├── bend-platform/             # 后端服务
+│   ├── Dockerfile             # 后端 Docker 镜像构建文件
+│   ├── pom.xml
+│   └── src/
+├── bend-platform-web/         # 前端服务
+│   ├── Dockerfile             # 前端 Docker 镜像构建文件
+│   ├── package.json
+│   └── src/
+└── bend-gateway/              # 网关服务
+    └── Dockerfile             # 网关 Docker 镜像构建文件
+```
+
+### Dockerfile 位置
+
+| 服务 | Dockerfile 位置 | 说明 |
+|------|----------------|------|
+| backend | `bend-platform/Dockerfile` | Spring Boot 应用 |
+| frontend | `bend-platform-web/Dockerfile` | Vue.js + Nginx |
+| gateway | `bend-gateway/Dockerfile` | Spring Cloud Gateway |
 
 ---
 
@@ -42,11 +74,14 @@ cd /path/to/team-management
 # 2. 复制环境配置文件
 cp docker/.env.example .env
 
-# 3. 一键启动所有服务
-docker-compose up -d
+# 3. 编辑 .env 文件，修改密码等配置
+nano .env
 
-# 4. 查看服务状态
-docker-compose ps
+# 4. 一键启动所有服务
+docker compose -f docker/docker-compose.yml up -d --build
+
+# 5. 查看服务状态
+docker compose -f docker/docker-compose.yml ps
 ```
 
 ### 访问服务
@@ -80,6 +115,9 @@ nano .env  # 修改密码等配置
 MYSQL_ROOT_PASSWORD=your_strong_password
 MYSQL_PASSWORD=your_strong_password
 
+# Redis 密码
+REDIS_PASSWORD=your_redis_password
+
 # JWT 密钥（请修改为随机字符串）
 JWT_SECRET=your-very-long-secret-key-at-least-32-characters
 
@@ -91,21 +129,21 @@ TZ=Asia/Shanghai
 
 ```bash
 # 完整构建（首次构建或代码更新后）
-docker-compose up -d --build
+docker compose -f docker/docker-compose.yml up -d --build
 
 # 仅启动（不重新构建）
-docker-compose up -d
+docker compose -f docker/docker-compose.yml up -d
 
 # 后台运行并查看日志
-docker-compose up -d --build
-docker-compose logs -f
+docker compose -f docker/docker-compose.yml up -d --build
+docker compose -f docker/docker-compose.yml logs -f
 ```
 
 ### 3. 验证部署
 
 ```bash
 # 检查服务状态
-docker-compose ps
+docker compose -f docker/docker-compose.yml ps
 
 # 检查服务健康
 curl http://localhost:3090/health        # 前端
@@ -113,8 +151,31 @@ curl http://localhost:8060/actuator/health  # 网关
 curl http://localhost:8061/actuator/health  # 后端（内部）
 
 # 查看日志
-docker-compose logs -f gateway
-docker-compose logs -f backend
+docker compose -f docker/docker-compose.yml logs -f gateway
+docker compose -f docker/docker-compose.yml logs -f backend
+```
+
+---
+
+## 服务 profile
+
+Docker Compose 使用 profile 来管理不同环境的服务启动：
+
+| profile | 包含服务 | 使用场景 |
+|---------|---------|---------|
+| `full` | mysql + redis + backend + gateway + frontend | 完整部署 |
+| `core` | redis + backend + gateway | 无前端，数据层独立 |
+| `data` | mysql + redis | 仅数据层 |
+
+```bash
+# 启动完整环境
+docker compose -f docker/docker-compose.yml --profile full up -d
+
+# 仅启动核心后端服务
+docker compose -f docker/docker-compose.yml --profile core up -d
+
+# 仅启动数据层
+docker compose -f docker/docker-compose.yml --profile data up -d
 ```
 
 ---
@@ -125,33 +186,33 @@ docker-compose logs -f backend
 
 ```bash
 # 停止所有服务（保留数据卷）
-docker-compose stop
+docker compose -f docker/docker-compose.yml stop
 
 # 停止并移除容器（保留数据卷）
-docker-compose down
+docker compose -f docker/docker-compose.yml down
 ```
 
 ### 方式二：完全停止并清理
 
 ```bash
 # 停止并移除所有容器、网络（保留数据卷）
-docker-compose down
+docker compose -f docker/docker-compose.yml down
 
 # 停止并移除所有容器、网络、数据卷（危险！会删除数据库）
-docker-compose down -v
+docker compose -f docker/docker-compose.yml down -v
 ```
 
 ### 方式三：停止单个服务
 
 ```bash
 # 停止后端
-docker-compose stop backend
+docker compose -f docker/docker-compose.yml stop backend
 
 # 停止前端
-docker-compose stop frontend
+docker compose -f docker/docker-compose.yml stop frontend
 
 # 停止数据库
-docker-compose stop mysql
+docker compose -f docker/docker-compose.yml stop mysql
 ```
 
 ---
@@ -162,24 +223,24 @@ docker-compose stop mysql
 
 ```bash
 # 启动所有服务
-docker-compose start
+docker compose -f docker/docker-compose.yml start
 
 # 停止所有服务
-docker-compose stop
+docker compose -f docker/docker-compose.yml stop
 
 # 重启所有服务
-docker-compose restart
+docker compose -f docker/docker-compose.yml restart
 
 # 重启单个服务
-docker-compose restart backend
+docker compose -f docker/docker-compose.yml restart backend
 
 # 查看服务状态
-docker-compose ps
+docker compose -f docker/docker-compose.yml ps
 
 # 查看实时日志
-docker-compose logs -f
-docker-compose logs -f backend  # 仅后端
-docker-compose logs -f --tail=100 frontend  # 前端最近100行
+docker compose -f docker/docker-compose.yml logs -f
+docker compose -f docker/docker-compose.yml logs -f backend  # 仅后端
+docker compose -f docker/docker-compose.yml logs -f --tail=100 frontend  # 前端最近100行
 ```
 
 ### 容器操作
@@ -226,7 +287,7 @@ docker volume prune -f
 docker builder prune -f
 
 # 完全重置（删除所有容器、镜像、卷）
-docker-compose down -v --rmi all
+docker compose -f docker/docker-compose.yml down -v --rmi all
 ```
 
 ---
@@ -251,10 +312,10 @@ docker volume ls
 mkdir -p backups
 
 # 备份 MySQL
-docker exec bend-mysql mysqldump -u root -p123456 bend_platform > backups/$(date +%Y%m%d_%H%M%S)_backup.sql
+docker exec bend-mysql mysqldump -u root -p${MYSQL_ROOT_PASSWORD} bend_platform > backups/$(date +%Y%m%d_%H%M%S)_backup.sql
 
 # 备份 Redis
-docker exec bend-redis redis-cli SAVE
+docker exec bend-redis redis-cli -a ${REDIS_PASSWORD} SAVE
 docker cp bend-redis:/data/dump.rdb backups/$(date +%Y%m%d_%H%M%S)_dump.rdb
 ```
 
@@ -262,11 +323,11 @@ docker cp bend-redis:/data/dump.rdb backups/$(date +%Y%m%d_%H%M%S)_dump.rdb
 
 ```bash
 # 恢复 MySQL
-docker exec -i bend-mysql mysql -u root -p123456 bend_platform < backups/backup.sql
+docker exec -i bend-mysql mysql -u root -p${MYSQL_ROOT_PASSWORD} bend_platform < backups/backup.sql
 
 # 恢复 Redis
 docker cp backups/dump.rdb bend-redis:/data/dump.rdb
-docker exec bend-redis redis-cli LOAD
+docker exec bend-redis redis-cli -a ${REDIS_PASSWORD} LOAD
 ```
 
 ---
@@ -278,21 +339,21 @@ docker exec bend-redis redis-cli LOAD
 如果 3090、8060、8061、3306、6379 端口被占用：
 
 ```bash
-# 修改端口映射配置（根据需要修改 docker-compose.full.yml）
+# 修改 .env 中的端口映射
 # 然后重启
-docker-compose -f docker-compose.full.yml down
-docker-compose up -d
+docker compose -f docker/docker-compose.yml down
+docker compose -f docker/docker-compose.yml up -d
 ```
 
 ### 2. 数据库连接失败
 
 ```bash
 # 检查数据库是否就绪
-docker-compose logs mysql | grep "ready for connections"
+docker compose -f docker/docker-compose.yml logs mysql | grep "ready for connections"
 
 # 等待 MySQL 完全启动后重试
 sleep 30
-docker-compose restart backend
+docker compose -f docker/docker-compose.yml restart backend
 ```
 
 ### 3. 前端无法访问后端 API
@@ -314,7 +375,7 @@ docker exec bend-frontend cat /etc/nginx/conf.d/default.conf
 # Docker Desktop -> Settings -> Resources -> Memory -> 8GB+
 
 # 或优化 JVM 内存
-# 编辑 Dockerfile.backend
+# 编辑 bend-platform/Dockerfile
 # 将 -Xmx1024m 改为 -Xmx512m
 ```
 
@@ -322,11 +383,11 @@ docker exec bend-frontend cat /etc/nginx/conf.d/default.conf
 
 ```bash
 # 重新构建并启动
-docker-compose up -d --build
+docker compose -f docker/docker-compose.yml up -d --build
 
 # 强制重新构建（不使用缓存）
-docker-compose build --no-cache
-docker-compose up -d
+docker compose -f docker/docker-compose.yml build --no-cache
+docker compose -f docker/docker-compose.yml up -d
 ```
 
 ---
@@ -346,7 +407,7 @@ docker-compose up -d
 
 ```bash
 # 停止所有服务并删除
-docker-compose down -v
+docker compose -f docker/docker-compose.yml down -v
 
 # 删除所有镜像
 docker images -q | xargs docker rmi -f

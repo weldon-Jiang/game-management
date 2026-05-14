@@ -111,7 +111,7 @@ class AgentCallbackControllerTest {
         doNothing().when(gameAccountService).update(any(), any());
 
         ApiResponse<Map<String, Object>> response = controller.reportMatchComplete(
-            "task-001", "ga-001", 3);
+            "task-001", "ga-001", 3, false);
 
         assertEquals(200, response.getCode());
         assertNotNull(response.getData());
@@ -125,7 +125,7 @@ class AgentCallbackControllerTest {
         when(gameAccountService.findById("non-existent")).thenReturn(null);
 
         ApiResponse<Map<String, Object>> response = controller.reportMatchComplete(
-            "task-001", "non-existent", 3);
+            "task-001", "non-existent", 3, false);
 
         assertEquals(404, response.getCode());
     }
@@ -136,7 +136,7 @@ class AgentCallbackControllerTest {
         when(taskService.findById("non-existent")).thenReturn(null);
 
         ApiResponse<Map<String, Object>> response = controller.reportMatchComplete(
-            "non-existent", "ga-001", 3);
+            "non-existent", "ga-001", 3, false);
 
         assertEquals(404, response.getCode());
     }
@@ -153,7 +153,7 @@ class AgentCallbackControllerTest {
         doNothing().when(gameAccountService).update(any(), any());
 
         ApiResponse<Map<String, Object>> response = controller.reportMatchComplete(
-            "task-001", "ga-001", 3);
+            "task-001", "ga-001", 3, false);
 
         assertEquals(200, response.getCode());
         assertEquals(false, response.getData().get("allCompleted"));

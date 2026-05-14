@@ -9,8 +9,8 @@ FROM maven:3.9-eclipse-temurin-21 AS builder
 WORKDIR /app
 
 # 复制 pom.xml 和依赖
-COPY bend-platform/pom.xml .
-COPY bend-platform/src ./src
+COPY pom.xml .
+COPY src ./src
 
 # 设置镜像源加速构建
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories

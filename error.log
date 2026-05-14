@@ -1,607 +1,123 @@
-PS D:\auto-xbox\team-management\bend-agent\scripts> .\build.bat
-========================================
-Bend Agent Build Script (Enhanced Security)
-========================================
-
-[1/9] Cleaning previous builds...
-[2/9] Installing dependencies...
-[3/9] Creating build directory structure...
-[4/9] Copying agent source files...
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\api\client.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\api\registration.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\api\websocket.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\api\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\api\__pycache__\client.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\api\__pycache__\registration.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\api\__pycache__\websocket.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\api\__pycache__\__init__.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\auth\microsoft_auth.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\automation_scheduler.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\automation_task.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\platform_api_client.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\step1_stream_account_login.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\step2_xbox_streaming.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\step3_gpu_decode.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\step4_game_automation.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\task_context.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\task_window_manager.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\mock_server.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\README.md
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\test_automation_scheduler.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\test_e2e.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\test_integration.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\test_performance.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\test_platform_api_client.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\test_task_context.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\test_with_mock_server.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\__pycache__\mock_server.cpython-39.pyc    
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\__pycache__\test_performance.cpython-39-pytest-8.4.2.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\__pycache__\test_task_context.cpython-39-pytest-8.4.2.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\__pycache__\test_with_mock_server.cpython-39-pytest-8.4.2.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\tests\__pycache__\__init__.cpython-39.pyc       
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__pycache__\automation_scheduler.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__pycache__\automation_task.cpython-39.pyc      
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__pycache__\platform_api_client.cpython-39.pyc  
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__pycache__\step1_stream_account_login.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__pycache__\step2_xbox_streaming.cpython-39.pyc 
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__pycache__\step3_gpu_decode.cpython-39.pyc     
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__pycache__\step4_game_automation.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__pycache__\task_context.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__pycache__\task_window_manager.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\automation\__pycache__\__init__.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\core\central_manager.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\core\config.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\core\logger.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\core\machine_identity.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\core\update_manager.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\core\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\core\__pycache__\config.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\core\__pycache__\logger.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\core\__pycache__\machine_identity.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\core\__pycache__\__init__.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\game\account_manager.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\game\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\game\__pycache__\account_manager.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\game\__pycache__\__init__.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\input\input_controller.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\input\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\input\__pycache__\input_controller.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\input\__pycache__\__init__.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\scene\scene_detector.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\scene\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\scene\__pycache__\scene_detector.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\scene\__pycache__\__init__.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\system\tray.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\system\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\task\stream_control_task.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\task\task_executor.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\task\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\task\__pycache__\task_executor.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\task\__pycache__\__init__.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\utils\crypto_util.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\vision\frame_capture.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\vision\template_manager.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\vision\template_matcher.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\vision\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\vision\__pycache__\frame_capture.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\vision\__pycache__\template_matcher.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\vision\__pycache__\__init__.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\windows\stream_window.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\windows\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\windows\__pycache__\stream_window.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\windows\__pycache__\__init__.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\xbox\stream_controller.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\xbox\xbox_discovery.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\xbox\__init__.py
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\xbox\__pycache__\stream_controller.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\xbox\__pycache__\xbox_discovery.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\xbox\__pycache__\__init__.cpython-39.pyc
-D:\auto-xbox\team-management\bend-agent\scripts\..\src\agent\__pycache__\__init__.cpython-39.pyc
-复制了 93 个文件
-[5/9] Copying main.py...
-已复制         1 个文件。
-[6/9] Running PyArmor obfuscation (this may take a while)...
-INFO     Python 3.9.12
-INFO     Pyarmor 9.2.4 (trial), 000000, non-profits
-INFO     Platform windows.x86_64
-INFO     search inputs ...
-INFO     find script main.py
-INFO     find package at agent
-INFO     find 2 top resources
-INFO     start to generate runtime files
-INFO     target platforms {'windows.amd64'}
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\pyarmor_runtime_000000\pyarmor_runtime.pyd
-INFO     generate runtime files OK
-INFO     start to obfuscate scripts
-INFO     process resource "main"
-INFO     obfuscating file main.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\main.py
-INFO     process resource "agent"
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\__init__.py
-INFO     obfuscating file client.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\api\client.py
-INFO     obfuscating file registration.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\api\registration.py
-INFO     obfuscating file websocket.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\api\websocket.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\api\__init__.py
-INFO     obfuscating file microsoft_auth.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\auth\microsoft_auth.py
-INFO     obfuscating file automation_scheduler.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\automation_scheduler.py
-INFO     obfuscating file automation_task.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\automation_task.py
-INFO     obfuscating file platform_api_client.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\platform_api_client.py
-INFO     obfuscating file step1_stream_account_login.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\step1_stream_account_login.py
-INFO     obfuscating file step2_xbox_streaming.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\step2_xbox_streaming.py
-INFO     obfuscating file step3_gpu_decode.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\step3_gpu_decode.py 
-INFO     obfuscating file step4_game_automation.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\step4_game_automation.py
-INFO     obfuscating file task_context.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\task_context.py
-INFO     obfuscating file task_window_manager.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\task_window_manager.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\__init__.py
-INFO     obfuscating file mock_server.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\tests\mock_server.py
-INFO     obfuscating file test_automation_scheduler.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\tests\test_automation_scheduler.py
-INFO     obfuscating file test_e2e.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\tests\test_e2e.py
-INFO     obfuscating file test_integration.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\tests\test_integration.py
-INFO     obfuscating file test_performance.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\tests\test_performance.py
-INFO     obfuscating file test_platform_api_client.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\tests\test_platform_api_client.py
-INFO     obfuscating file test_task_context.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\tests\test_task_context.py
-INFO     obfuscating file test_with_mock_server.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\tests\test_with_mock_server.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\automation\tests\__init__.py   
-INFO     obfuscating file central_manager.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\core\central_manager.py
-INFO     obfuscating file config.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\core\config.py
-INFO     obfuscating file logger.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\core\logger.py
-INFO     obfuscating file machine_identity.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\core\machine_identity.py
-INFO     obfuscating file update_manager.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\core\update_manager.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\core\__init__.py
-INFO     obfuscating file account_manager.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\game\account_manager.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\game\__init__.py
-INFO     obfuscating file input_controller.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\input\input_controller.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\input\__init__.py
-INFO     obfuscating file scene_detector.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\scene\scene_detector.py        
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\scene\__init__.py
-INFO     obfuscating file tray.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\system\tray.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\system\__init__.py
-INFO     obfuscating file stream_control_task.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\task\stream_control_task.py    
-INFO     obfuscating file task_executor.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\task\task_executor.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\task\__init__.py
-INFO     obfuscating file crypto_util.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\utils\crypto_util.py
-INFO     obfuscating file frame_capture.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\vision\frame_capture.py
-INFO     obfuscating file template_manager.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\vision\template_manager.py
-INFO     obfuscating file template_matcher.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\vision\template_matcher.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\vision\__init__.py
-INFO     obfuscating file stream_window.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\windows\stream_window.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\windows\__init__.py
-INFO     obfuscating file stream_controller.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\xbox\stream_controller.py
-INFO     obfuscating file xbox_discovery.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\xbox\xbox_discovery.py
-INFO     obfuscating file __init__.py
-INFO     write D:\auto-xbox\team-management\bend-agent\scripts\..\build\obfuscated\agent\xbox\__init__.py
-INFO     obfuscate scripts OK
-PyArmor obfuscation succeeded (alternative method
-PyArmor obfuscation succeeded
-[7/9] Running PyInstaller...
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-344 INFO: PyInstaller: 6.11.1, contrib hooks: 2025.0
-344 INFO: Python: 3.9.12
-358 INFO: Platform: Windows-10-10.0.26200-SP0
-358 INFO: Python environment: E:\Python\Python39
-359 INFO: wrote D:\auto-xbox\team-management\bend-agent\BendAgent.spec
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-3096 INFO: Module search paths (PYTHONPATH):
-['E:\\Python\\Python39\\Scripts\\pyinstaller.exe',
- 'E:\\Python\\Python39\\python39.zip',
- 'E:\\Python\\Python39\\DLLs',
- 'E:\\Python\\Python39\\lib',
- 'E:\\Python\\Python39',
- 'E:\\Python\\Python39\\lib\\site-packages',
- 'E:\\Python\\Python39\\lib\\site-packages\\win32',
- 'E:\\Python\\Python39\\lib\\site-packages\\win32\\lib',
- 'E:\\Python\\Python39\\lib\\site-packages\\Pythonwin',
- 'E:\\Python\\Python39\\lib\\site-packages\\setuptools\\_vendor',
- 'D:\\auto-xbox\\team-management\\bend-agent\\build\\obfuscated']
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-pygame 2.6.1 (SDL 2.28.4, Python 3.9.12)
-Hello from the pygame community. https://www.pygame.org/contribute.html
-413 WARNING: discover_hook_directories: Failed to process hook entry point 'EntryPoint(name='hook-dirs', value='rapidfuzz.__pyinstaller:get_hook_dirs', group='pyinstaller40')': AttributeError: module 'rapidfuzz.__pyinstaller' has no attribute 'get_hook_dirs'
-3684 INFO: Appending 'datas' from .spec
-3693 INFO: checking Analysis
-3694 INFO: Building Analysis because Analysis-00.toc is non existent
-3694 INFO: Running Analysis Analysis-00.toc
-3694 INFO: Target bytecode optimization level: 0
-3694 INFO: Initializing module dependency graph...
-3694 INFO: Initializing module graph hook caches...
-3706 INFO: Analyzing base_library.zip ...
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-4734 INFO: Processing standard module hook 'hook-encodings.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-5592 INFO: Processing standard module hook 'hook-pickle.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-5982 INFO: Processing standard module hook 'hook-heapq.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-6157 INFO: Caching module dependency graph...
-6238 INFO: Looking for Python shared library...
-6244 INFO: Using Python shared library: E:\Python\Python39\python39.dll
-6244 INFO: Analyzing D:\auto-xbox\team-management\bend-agent\build\obfuscated\main.py
-6246 INFO: Analyzing hidden import 'asyncio'
-6298 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-6379 INFO: Processing standard module hook 'hook-xml.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-6674 INFO: Analyzing hidden import 'aiohttp'
-6691 INFO: Processing standard module hook 'hook-platform.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-7058 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-7059 INFO: SetuptoolsInfo: initializing cached setuptools info...
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-9908 INFO: Analyzing hidden import 'websockets'
-9910 INFO: Processing standard module hook 'hook-websockets.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-10452 INFO: Analyzing hidden import 'PIL'
-10453 INFO: Processing standard module hook 'hook-PIL.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-10454 INFO: Analyzing hidden import 'cv2'
-10457 INFO: Processing standard module hook 'hook-cv2.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-11058 INFO: Processing standard module hook 'hook-numpy.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-13529 INFO: Processing standard module hook 'hook-sysconfig.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-13780 INFO: Processing standard module hook 'hook-difflib.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-14189 INFO: Processing standard module hook 'hook-psutil.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-14586 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-14734 INFO: Analyzing hidden import 'pystray'
-14735 INFO: Processing standard module hook 'hook-pystray.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-15172 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-15233 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-15270 INFO: Processing standard module hook 'hook-Xlib.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-15791 INFO: Analyzing hidden import 'pyautogui'
-15819 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
-15819 INFO: TclTkInfo: initializing cached Tcl/Tk info...
-16020 INFO: Processing standard module hook 'hook-_tkinter.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-16069 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-16508 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-16536 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-16640 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-16806 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-16811 INFO: Processing standard module hook 'hook-packaging.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-16900 INFO: Analyzing hidden import 'pydirectinput'
-16906 INFO: Analyzing hidden import 'win32gui'
-16907 INFO: Analyzing hidden import 'win32ui'
-16909 INFO: Analyzing hidden import 'inputs'
-16943 INFO: Analyzing hidden import 'cryptography'
-16944 INFO: Processing standard module hook 'hook-cryptography.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-18040 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
-18044 INFO: Analyzing hidden import 'pycryptodome'
-18045 ERROR: Hidden import 'pycryptodome' not found
-18045 INFO: Analyzing hidden import 'pythonjsonlogger'
-18055 INFO: Analyzing hidden import 'pythonjsonlogger.jsonlogger'
-18056 INFO: Analyzing hidden import 'skimage'
-18057 INFO: Processing standard module hook 'hook-skimage.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-18276 INFO: Processing standard module hook 'hook-skimage.exposure.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-19257 INFO: Processing standard module hook 'hook-skimage.data.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-20214 INFO: Processing standard module hook 'hook-pytest.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-20340 INFO: Processing standard module hook 'hook-pygments.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-22136 INFO: Processing standard module hook 'hook-py.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-22491 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-22816 INFO: Processing standard module hook 'hook-pkg_resources.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-23285 INFO: Processing pre-safe-import-module hook 'hook-jaraco.text.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-23285 INFO: Setuptools: 'jaraco.text' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.text'!
-23289 INFO: Processing standard module hook 'hook-setuptools.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-23294 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-23294 INFO: Processing pre-find-module-path hook 'hook-distutils.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
-23530 INFO: Processing standard module hook 'hook-distutils.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-23539 INFO: Processing standard module hook 'hook-distutils.util.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-23590 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-23590 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
-23653 INFO: Processing pre-safe-import-module hook 'hook-jaraco.functools.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-23653 INFO: Setuptools: 'jaraco.functools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.functools'!
-23659 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-23666 INFO: Processing standard module hook 'hook-importlib_metadata.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-23679 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-23982 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-24045 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-24046 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-24048 INFO: Processing standard module hook 'hook-importlib_resources.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-24068 INFO: Processing pre-safe-import-module hook 'hook-jaraco.context.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-24068 INFO: Setuptools: 'jaraco.context' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.context'!
-24073 INFO: Processing pre-safe-import-module hook 'hook-backports.tarfile.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-24073 INFO: Setuptools: 'backports.tarfile' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.backports.tarfile'!
-24130 INFO: Processing standard module hook 'hook-backports.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-24131 INFO: Processing pre-safe-import-module hook 'hook-platformdirs.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
-24132 INFO: Setuptools: 'platformdirs' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.platformdirs'!
-24195 INFO: Analyzing hidden import 'skimage.feature'
-24196 INFO: Processing standard module hook 'hook-skimage.feature.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-25365 INFO: Analyzing hidden import 'skimage.transform'
-25366 INFO: Processing standard module hook 'hook-skimage.transform.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-26346 INFO: Analyzing hidden import 'easyocr'
-26347 INFO: Processing standard module hook 'hook-easyocr.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-26379 INFO: Processing standard module hook 'hook-torch.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-1620 WARNING: Failed to collect submodules for 'torch.utils.tensorboard' because importing 'torch.utils.tensorboard' raised: ModuleNotFoundError: No module named 'tensorboard'
-W0511 14:55:33.459396 63156 site-packages\torch\distributed\elastic\multiprocessing\redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
-E:\Python\Python39\lib\site-packages\PyInstaller\utils\hooks\__init__.py:666: DeprecationWarning: `torch.distributed._sharding_spec` will be deprecated, use `torch.distributed._shard.sharding_spec` instead
-  __import__(name)
-E:\Python\Python39\lib\site-packages\PyInstaller\utils\hooks\__init__.py:666: DeprecationWarning: `torch.distributed._sharded_tensor` will be deprecated, use `torch.distributed._shard.sharded_tensor` instead
-  __import__(name)
-E:\Python\Python39\lib\site-packages\PyInstaller\utils\hooks\__init__.py:666: DeprecationWarning: `torch.distributed._shard.checkpoint` will be deprecated, use `torch.distributed.checkpoint` instead
-  __import__(name)
-39549 INFO: hook-torch: this torch build does not depend on MKL...
-39551 INFO: hook-torch: raising recursion limit to 5000
-39630 INFO: Processing standard module hook 'hook-sympy.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-44170 INFO: Processing standard module hook 'hook-scipy.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-44885 INFO: Processing standard module hook 'hook-pycparser.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-45308 INFO: Processing standard module hook 'hook-scipy.linalg.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-45596 INFO: Processing standard module hook 'hook-scipy.sparse.csgraph.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-45630 INFO: Processing standard module hook 'hook-scipy.special._ufuncs.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-45679 INFO: Processing standard module hook 'hook-scipy.special._ellip_harm_2.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-46334 INFO: Processing standard module hook 'hook-scipy.spatial.transform.rotation.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-46600 INFO: Processing standard module hook 'hook-scipy.stats._stats.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-47849 INFO: Processing standard module hook 'hook-lxml.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-48323 INFO: Processing standard module hook 'hook-lxml.etree.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-50891 INFO: Processing standard module hook 'hook-pandas.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-52215 INFO: Processing standard module hook 'hook-pytz.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-52483 INFO: Processing standard module hook 'hook-pyarrow.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-53480 INFO: Processing standard module hook 'hook-fsspec.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-55092 INFO: Processing standard module hook 'hook-pandas.io.formats.style.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-56547 INFO: Processing standard module hook 'hook-pandas.plotting.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-56750 INFO: Processing standard module hook 'hook-openpyxl.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-57968 INFO: Processing standard module hook 'hook-sqlalchemy.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-59910 INFO: Processing standard module hook 'hook-sqlite3.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-60372 INFO: Processing standard module hook 'hook-pandas.io.clipboard.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-60850 INFO: Processing standard module hook 'hook-bcrypt.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-61185 INFO: Processing standard module hook 'hook-certifi.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-62402 INFO: Processing pre-safe-import-module hook 'hook-win32com.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\pre_safe_import_module'
-62570 INFO: Processing standard module hook 'hook-win32com.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-62571 INFO: Processing standard module hook 'hook-pythoncom.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-62745 INFO: Processing standard module hook 'hook-pywintypes.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-68975 INFO: Processing standard module hook 'hook-jinja2.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-71320 INFO: Processing standard module hook 'hook-torchvision.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-71353 INFO: Processing standard module hook 'hook-torchvision.io.image.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-71573 INFO: Processing standard module hook 'hook-transformers.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-74787 INFO: Processing standard module hook 'hook-pydantic.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-75458 INFO: Processing standard module hook 'hook-zoneinfo.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-76263 INFO: Processing standard module hook 'hook-anyio.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-77105 INFO: Processing standard module hook 'hook-orjson.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-77415 INFO: Processing pre-safe-import-module hook 'hook-tensorflow.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\pre_safe_import_module'
-77461 INFO: Processing standard module hook 'hook-regex.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-78265 INFO: Processing standard module hook 'hook-av.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-79384 INFO: Processing standard module hook 'hook-scipy.io.matlab.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-79580 INFO: Processing standard module hook 'hook-onnxruntime.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-79756 INFO: Processing standard module hook 'hook-sklearn.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-80685 INFO: Processing standard module hook 'hook-sklearn.utils.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-80972 INFO: Processing standard module hook 'hook-sklearn.metrics.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-83263 INFO: Processing standard module hook 'hook-sklearn.metrics.cluster.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-83548 INFO: Processing standard module hook 'hook-sklearn.cluster.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-83576 INFO: Processing standard module hook 'hook-sklearn.metrics.pairwise.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-83681 INFO: Processing standard module hook 'hook-sklearn.neighbors.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-83727 INFO: Processing standard module hook 'hook-sklearn.linear_model.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-84202 INFO: Processing standard module hook 'hook-opentelemetry.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-93335 INFO: Processing standard module hook 'hook-nltk.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-95930 INFO: Processing standard module hook 'hook-pygame.py' from 'E:\\Python\\Python39\\lib\\site-packages\\pygame\\__pyinstaller'
-pygame 2.6.1 (SDL 2.28.4, Python 3.9.12)
-Hello from the pygame community. https://www.pygame.org/contribute.html
-96023 INFO: Processing standard module hook 'hook-OpenGL.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-107046 INFO: Processing standard module hook 'hook-skimage.io.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-109495 INFO: Processing standard module hook 'hook-skimage.color.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-110508 INFO: Processing standard module hook 'hook-shapely.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-110577 INFO: Analyzing hidden import 'asyncio_throttle'
-110579 INFO: Analyzing hidden import 'pystray._info'
-110579 INFO: Processing module hooks (post-graph stage)...
-111012 INFO: Processing standard module hook 'hook-easyocr.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-111314 INFO: Processing standard module hook 'hook-lxml.isoschematron.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-111510 INFO: Processing standard module hook 'hook-grpc.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-111873 INFO: Processing standard module hook 'hook-zope.interface.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-112541 INFO: Processing standard module hook 'hook-skimage.filters.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-113706 INFO: Processing standard module hook 'hook-skimage.draw.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-114700 INFO: Processing standard module hook 'hook-skimage.measure.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-115656 INFO: Processing standard module hook 'hook-skimage.morphology.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-116223 INFO: Processing standard module hook 'hook-skimage.restoration.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-117220 INFO: Processing standard module hook 'hook-imageio.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-118132 INFO: Processing standard module hook 'hook-skimage.metrics.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-119173 INFO: Processing standard module hook 'hook-sklearn.tree.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-123266 WARNING: Hidden import "importlib_resources.trees" not found!
-123384 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-124608 INFO: Processing standard module hook 'hook-sqlalchemy.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-124928 WARNING: Hidden import "pysqlite2" not found!
-124929 WARNING: Hidden import "MySQLdb" not found!
-124931 WARNING: Hidden import "psycopg2" not found!
-125411 INFO: Processing standard module hook 'hook-_tkinter.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks'
-125801 INFO: Processing standard module hook 'hook-lxml.objectify.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-125816 INFO: Processing standard module hook 'hook-tzdata.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
-E:\Python\Python39\lib\site-packages\altgraph\__init__.py:142: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-126693 INFO: Performing binary vs. data reclassification (3717 entries)
-127266 INFO: Looking for ctypes DLLs
-127338 WARNING: Ignoring /usr/lib64/libgomp.so.1 imported from E:\Python\Python39\lib\site-packages\torch\_inductor\codecache.py - only basenames are supported with ctypes imports!
-127363 WARNING: Library nvrtc64_120_0.dll required via ctypes not found
-127553 INFO: Analyzing run-time hooks ...
-127582 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-127585 INFO: Including run-time hook 'pyi_rth_pkgres.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-127588 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-127590 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-127591 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-127592 INFO: Including run-time hook 'pyi_rth_pywintypes.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
-127593 INFO: Including run-time hook 'pyi_rth_nltk.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
-127594 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'E:\\Python\\Python39\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
-127595 INFO: Including run-time hook 'pyi_rth_pythoncom.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
-127596 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from 'E:\\Python\\Python39\\lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
-127777 INFO: Looking for dynamic libraries
-E:\Python\Python39\lib\site-packages\nltk\app\__init__.py:45: UserWarning: nltk.app.wordfreq not loaded (requires the matplotlib library).
-  warnings.warn("nltk.app.wordfreq not loaded (requires the matplotlib library).")
-E:\Python\Python39\lib\site-packages\pygame\pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  from pkg_resources import resource_stream, resource_exists
-pygame 2.6.1 (SDL 2.28.4, Python 3.9.12)
-Hello from the pygame community. https://www.pygame.org/contribute.html
-E:\Python\Python39\lib\site-packages\google\auth\__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
-  warnings.warn(eol_message.format("3.9"), FutureWarning)
-E:\Python\Python39\lib\site-packages\google\oauth2\__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
-  warnings.warn(eol_message.format("3.9"), FutureWarning)
-W0511 14:57:13.890551 67480 site-packages\torch\distributed\elastic\multiprocessing\redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
-E:\Python\Python39\lib\site-packages\PyInstaller\building\build_main.py:226: DeprecationWarning: `torch.distributed._sharding_spec` will be deprecated, use `torch.distributed._shard.sharding_spec` instead
-  __import__(package)
-E:\Python\Python39\lib\site-packages\PyInstaller\building\build_main.py:226: DeprecationWarning: `torch.distributed._sharded_tensor` will be deprecated, use `torch.distributed._shard.sharded_tensor` instead
-  __import__(package)
-E:\Python\Python39\lib\site-packages\PyInstaller\building\build_main.py:226: DeprecationWarning: `torch.distributed._shard.checkpoint` will be deprecated, use `torch.distributed.checkpoint` instead
-  __import__(package)
-140365 INFO: Extra DLL search directories (AddDllDirectory): ['E:\\Python\\Python39\\lib\\site-packages\\numpy.libs', 'E:\\Python\\Python39\\lib\\site-packages\\scipy.libs', 'E:\\Python\\Python39\\lib\\site-packages\\pandas.libs', 'E:\\Python\\Python39\\lib\\site-packages\\pygame', 'E:\\Python\\Python39\\lib\\site-packages\\torch\\lib', 'E:\\Python\\Python39\\lib\\site-packages\\torchvision', 'E:\\Python\\Python39\\lib\\site-packages\\torchvision', 'E:\\Python\\Python39\\lib\\site-packages\\torchvision', 'E:\\Python\\Python39\\lib\\site-packages\\torchvision', 'E:\\Python\\Python39\\lib\\site-packages\\av.libs', 'E:\\Python\\Python39\\lib\\site-packages\\faiss_cpu.libs', 'E:\\Python\\Python39\\Lib\\site-packages\\cv2\\../../x64/vc17/bin', 'E:\\Python\\Python39\\lib\\site-packages\\shapely.libs']
-140367 INFO: Extra DLL search directories (PATH): ['E:\\Python\\Python39\\Lib\\site-packages\\cv2\\../../x64/vc17/bin'] 
-149683 INFO: Warnings written to D:\auto-xbox\team-management\bend-agent\build\BendAgent\warn-BendAgent.txt
-150608 INFO: Graph cross-reference written to D:\auto-xbox\team-management\bend-agent\build\BendAgent\xref-BendAgent.html
-150853 INFO: checking PYZ
-150853 INFO: Building PYZ because PYZ-00.toc is non existent
-150853 INFO: Building PYZ (ZlibArchive) D:\auto-xbox\team-management\bend-agent\build\BendAgent\PYZ-00.pyz
-157970 INFO: Building PYZ (ZlibArchive) D:\auto-xbox\team-management\bend-agent\build\BendAgent\PYZ-00.pyz completed successfully.
-158166 INFO: checking PKG
-158166 INFO: Building PKG because PKG-00.toc is non existent
-158168 INFO: Building PKG (CArchive) BendAgent.pkg
-232262 INFO: Building PKG (CArchive) BendAgent.pkg completed successfully.
-232349 INFO: Bootloader E:\Python\Python39\lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\run.exe
-232350 INFO: checking EXE
-232350 INFO: Building EXE because EXE-00.toc is non existent
-232350 INFO: Building EXE from EXE-00.toc
-232350 INFO: Copying bootloader EXE to D:\auto-xbox\team-management\bend-agent\dist\BendAgent.exe
-232354 INFO: Copying icon to EXE
-232357 INFO: Copying 0 resources to EXE
-232357 INFO: Embedding manifest in EXE
-232362 INFO: Appending PKG archive to EXE
-232616 INFO: Fixing EXE headers
-233826 INFO: Building EXE from EXE-00.toc completed successfully.
-
-[8/9] Moving output and copying distribution files...
-已复制         1 个文件。
-  - Copied agent.yaml
-已复制         1 个文件。
-  - Copied README.txt
-  - Created templates directory
-  - Created logs directory
-
-========================================
-Build completed successfully!
-========================================
-
-Output directory: D:\auto-xbox\team-management\bend-agent\scripts\..\dist
-Contents:
-agent.yaml
-BendAgent.exe
-logs
-README.txt
-templates
-
-Ready for distribution!
-
-Note: The obfuscated code includes runtime protection.
-It is still possible to reverse-engineer, but significantly harder.
-For maximum security, consider keeping core algorithms on the server side.
-
-请按任意键继续. . .
+### SQL: UPDATE merchant  SET total_points = COALESCE(total_points, 0) + 500   WHERE deleted=0     AND (id = ?)
+### Cause: java.sql.SQLSyntaxErrorException: Unknown column 'total_points' in 'field list'
+; bad SQL grammar []
+	at org.springframework.jdbc.support.SQLErrorCodeSQLExceptionTranslator.doTranslate(SQLErrorCodeSQLExceptionTranslator.java:246) ~[spring-jdbc-6.1.6.jar:6.1.6]
+	at org.springframework.jdbc.support.AbstractFallbackSQLExceptionTranslator.translate(AbstractFallbackSQLExceptionTranslator.java:107) ~[spring-jdbc-6.1.6.jar:6.1.6]
+	at org.mybatis.spring.MyBatisExceptionTranslator.translateExceptionIfPossible(MyBatisExceptionTranslator.java:92) ~[mybatis-spring-3.0.3.jar:3.0.3]
+	at org.mybatis.spring.SqlSessionTemplate$SqlSessionInterceptor.invoke(SqlSessionTemplate.java:439) ~[mybatis-spring-3.0.3.jar:3.0.3]
+	at jdk.proxy2/jdk.proxy2.$Proxy95.update(Unknown Source) ~[na:na]
+	at org.mybatis.spring.SqlSessionTemplate.update(SqlSessionTemplate.java:288) ~[mybatis-spring-3.0.3.jar:3.0.3]
+	at com.baomidou.mybatisplus.core.override.MybatisMapperMethod.execute(MybatisMapperMethod.java:64) ~[mybatis-plus-core-3.5.5.jar:3.5.5]
+	at com.baomidou.mybatisplus.core.override.MybatisMapperProxy$PlainMethodInvoker.invoke(MybatisMapperProxy.java:152) ~[mybatis-plus-core-3.5.5.jar:3.5.5]
+	at com.baomidou.mybatisplus.core.override.MybatisMapperProxy.invoke(MybatisMapperProxy.java:89) ~[mybatis-plus-core-3.5.5.jar:3.5.5]
+	at jdk.proxy2/jdk.proxy2.$Proxy100.update(Unknown Source) ~[na:na]
+	at com.bend.platform.service.impl.MerchantBalanceServiceImpl.addPoints(MerchantBalanceServiceImpl.java:112) ~[classes/:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568) ~[na:na]
+	at org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:354) ~[spring-aop-6.1.6.jar:6.1.6]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.invokeJoinpoint(ReflectiveMethodInvocation.java:196) ~[spring-aop-6.1.6.jar:6.1.6]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:163) ~[spring-aop-6.1.6.jar:6.1.6]
+	at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed(CglibAopProxy.java:768) ~[spring-aop-6.1.6.jar:6.1.6]
+	at org.springframework.transaction.interceptor.TransactionInterceptor$1.proceedWithInvocation(TransactionInterceptor.java:123) ~[spring-tx-6.1.6.jar:6.1.6]
+	at org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:392) ~[spring-tx-6.1.6.jar:6.1.6]
+	at org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:119) ~[spring-tx-6.1.6.jar:6.1.6]
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184) ~[spring-aop-6.1.6.jar:6.1.6]
+	at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed(CglibAopProxy.java:768) ~[spring-aop-6.1.6.jar:6.1.6]
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:720) ~[spring-aop-6.1.6.jar:6.1.6]
+	at com.bend.platform.service.impl.MerchantBalanceServiceImpl$$SpringCGLIB$$0.addPoints(<generated>) ~[classes/:na]
+	at com.bend.platform.controller.MerchantSubscriptionController.activate(MerchantSubscriptionController.java:235) ~[classes/:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568) ~[na:na]
+	at org.springframework.web.method.support.InvocableHandlerMethod.doInvoke(InvocableHandlerMethod.java:255) ~[spring-web-6.1.6.jar:6.1.6]
+	at org.springframework.web.method.support.InvocableHandlerMethod.invokeForRequest(InvocableHandlerMethod.java:188) ~[spring-web-6.1.6.jar:6.1.6]
+	at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:118) ~[spring-webmvc-6.1.6.jar:6.1.6]
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod(RequestMappingHandlerAdapter.java:926) ~[spring-webmvc-6.1.6.jar:6.1.6]
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal(RequestMappingHandlerAdapter.java:831) ~[spring-webmvc-6.1.6.jar:6.1.6]
+	at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle(AbstractHandlerMethodAdapter.java:87) ~[spring-webmvc-6.1.6.jar:6.1.6]
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089) ~[spring-webmvc-6.1.6.jar:6.1.6]
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979) ~[spring-webmvc-6.1.6.jar:6.1.6]
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014) ~[spring-webmvc-6.1.6.jar:6.1.6]
+	at org.springframework.web.servlet.FrameworkServlet.doPost(FrameworkServlet.java:914) ~[spring-webmvc-6.1.6.jar:6.1.6]
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:590) ~[tomcat-embed-core-10.1.20.jar:6.0]
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885) ~[spring-webmvc-6.1.6.jar:6.1.6]
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658) ~[tomcat-embed-core-10.1.20.jar:6.0]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:206) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:150) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51) ~[tomcat-embed-websocket-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:175) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:150) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100) ~[spring-web-6.1.6.jar:6.1.6]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.1.6.jar:6.1.6]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:175) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:150) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93) ~[spring-web-6.1.6.jar:6.1.6]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.1.6.jar:6.1.6]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:175) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:150) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.springframework.web.filter.ServerHttpObservationFilter.doFilterInternal(ServerHttpObservationFilter.java:109) ~[spring-web-6.1.6.jar:6.1.6]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.1.6.jar:6.1.6]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:175) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:150) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201) ~[spring-web-6.1.6.jar:6.1.6]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.1.6.jar:6.1.6]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:175) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:150) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at com.bend.platform.config.XssFilter.doFilter(XssFilter.java:57) ~[classes/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:175) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:150) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1736) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63) ~[tomcat-embed-core-10.1.20.jar:10.1.20]
+	at java.base/java.lang.Thread.run(Thread.java:842) ~[na:na]
+Caused by: java.sql.SQLSyntaxErrorException: Unknown column 'total_points' in 'field list'
+	at com.mysql.cj.jdbc.exceptions.SQLError.createSQLException(SQLError.java:121) ~[mysql-connector-j-8.3.0.jar:8.3.0]
+	at com.mysql.cj.jdbc.exceptions.SQLExceptionsMapping.translateException(SQLExceptionsMapping.java:122) ~[mysql-connector-j-8.3.0.jar:8.3.0]
+	at com.mysql.cj.jdbc.ClientPreparedStatement.executeInternal(ClientPreparedStatement.java:912) ~[mysql-connector-j-8.3.0.jar:8.3.0]
+	at com.mysql.cj.jdbc.ClientPreparedStatement.execute(ClientPreparedStatement.java:354) ~[mysql-connector-j-8.3.0.jar:8.3.0]
+	at com.zaxxer.hikari.pool.ProxyPreparedStatement.execute(ProxyPreparedStatement.java:44) ~[HikariCP-5.0.1.jar:na]
+	at com.zaxxer.hikari.pool.HikariProxyPreparedStatement.execute(HikariProxyPreparedStatement.java) ~[HikariCP-5.0.1.jar:na]
+	at jdk.internal.reflect.GeneratedMethodAccessor54.invoke(Unknown Source) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568) ~[na:na]
+	at org.apache.ibatis.logging.jdbc.PreparedStatementLogger.invoke(PreparedStatementLogger.java:58) ~[mybatis-3.5.15.jar:3.5.15]
+	at jdk.proxy3/jdk.proxy3.$Proxy165.execute(Unknown Source) ~[na:na]
+	at org.apache.ibatis.executor.statement.PreparedStatementHandler.update(PreparedStatementHandler.java:48) ~[mybatis-3.5.15.jar:3.5.15]
+	at org.apache.ibatis.executor.statement.RoutingStatementHandler.update(RoutingStatementHandler.java:75) ~[mybatis-3.5.15.jar:3.5.15]
+	at jdk.internal.reflect.GeneratedMethodAccessor86.invoke(Unknown Source) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568) ~[na:na]
+	at org.apache.ibatis.plugin.Plugin.invoke(Plugin.java:61) ~[mybatis-3.5.15.jar:3.5.15]
+	at jdk.proxy2/jdk.proxy2.$Proxy163.update(Unknown Source) ~[na:na]
+	at org.apache.ibatis.executor.SimpleExecutor.doUpdate(SimpleExecutor.java:50) ~[mybatis-3.5.15.jar:3.5.15]
+	at org.apache.ibatis.executor.BaseExecutor.update(BaseExecutor.java:117) ~[mybatis-3.5.15.jar:3.5.15]
+	at org.apache.ibatis.executor.CachingExecutor.update(CachingExecutor.java:76) ~[mybatis-3.5.15.jar:3.5.15]
+	at jdk.internal.reflect.GeneratedMethodAccessor85.invoke(Unknown Source) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568) ~[na:na]
+	at org.apache.ibatis.plugin.Invocation.proceed(Invocation.java:49) ~[mybatis-3.5.15.jar:3.5.15]
+	at com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor.intercept(MybatisPlusInterceptor.java:106) ~[mybatis-plus-extension-3.5.5.jar:3.5.5]
+	at org.apache.ibatis.plugin.Plugin.invoke(Plugin.java:59) ~[mybatis-3.5.15.jar:3.5.15]
+	at jdk.proxy2/jdk.proxy2.$Proxy162.update(Unknown Source) ~[na:na]
+	at org.apache.ibatis.session.defaults.DefaultSqlSession.update(DefaultSqlSession.java:197) ~[mybatis-3.5.15.jar:3.5.15]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568) ~[na:na]
+	at org.mybatis.spring.SqlSessionTemplate$SqlSessionInterceptor.invoke(SqlSessionTemplate.java:425) ~[mybatis-spring-3.0.3.jar:3.0.3]
+	... 80 common frames omitted

@@ -5,8 +5,10 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.entity.ActivationCode;
 import com.bend.platform.entity.ActivationCodeBatch;
+import com.bend.platform.entity.Merchant;
 import com.bend.platform.repository.ActivationCodeBatchMapper;
 import com.bend.platform.repository.ActivationCodeMapper;
+import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.ActivationCodeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,12 +25,14 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
 
     private final ActivationCodeMapper activationCodeMapper;
     private final ActivationCodeBatchMapper activationCodeBatchMapper;
+    private final MerchantMapper merchantMapper;
+    private final VipLevelService vipLevelService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ActivationCode generateCode(String merchantId, String subscriptionType, String boundResourceType,
-                                    String boundResourceIds, String boundResourceNames,
-                                    Integer durationDays, int originalPrice, int discountPrice, Integer pointsAmount) {
+                                       String boundResourceIds, String boundResourceNames,
+                                       Integer durationDays, int originalPrice, int discountPrice, Integer pointsAmount) {
         String code = generateUniqueCode();
 
         ActivationCode activationCode = new ActivationCode();
@@ -113,8 +117,26 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
         if ("used".equals(code.getStatus())) {
             throw new RuntimeException("已使用的激活码无法删除");
         }
+
+        Merchant merchant = merchantMapper.selectById(code.getMerchantId());
+        if (merchant == null) {
+            throw new RuntimeException("激活码关联的商户不存在");
+        }
+
+        int beforeTotalAmount = merchant.getTotalAmount() != null ? merchant.getTotalAmount() : 0;
+        int beforeVipLevel = merchant.getVipLevel() != null ? merchant.getVipLevel() : 0;
+        int discountPrice = code.getDiscountPrice() != null ? code.getDiscountPrice() : 0;
+        int afterTotalAmount = Math.max(0, beforeTotalAmount - discountPrice);
+        int afterVipLevel = vipLevelService.calculateVipLevel(afterTotalAmount);
+
+        merchant.setTotalAmount(afterTotalAmount);
+        merchant.setVipLevel(afterVipLevel);
+        merchantMapper.updateById(merchant);
+
         activationCodeMapper.deleteById(id);
-        log.info("删除激活码 - id: {}, code: {}", id, code.getCode());
+        log.info("删除激活码 - id: {}, code: {}, merchantId: {}, subscriptionType: {}, discountPrice: {}, totalAmount: {} -> {}, vipLevel: {} -> {}",
+                id, code.getCode(), code.getMerchantId(), code.getSubscriptionType(), discountPrice,
+                beforeTotalAmount, afterTotalAmount, beforeVipLevel, afterVipLevel);
     }
 
     private String generateUniqueCode() {
