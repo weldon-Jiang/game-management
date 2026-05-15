@@ -720,20 +720,36 @@ const showAddDialog = () => {
  * 显示编辑账号对话框
  *
  * 功能说明：
- * - 填充表单数据为选中行的信息
+ * - 通过API获取账号详情（包含解密后的密码）
+ * - 填充表单数据为账号信息
  * - 设置对话框类型为编辑
  *
  * 参数说明：
  * - row: 账号行数据
  */
-const showEditDialog = (row) => {
+const showEditDialog = async (row) => {
   dialogType.value = 'edit'
   formData.id = row.id
   formData.merchantId = row.merchantId
   formData.name = row.name
   formData.email = row.email
-  formData.password = ''  // 编辑时不显示原密码
-  formData.authCode = ''  // 编辑时不清空认证码
+  formData.authCode = ''
+  
+  // 通过API获取账号详情，包含解密后的密码
+  try {
+    const res = await streamingApi.getById(row.id)
+    if (res.code === 0 || res.code === 200) {
+      const account = res.data
+      // 使用解密后的密码
+      formData.password = account.passwordEncrypted || ''
+    } else {
+      formData.password = ''
+    }
+  } catch (error) {
+    console.error('Failed to get streaming account detail:', error)
+    formData.password = ''
+  }
+  
   dialogVisible.value = true
 }
 

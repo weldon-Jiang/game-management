@@ -16,6 +16,7 @@ import com.bend.platform.repository.GameAccountMapper;
 import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.repository.StreamingAccountMapper;
 import com.bend.platform.service.GameAccountService;
+import com.bend.platform.util.AesUtil;
 import com.bend.platform.util.DataSecurityUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -60,6 +61,7 @@ public class GameAccountServiceImpl implements GameAccountService {
     private final StreamingAccountMapper streamingAccountMapper;
     private final MerchantMapper merchantMapper;
     private final DataSecurityUtil dataSecurityUtil;
+    private final AesUtil aesUtil;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -77,7 +79,9 @@ public class GameAccountServiceImpl implements GameAccountService {
         entity.setStreamingId(account.getStreamingId());
         entity.setXboxGameName(account.getXboxGameName());
         entity.setXboxLiveEmail(account.getXboxLiveEmail());
-        entity.setXboxLivePasswordEncrypted(account.getXboxLivePasswordEncrypted());
+        if (account.getXboxLivePasswordEncrypted() != null) {
+            entity.setXboxLivePasswordEncrypted(aesUtil.encrypt(account.getXboxLivePasswordEncrypted()));
+        }
         entity.setIsActive(true);
         entity.setIsPrimary(false);
         entity.setCreatedTime(LocalDateTime.now());
@@ -134,7 +138,9 @@ public class GameAccountServiceImpl implements GameAccountService {
                 entity.setMerchantId(merchantId);
                 entity.setXboxGameName(dto.getXboxGameName());
                 entity.setXboxLiveEmail(dto.getXboxLiveEmail());
-                entity.setXboxLivePasswordEncrypted(dto.getXboxLivePassword());
+                if (dto.getXboxLivePassword() != null) {
+                    entity.setXboxLivePasswordEncrypted(aesUtil.encrypt(dto.getXboxLivePassword()));
+                }
                 entity.setIsActive(true);
                 entity.setIsPrimary(false);
                 entity.setCreatedTime(LocalDateTime.now());
@@ -266,7 +272,7 @@ public class GameAccountServiceImpl implements GameAccountService {
             existing.setXboxLiveEmail(account.getXboxLiveEmail());
         }
         if (account.getXboxLivePasswordEncrypted() != null) {
-            existing.setXboxLivePasswordEncrypted(account.getXboxLivePasswordEncrypted());
+            existing.setXboxLivePasswordEncrypted(aesUtil.encrypt(account.getXboxLivePasswordEncrypted()));
         }
         if (account.getIsActive() != null) {
             existing.setIsActive(account.getIsActive());

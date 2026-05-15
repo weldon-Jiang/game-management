@@ -352,7 +352,22 @@ const showEditDialog = async (row) => {
   formData.merchantId = row.merchantId || ''
   formData.xboxGameName = row.xboxGameName
   formData.xboxLiveEmail = row.xboxLiveEmail
-  formData.xboxLivePassword = ''
+  
+  // 通过API获取账号详情，包含解密后的密码
+  try {
+    const res = await gameAccountApi.getById(row.id)
+    if (res.code === 0 || res.code === 200) {
+      const account = res.data
+      // 使用解密后的密码
+      formData.xboxLivePassword = account.xboxLivePasswordEncrypted || ''
+    } else {
+      formData.xboxLivePassword = ''
+    }
+  } catch (error) {
+    console.error('Failed to get game account detail:', error)
+    formData.xboxLivePassword = ''
+  }
+  
   if (authStore.isPlatformAdmin && merchantList.value.length === 0) {
     await loadMerchants()
   }

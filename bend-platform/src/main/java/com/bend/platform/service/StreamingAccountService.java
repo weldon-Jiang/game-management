@@ -88,6 +88,27 @@ public interface StreamingAccountService {
     void update(String id, String merchantId, String name, String authCode);
 
     /**
+     * 更新账号信息（包含密码）
+     *
+     * @param id       账号ID
+     * @param name     新名称（可选）
+     * @param password 新密码（可选）
+     * @param authCode 新认证码（可选）
+     */
+    void updateWithPassword(String id, String name, String password, String authCode);
+
+    /**
+     * 更新账号信息（管理员用，包含密码）
+     *
+     * @param id         账号ID
+     * @param merchantId 新商户ID（可选）
+     * @param name       新名称（可选）
+     * @param password   新密码（可选）
+     * @param authCode   新认证码（可选）
+     */
+    void updateWithPassword(String id, String merchantId, String name, String password, String authCode);
+
+    /**
      * 更新账号状态
      *
      * @param id     账号ID

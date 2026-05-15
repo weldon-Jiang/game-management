@@ -189,6 +189,8 @@ CREATE TABLE IF NOT EXISTS `task` (
     `name` VARCHAR(128) NOT NULL COMMENT '任务名称',
     `description` VARCHAR(512) DEFAULT NULL COMMENT '任务描述',
     `type` VARCHAR(32) NOT NULL COMMENT '任务类型',
+    `game_platform` VARCHAR(32) DEFAULT NULL COMMENT '游戏平台: xbox, playstation, switch',
+    `game_mode` VARCHAR(32) DEFAULT NULL COMMENT '游戏模式: solo, multiplayer, cooperative',
     `target_agent_id` VARCHAR(64) DEFAULT NULL COMMENT '目标Agent ID',
     `streaming_account_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的流媒体账号ID',
     `game_account_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的游戏账号ID',

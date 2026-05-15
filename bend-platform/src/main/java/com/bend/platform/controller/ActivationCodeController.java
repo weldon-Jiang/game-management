@@ -169,21 +169,29 @@ public class ActivationCodeController {
         int discountPrice = 0;
         String boundResourceType = null;
 
+        int resourceCount = boundResourceIds != null ? boundResourceIds.size() : 0;
+
         switch (subscriptionType) {
             case "window_account":
                 boundResourceType = "streaming_account";
-                originalPrice = group != null ? group.getWindowOriginalPrice() : 10000;
-                discountPrice = group != null ? group.getWindowDiscountPrice() : 10000;
+                int windowUnitOriginal = group != null ? group.getWindowOriginalPrice() : 10000;
+                int windowUnitDiscount = group != null ? group.getWindowDiscountPrice() : 10000;
+                originalPrice = windowUnitOriginal * (resourceCount > 0 ? resourceCount : 1);
+                discountPrice = windowUnitDiscount * (resourceCount > 0 ? resourceCount : 1);
                 break;
             case "account":
                 boundResourceType = "game_account";
-                originalPrice = group != null ? group.getAccountOriginalPrice() : 5000;
-                discountPrice = group != null ? group.getAccountDiscountPrice() : 5000;
+                int accountUnitOriginal = group != null ? group.getAccountOriginalPrice() : 5000;
+                int accountUnitDiscount = group != null ? group.getAccountDiscountPrice() : 5000;
+                originalPrice = accountUnitOriginal * (resourceCount > 0 ? resourceCount : 1);
+                discountPrice = accountUnitDiscount * (resourceCount > 0 ? resourceCount : 1);
                 break;
             case "host":
                 boundResourceType = "xbox_host";
-                originalPrice = group != null ? group.getHostOriginalPrice() : 20000;
-                discountPrice = group != null ? group.getHostDiscountPrice() : 20000;
+                int hostUnitOriginal = group != null ? group.getHostOriginalPrice() : 20000;
+                int hostUnitDiscount = group != null ? group.getHostDiscountPrice() : 20000;
+                originalPrice = hostUnitOriginal * (resourceCount > 0 ? resourceCount : 1);
+                discountPrice = hostUnitDiscount * (resourceCount > 0 ? resourceCount : 1);
                 break;
             case "full":
                 boundResourceType = "all";

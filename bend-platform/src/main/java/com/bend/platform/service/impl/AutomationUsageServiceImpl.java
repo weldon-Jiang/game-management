@@ -45,9 +45,9 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         Merchant merchant = merchantMapper.selectById(merchantId);
         MerchantGroup group = getMerchantGroup(merchant);
 
-        int windowPrice = group != null && group.getWindowDiscountPrice() != null ? group.getWindowDiscountPrice().intValue() : 10;
-        int accountPrice = group != null && group.getAccountDiscountPrice() != null ? group.getAccountDiscountPrice().intValue() : 5;
-        int hostPrice = group != null && group.getHostDiscountPrice() != null ? group.getHostDiscountPrice().intValue() : 20;
+        int windowPrice = group != null && group.getWindowDiscountPrice() != null ? group.getWindowDiscountPrice().intValue() : 1;
+        int accountPrice = 1;
+        int hostPrice = 1;
 
         Map<String, Object> windowMonthlyUsage = checkMonthlyUsage(merchantId, "window", streamingAccountId);
         Map<String, Object> accountMonthlyUsage = checkMonthlyUsage(merchantId, "account",

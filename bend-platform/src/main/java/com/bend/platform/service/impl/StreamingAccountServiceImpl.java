@@ -231,6 +231,56 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void updateWithPassword(String id, String name, String password, String authCode) {
+        StreamingAccount account = streamingAccountMapper.selectById(id);
+        if (account == null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+        }
+
+        merchantService.validateMerchantActive(account.getMerchantId());
+
+        if (name != null) {
+            account.setName(name);
+        }
+        if (password != null) {
+            account.setPasswordEncrypted(aesUtil.encrypt(password));
+        }
+        if (authCode != null) {
+            account.setAuthCode(authCode);
+        }
+
+        streamingAccountMapper.updateById(account);
+        log.info("更新流媒体账号（含密码）- ID: {}", id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateWithPassword(String id, String merchantId, String name, String password, String authCode) {
+        StreamingAccount account = streamingAccountMapper.selectById(id);
+        if (account == null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+        }
+
+        if (merchantId != null) {
+            merchantService.validateMerchantActive(merchantId);
+            account.setMerchantId(merchantId);
+        }
+        if (name != null) {
+            account.setName(name);
+        }
+        if (password != null) {
+            account.setPasswordEncrypted(aesUtil.encrypt(password));
+        }
+        if (authCode != null) {
+            account.setAuthCode(authCode);
+        }
+
+        streamingAccountMapper.updateById(account);
+        log.info("更新流媒体账号（含密码，管理员）- ID: {}", id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void updateStatus(String id, String status) {
         StreamingAccount account = streamingAccountMapper.selectById(id);
         if (account == null) {

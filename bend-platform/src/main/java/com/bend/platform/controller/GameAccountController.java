@@ -13,9 +13,11 @@ import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.StreamingAccountMapper;
 import com.bend.platform.service.GameAccountService;
+import com.bend.platform.util.AesUtil;
 import com.bend.platform.util.UserContext;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -38,10 +40,12 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/game-accounts")
 @RequiredArgsConstructor
+@Slf4j
 public class GameAccountController {
 
     private final GameAccountService gameAccountService;
     private final StreamingAccountMapper streamingAccountMapper;
+    private final AesUtil aesUtil;
 
     /**
      * 分页查询游戏账号列表
@@ -76,7 +80,7 @@ public class GameAccountController {
      * 获取游戏账号详情
      *
      * @param id 游戏账号ID
-     * @return 游戏账号信息
+     * @return 游戏账号信息（密码已解密）
      */
     @GetMapping("/{id}")
     public ApiResponse<GameAccount> getById(@PathVariable String id) {
@@ -87,6 +91,16 @@ public class GameAccountController {
         if (!UserContext.isPlatformAdmin() && !account.getMerchantId().equals(UserContext.getMerchantId())) {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
+
+        // 解密密码供前端显示
+        if (account.getXboxLivePasswordEncrypted() != null) {
+            try {
+                account.setXboxLivePasswordEncrypted(aesUtil.decrypt(account.getXboxLivePasswordEncrypted()));
+            } catch (Exception e) {
+                log.warn("解密游戏账号密码失败 - ID: {}", id, e);
+            }
+        }
+
         return ApiResponse.success(account);
     }
 

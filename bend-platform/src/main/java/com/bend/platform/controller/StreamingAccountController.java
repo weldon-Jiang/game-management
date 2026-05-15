@@ -17,9 +17,11 @@ import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountLoginRecordService;
 import com.bend.platform.service.StreamingAccountService;
+import com.bend.platform.util.AesUtil;
 import com.bend.platform.util.UserContext;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
@@ -46,12 +48,14 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/streaming-accounts")
 @RequiredArgsConstructor
+@Slf4j
 public class StreamingAccountController {
 
     private final StreamingAccountService streamingAccountService;
     private final StreamingAccountLoginRecordService loginRecordService;
     private final MerchantService merchantService;
     private final GameAccountService gameAccountService;
+    private final AesUtil aesUtil;
 
     /**
      * 创建流媒体账号
@@ -136,7 +140,7 @@ public class StreamingAccountController {
      * 获取流媒体账号详情
      *
      * @param id 流媒体账号ID
-     * @return 流媒体账号信息
+     * @return 流媒体账号信息（密码已解密）
      */
     @GetMapping("/{id}")
     public ApiResponse<StreamingAccount> getById(@PathVariable String id) {
@@ -147,6 +151,15 @@ public class StreamingAccountController {
 
         if (!UserContext.isPlatformAdmin() && !account.getMerchantId().equals(UserContext.getMerchantId())) {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+
+        // 解密密码供前端显示
+        if (account.getPasswordEncrypted() != null) {
+            try {
+                account.setPasswordEncrypted(aesUtil.decrypt(account.getPasswordEncrypted()));
+            } catch (Exception e) {
+                log.warn("解密流媒体账号密码失败 - ID: {}", id, e);
+            }
         }
 
         return ApiResponse.success(account);
@@ -170,10 +183,21 @@ public class StreamingAccountController {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
 
+        // 检查是否需要更新密码
+        boolean hasPassword = request.getPassword() != null && !request.getPassword().isEmpty();
+        
         if (UserContext.isPlatformAdmin()) {
-            streamingAccountService.update(id, request.getMerchantId(), request.getName(), request.getAuthCode());
+            if (hasPassword) {
+                streamingAccountService.updateWithPassword(id, request.getMerchantId(), request.getName(), request.getPassword(), request.getAuthCode());
+            } else {
+                streamingAccountService.update(id, request.getMerchantId(), request.getName(), request.getAuthCode());
+            }
         } else {
-            streamingAccountService.update(id, request.getName(), request.getAuthCode());
+            if (hasPassword) {
+                streamingAccountService.updateWithPassword(id, request.getName(), request.getPassword(), request.getAuthCode());
+            } else {
+                streamingAccountService.update(id, request.getName(), request.getAuthCode());
+            }
         }
         return ApiResponse.success("更新成功", null);
     }

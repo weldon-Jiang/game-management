@@ -34,6 +34,7 @@ import asyncio
 from typing import Callable, Dict, Any, Optional
 
 from ..core.logger import get_logger
+from ..core.account_logger import get_game_logger
 from .task_context import (
     AgentTaskContext,
     Step4Result,
@@ -103,8 +104,10 @@ async def step4_execute_gaming(
 
             context.current_game_account_index = account_index
 
+            game_logger = get_game_logger(game_account.gamertag)
             logger.info(f"开始处理游戏账号: {game_account.gamertag} "
                        f"({account_index+1}/{len(context.game_accounts)})")
+            game_logger.info(f"=== 开始处理游戏账号 ===")
 
             while context.matches_completed_today[game_account.id] < game_account.target_matches:
                 if check_cancel():
@@ -118,6 +121,8 @@ async def step4_execute_gaming(
                 context.update_step_status("step4", TaskStepStatus.RUNNING,
                     f"账号 {game_account.gamertag} 进行第{current_count}场比赛 "
                     f"(今日已完成: {current_total}/{target})")
+
+                game_logger.info(f"进行第{current_count}场比赛 (今日已完成: {current_total}/{target})")
 
                 await report_progress(
                     context.task_id, "STEP4", "RUNNING",
@@ -134,7 +139,7 @@ async def step4_execute_gaming(
                 )
 
                 match_success = await _execute_match_for_account(
-                    context, game_account, logger, check_cancel, report_progress
+                    context, game_account, logger, game_logger, check_cancel, report_progress
                 )
 
                 if match_success:
@@ -144,6 +149,7 @@ async def step4_execute_gaming(
 
                     logger.info(f"账号 {game_account.gamertag} 完成第{current_count}场比赛, "
                                f"今日: {new_completed}/{target}")
+                    game_logger.info(f"完成第{current_count}场比赛, 今日: {new_completed}/{target}")
 
                     await report_progress(
                         context.task_id, "STEP4", "RUNNING",
@@ -160,10 +166,12 @@ async def step4_execute_gaming(
                     )
                 else:
                     logger.warning(f"账号 {game_account.gamertag} 第{current_count}场比赛失败")
+                    game_logger.warning(f"第{current_count}场比赛失败")
                     await asyncio.sleep(5)
 
             logger.info(f"游戏账号 {game_account.gamertag} 今日已完成 "
                        f"{game_account.target_matches} 场比赛")
+            game_logger.info(f"今日已完成 {game_account.target_matches} 场比赛")
 
         success_msg = f"游戏比赛自动化完成，共完成 {completed_matches} 场比赛"
         logger.info(success_msg)
@@ -189,6 +197,7 @@ async def _execute_match_for_account(
     context: AgentTaskContext,
     game_account: GameAccountInfo,
     logger,
+    game_logger,
     check_cancel: Callable[[], bool],
     report_progress: Callable[[str, str, str, Optional[Dict]], None]
 ) -> bool:
@@ -204,7 +213,8 @@ async def _execute_match_for_account(
     参数：
     - context: 任务上下文
     - game_account: 游戏账号
-    - logger: 日志记录器
+    - logger: 主日志记录器
+    - game_logger: 游戏账号专用日志记录器
     - check_cancel: 取消检查函数
     - report_progress: 进度上报函数
 
@@ -212,21 +222,24 @@ async def _execute_match_for_account(
     - bool: 是否成功
     """
     logger.info(f"执行比赛: {game_account.gamertag}")
+    game_logger.info("执行比赛")
 
     try:
-        await _enter_match(context, game_account, logger, report_progress)
+        await _enter_match(context, game_account, logger, game_logger, report_progress)
 
-        await _wait_for_match_start(context, game_account, logger, report_progress)
+        await _wait_for_match_start(context, game_account, logger, game_logger, report_progress)
 
-        await _play_match(context, game_account, logger, check_cancel, report_progress)
+        await _play_match(context, game_account, logger, game_logger, check_cancel, report_progress)
 
-        await _finish_match(context, game_account, logger, report_progress)
+        await _finish_match(context, game_account, logger, game_logger, report_progress)
 
         logger.info(f"比赛完成: {game_account.gamertag}")
+        game_logger.info("比赛完成")
         return True
 
     except Exception as e:
         logger.error(f"比赛执行异常: {e}")
+        game_logger.error(f"比赛执行异常: {e}")
         return False
 
 
@@ -234,6 +247,7 @@ async def _enter_match(
     context: AgentTaskContext,
     game_account: GameAccountInfo,
     logger,
+    game_logger,
     report_progress: Callable[[str, str, str, Optional[Dict]], None]
 ):
     """
@@ -247,6 +261,7 @@ async def _enter_match(
     - 等待匹配
     """
     logger.info(f"进入比赛准备: {game_account.gamertag}")
+    game_logger.info("进入比赛准备")
 
     await report_progress(
         context.task_id, "STEP4", "RUNNING",
@@ -265,6 +280,7 @@ async def _wait_for_match_start(
     context: AgentTaskContext,
     game_account: GameAccountInfo,
     logger,
+    game_logger,
     report_progress: Callable[[str, str, str, Optional[Dict]], None]
 ):
     """
@@ -273,6 +289,7 @@ async def _wait_for_match_start(
     状态上报：比赛正式开始
     """
     logger.info(f"比赛正式开始: {game_account.gamertag}")
+    game_logger.info("比赛正式开始")
 
     await report_progress(
         context.task_id, "STEP4", "RUNNING",
@@ -291,6 +308,7 @@ async def _play_match(
     context: AgentTaskContext,
     game_account: GameAccountInfo,
     logger,
+    game_logger,
     check_cancel: Callable[[], bool],
     report_progress: Callable[[str, str, str, Optional[Dict]], None]
 ):
@@ -308,6 +326,7 @@ async def _play_match(
     report_interval = 30
 
     logger.info(f"比赛中，预计时长: {match_duration}秒")
+    game_logger.info(f"比赛中，预计时长: {match_duration}秒")
 
     for i in range(match_duration // 10):
         if check_cancel():
@@ -320,6 +339,7 @@ async def _play_match(
 
         if i % 3 == 0 or elapsed == match_duration:
             logger.info(f"比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
+            game_logger.info(f"比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
 
             current_count = context.matches_completed_today[game_account.id] + 1
             target = game_account.target_matches
@@ -345,6 +365,7 @@ async def _finish_match(
     context: AgentTaskContext,
     game_account: GameAccountInfo,
     logger,
+    game_logger,
     report_progress: Callable[[str, str, str, Optional[Dict]], None]
 ):
     """
@@ -357,6 +378,7 @@ async def _finish_match(
     - 跳过结算画面
     """
     logger.info(f"比赛结束: {game_account.gamertag}")
+    game_logger.info("比赛结束")
 
     current_count = context.matches_completed_today[game_account.id] + 1
     target = game_account.target_matches
