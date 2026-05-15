@@ -3,7 +3,7 @@
 ## ⚠️ 重要规则
 **根据需求编写代码时，要走一步想十步，不能只顾当前需求，还要考虑未来可能的需求变化，以及涉及到的关联影响的功能模块。**
 
-**改完代码后必须用 Docker Compose 构建重启验证功能：**
+**改完代码后必须用 Docker Compose 构建重启验证功能，确保所有服务都能正常运行，只针对本项目的docker服务和镜像，不操作其他项目的docker服务和镜像。**
 ```bash
 # 构建并重启所有服务（从项目根目录执行）
 docker compose -f docker/docker-compose.yml up -d --build

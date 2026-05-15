@@ -26,7 +26,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/agents/**",
                         "/api/agent-callback/**",
                         "/api/monitoring/**",
-                        "/api/registration-codes/**"
+                        "/api/registration-codes/**",
+                        "/api/test/**"
                 );
     }
 }

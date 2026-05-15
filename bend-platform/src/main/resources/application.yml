@@ -40,7 +40,7 @@ spring:
   # 数据库配置
   # ----------------------------------------------
   datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3306/bend_platform?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:bend_platform}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:D$U@GAMECeKfidb}
     driver-class-name: com.mysql.cj.jdbc.Driver

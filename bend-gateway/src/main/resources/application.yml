@@ -38,14 +38,7 @@ spring:
             - StripPrefix=0
 
     sentinel:
-      transport:
-        dashboard: ${SENTINEL_DASHBOARD:-localhost:8080}
-      eager: true
-      scg:
-        fallback:
-          mode: response
-          response-body: '{"code":429,"message":"请求过于频繁，请稍后再试"}'
-          response-status: 429
+      enabled: false
 
 management:
   endpoints:
@@ -81,4 +74,4 @@ bend:
       blacklist: []
       whitelist: []
     circuit-breaker:
-      enabled: true
+      enabled: false

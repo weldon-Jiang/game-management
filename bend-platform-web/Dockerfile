@@ -38,8 +38,7 @@ RUN rm -rf /etc/nginx/conf.d/default.conf
 # 复制构建产物
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# 复制 Nginx 配置
-COPY ../docker/nginx.conf /etc/nginx/conf.d/default.conf
+# Nginx 配置通过 docker-compose volumes 挂载
 
 # 暴露端口
 EXPOSE 80

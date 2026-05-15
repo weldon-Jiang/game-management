@@ -4,6 +4,11 @@
 CREATE DATABASE IF NOT EXISTS bend_platform DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE bend_platform;
 
+-- 设置字符集
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+SET collation_connection = 'utf8mb4_unicode_ci';
+
 -- ---------------------------------------------
 -- 商户表
 -- ---------------------------------------------
@@ -28,7 +33,7 @@ CREATE TABLE IF NOT EXISTS `merchant` (
 -- 商户用户表
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `merchant_user` (
-    `id` VARCHAR(36) DEFAULT NULL COMMENT '主键ID',
+    `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
     `merchant_id` VARCHAR(36) NOT NULL COMMENT '商户ID',
     `username` VARCHAR(50) NOT NULL COMMENT '用户名',
     `phone` VARCHAR(20) NOT NULL COMMENT '手机号',
@@ -69,7 +74,7 @@ CREATE TABLE IF NOT EXISTS `merchant_registration_code` (
 -- 流媒体账号表
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `streaming_account` (
-    `id` VARCHAR(36) DEFAULT NULL COMMENT '主键ID',
+    `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
     `merchant_id` VARCHAR(36) NOT NULL COMMENT '商户ID',
     `name` VARCHAR(100) NOT NULL COMMENT '账号名称',
     `email` VARCHAR(255) NOT NULL COMMENT '账号邮箱',
@@ -97,7 +102,7 @@ CREATE TABLE IF NOT EXISTS `streaming_account` (
 -- 游戏账号表
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `game_account` (
-    `id` VARCHAR(36) DEFAULT NULL COMMENT '主键ID',
+    `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
     `streaming_id` VARCHAR(36) DEFAULT NULL COMMENT '关联的流媒体账号ID',
     `xbox_game_name` VARCHAR(64) DEFAULT NULL COMMENT 'Xbox游戏名称',
     `xbox_live_email` VARCHAR(255) DEFAULT NULL COMMENT 'Xbox登录邮箱',
@@ -180,6 +185,7 @@ CREATE TABLE IF NOT EXISTS `agent_instance` (
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `task` (
     `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
+    `merchant_id` VARCHAR(64) NOT NULL COMMENT '商户ID',
     `name` VARCHAR(128) NOT NULL COMMENT '任务名称',
     `description` VARCHAR(512) DEFAULT NULL COMMENT '任务描述',
     `type` VARCHAR(32) NOT NULL COMMENT '任务类型',
@@ -264,7 +270,7 @@ CREATE TABLE IF NOT EXISTS `activation_code` (
 -- Xbox主机表
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `xbox_host` (
-    `id` VARCHAR(36) DEFAULT NULL COMMENT '主键ID',
+    `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
     `merchant_id` VARCHAR(36) NOT NULL COMMENT '商户ID',
     `xbox_id` VARCHAR(64) NOT NULL COMMENT 'Xbox主机ID',
     `name` VARCHAR(100) DEFAULT NULL COMMENT '主机名称',
@@ -667,7 +673,7 @@ CREATE TABLE IF NOT EXISTS `system_alert` (
 -- 模板表
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `template` (
-    `id` VARCHAR(36) DEFAULT NULL COMMENT '主键ID',
+    `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
     `merchant_id` BIGINT NOT NULL COMMENT '商户ID',
     `category` VARCHAR(100) NOT NULL COMMENT '分类',
     `name` VARCHAR(100) NOT NULL COMMENT '模板名称',
@@ -701,4 +707,4 @@ INSERT INTO merchant (id, phone, name, status, created_time, updated_time, delet
 VALUES ('f5d927c40f87f57ef0f4a484d8a823e9', '13800138000', '系统管理员', 'active', '2026-04-16 17:21:58', '2026-04-23 11:16:44', 0, 1, 0, 0);
 
 INSERT INTO merchant_user (id, merchant_id, username, phone, password_hash, role, status, total_recharged, last_login_time, created_time, deleted)
-VALUES ('f5d927c40f87f57ef0f4a484d8a823f9', 'f5d927c40f87f57ef0f4a484d8a823e9', 'admin', '13800138000', 'bc9c6ebfa285976aa94186fe90103bc7', 'platform_admin', 'active', 0, '2026-05-07 10:52:43', '2026-04-16 17:21:58', 0);
+VALUES ('f5d927c40f87f57ef0f4a484d8a823f9', 'f5d927c40f87f57ef0f4a484d8a823e9', 'admin', '13800138000', '5f59b6ec6019c1a1499fc241b5f578b1', 'platform_admin', 'active', 0, '2026-05-07 10:52:43', '2026-04-16 17:21:58', 0);
