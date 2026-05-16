@@ -300,6 +300,7 @@ public class ActivationCodeController {
         );
 
         Map<String, Object> prices = new HashMap<>();
+        prices.put("vipLevel", vipLevel);
         if (group != null) {
             prices.put("windowOriginalPrice", group.getWindowOriginalPrice());
             prices.put("windowDiscountPrice", group.getWindowDiscountPrice());

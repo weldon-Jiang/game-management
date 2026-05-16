@@ -118,8 +118,15 @@ public class MerchantUserServiceImpl implements MerchantUserService {
             throw new BusinessException(ResultCode.MerchantUser.PHONE_DUPLICATE);
         }
 
-        if (!isValidRole(role)) {
-            role = "operator";
+        Merchant merchant = merchantMapper.selectById(merchantId);
+        if (merchant != null && Boolean.TRUE.equals(merchant.getIsSystem())) {
+            if (!"platform_admin".equals(role)) {
+                throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+            }
+        } else {
+            if (!isValidRole(role)) {
+                role = "operator";
+            }
         }
 
         MerchantUser user = new MerchantUser();
@@ -132,7 +139,7 @@ public class MerchantUserServiceImpl implements MerchantUserService {
 
         merchantUserMapper.insert(user);
 
-        log.info("注册用户成功 - 用户名: {}, 商户ID: {}", username, merchantId);
+        log.info("注册用户成功 - 用户名: {}, 商户ID: {}, 角色: {}", username, merchantId, role);
         return user;
     }
 
@@ -162,12 +169,22 @@ public class MerchantUserServiceImpl implements MerchantUserService {
     @Override
     public IPage<MerchantUser> findByMerchantId(String merchantId, MerchantUserPageRequest request) {
         LambdaQueryWrapper<MerchantUser> wrapper = new LambdaQueryWrapper<>();
+        
         if (merchantId != null) {
             wrapper.eq(MerchantUser::getMerchantId, merchantId);
-        } else {
-            wrapper.ne(MerchantUser::getRole, "platform_admin");
         }
-        wrapper.orderByDesc(MerchantUser::getCreatedTime);
+        
+        if (request.getMerchantId() != null) {
+            wrapper.eq(MerchantUser::getMerchantId, request.getMerchantId());
+        }
+        
+        if (request.getRole() != null) {
+            wrapper.eq(MerchantUser::getRole, request.getRole());
+        }
+        
+        wrapper.orderByAsc(MerchantUser::getMerchantId)
+               .orderByAsc(MerchantUser::getRole)
+               .orderByDesc(MerchantUser::getCreatedTime);
 
         Page<MerchantUser> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return merchantUserMapper.selectPage(page, wrapper);
@@ -184,9 +201,19 @@ public class MerchantUserServiceImpl implements MerchantUserService {
         if (phone != null) {
             user.setPhone(phone);
         }
-        if (role != null && isValidRole(role)) {
+        
+        if (role != null) {
+            Merchant merchant = merchantMapper.selectById(user.getMerchantId());
+            if (merchant != null && Boolean.TRUE.equals(merchant.getIsSystem())) {
+                if (!"platform_admin".equals(role)) {
+                    throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+                }
+            } else if (!isValidRole(role)) {
+                throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+            }
             user.setRole(role);
         }
+        
         if (status != null) {
             user.setStatus(status);
         }
@@ -240,6 +267,6 @@ public class MerchantUserServiceImpl implements MerchantUserService {
     }
 
     private boolean isValidRole(String role) {
-        return "owner".equals(role) || "admin".equals(role) || "operator".equals(role) || "platform_admin".equals(role);
+        return "operator".equals(role) || "merchant_owner".equals(role) || "platform_admin".equals(role);
     }
 }

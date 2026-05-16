@@ -281,12 +281,19 @@
           </template>
           <template v-else>
             <div class="price-row">
-              <span class="price-label">原价</span>
+              <span class="price-label">单价</span>
               <span class="price-value price-original">{{ formatPrice(generateFormData.originalPrice) }}</span>
-            </div>
-            <div class="price-row">
-              <span class="price-label">折后价</span>
               <span class="price-value price-discount">{{ formatPrice(generateFormData.discountPrice) }}</span>
+            </div>
+            <div v-if="selectedCount > 0" class="price-row">
+              <span class="price-label">数量</span>
+              <span class="price-value price-original">{{ selectedCount }}个</span>
+              <span class="price-value price-discount">{{ selectedCount }}个</span>
+            </div>
+            <div v-if="selectedCount > 0" class="price-row total-row">
+              <span class="price-label">总计</span>
+              <span class="price-value price-original">{{ formatPrice(generateFormData.originalPrice * selectedCount) }}</span>
+              <span class="price-value price-discount">{{ formatPrice(calculateTotalPrice) }}</span>
             </div>
           </template>
         </div>
@@ -294,10 +301,6 @@
         <div v-if="generateFormData.vipLevel > 0" class="vip-tip success">
           <el-icon><SuccessFilled /></el-icon>
           <span>当前VIP{{ generateFormData.vipLevel }}，已享受折扣价格</span>
-        </div>
-        <div v-else class="vip-tip info">
-          <el-icon><InfoFilled /></el-icon>
-          <span>当前无VIP等级，使用原价</span>
         </div>
       </el-form>
       <template #footer>
@@ -388,11 +391,16 @@ const subscriptionTypes = [
   { value: 'points', label: '点数充值' }
 ]
 
+const selectedCount = computed(() => {
+  return generateFormData.boundResourceIds?.length || 0
+})
+
 const calculateTotalPrice = computed(() => {
   if (generateFormData.subscriptionType === 'points' && generateFormData.pointsAmount) {
     return generateFormData.pointsAmount * generateFormData.discountPrice
   }
-  return generateFormData.discountPrice
+  const count = selectedCount.value || 1
+  return generateFormData.discountPrice * count
 })
 
 const generateFormRules = computed(() => {
@@ -455,9 +463,7 @@ const showGenerateDialog = async () => {
   generateFormData.discountPrice = 0
   generateFormData.vipLevel = 0
   await loadMerchants()
-  if (!authStore.isPlatformAdmin) {
-    await loadPrices()
-  }
+  await loadPrices()
   generateDialogVisible.value = true
 }
 

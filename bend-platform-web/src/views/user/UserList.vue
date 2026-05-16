@@ -16,6 +16,50 @@
       </div>
     </div>
 
+    <div class="content-card">
+      <!-- 筛选区域 -->
+      <div class="filter-bar" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px;">
+        <div v-if="authStore.isPlatformAdmin">
+          <el-select
+            v-model="filterForm.merchantId"
+            placeholder="请选择商户"
+            filterable
+            clearable
+            style="width: 200px"
+          >
+            <el-option
+              v-for="merchant in merchantList"
+              :key="merchant.id"
+              :label="merchant.name"
+              :value="merchant.id"
+            />
+          </el-select>
+        </div>
+        <div>
+          <el-select
+            v-model="filterForm.role"
+            placeholder="请选择角色"
+            clearable
+            style="width: 150px"
+          >
+            <el-option label="平台管理员" value="platform_admin" />
+            <el-option label="商户管理员" value="merchant_owner" />
+            <el-option label="操作员" value="operator" />
+          </el-select>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <el-button type="primary" @click="loadData">
+            <el-icon><Search /></el-icon>
+            查询
+          </el-button>
+          <el-button @click="resetFilter">
+            <el-icon><Refresh /></el-icon>
+            重置
+          </el-button>
+        </div>
+      </div>
+    </div>
+
     <div class="content-card table-container">
       <el-table
         :data="tableData"
@@ -122,8 +166,11 @@
         </el-form-item>
         <el-form-item label="角色" prop="role">
           <el-select v-model="editFormData.role" placeholder="请选择角色" style="width: 100%">
-            <el-option label="商户管理员" value="merchant_owner" />
-            <el-option label="操作员" value="operator" />
+            <el-option v-if="isCurrentMerchantSystem" label="平台管理员" value="platform_admin" />
+            <template v-else>
+              <el-option label="商户管理员" value="merchant_owner" />
+              <el-option label="操作员" value="operator" />
+            </template>
           </el-select>
         </el-form-item>
         <el-form-item label="状态" prop="status">
@@ -186,8 +233,11 @@
         </el-form-item>
         <el-form-item label="角色" prop="role">
           <el-select v-model="addFormData.role" placeholder="请选择角色" style="width: 100%">
-            <el-option label="商户管理员" value="merchant_owner" />
-            <el-option label="操作员" value="operator" />
+            <el-option v-if="isAddMerchantSystem" label="平台管理员" value="platform_admin" />
+            <template v-else>
+              <el-option label="商户管理员" value="merchant_owner" />
+              <el-option label="操作员" value="operator" />
+            </template>
           </el-select>
         </el-form-item>
       </el-form>
@@ -246,7 +296,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { userApi, merchantApi } from '@/api'
 
@@ -263,6 +313,24 @@ const authStore = useAuthStore()
  * 当前用户ID（防止删除自己）
  */
 const currentUserId = computed(() => authStore.userId)
+
+/**
+ * 判断当前编辑的商户是否为系统商户
+ */
+const isCurrentMerchantSystem = computed(() => {
+  if (!editFormData.merchantId) return false
+  const merchant = merchantList.value.find(m => m.id === editFormData.merchantId)
+  return merchant ? merchant.isSystem : false
+})
+
+/**
+ * 判断当前新增用户选择的商户是否为系统商户
+ */
+const isAddMerchantSystem = computed(() => {
+  if (!addFormData.merchantId) return false
+  const merchant = merchantList.value.find(m => m.id === addFormData.merchantId)
+  return merchant ? merchant.isSystem : false
+})
 
 /**
  * 表格数据加载状态
@@ -291,6 +359,14 @@ const pagination = reactive({
   pageNum: 1,
   pageSize: 10,
   total: 0
+})
+
+/**
+ * 筛选表单数据
+ */
+const filterForm = reactive({
+  merchantId: '',
+  role: ''
 })
 
 /**
@@ -416,10 +492,17 @@ const loadMerchants = async () => {
 const loadData = async () => {
   loading.value = true
   try {
-    const res = await userApi.list({
+    const params = {
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize
-    })
+    }
+    if (filterForm.merchantId) {
+      params.merchantId = filterForm.merchantId
+    }
+    if (filterForm.role) {
+      params.role = filterForm.role
+    }
+    const res = await userApi.list(params)
     tableData.value = res.data.records || []
     pagination.total = res.data.total || 0
   } catch (error) {
@@ -427,6 +510,15 @@ const loadData = async () => {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 重置筛选条件
+ */
+const resetFilter = () => {
+  filterForm.merchantId = ''
+  filterForm.role = ''
+  loadData()
 }
 
 /**
@@ -566,6 +658,7 @@ const getRoleType = (role) => {
     platform_admin: 'danger',
     owner: 'primary',
     admin: 'warning',
+    merchant_owner: 'primary',
     operator: 'info'
   }
   return typeMap[role] || 'info'
