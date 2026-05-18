@@ -9,5 +9,6 @@ export const xboxApi = {
   delete: (id) => request.delete(`/api/xbox-hosts/${id}`),
   bind: (id, streamingAccountId, gamertag) => request.put(`/api/xbox-hosts/${id}/bind`, null, { params: { streamingAccountId, gamertag } }),
   unbind: (id) => request.put(`/api/xbox-hosts/${id}/unbind`),
-  getAvailableAccounts: (id) => request.get(`/api/xbox-hosts/${id}/available-streaming-accounts`)
+  getAvailableAccounts: (id) => request.get(`/api/xbox-hosts/${id}/available-streaming-accounts`),
+  discover: (agentId) => request.post('/api/xbox-hosts/discover', null, { params: { agentId } })
 }

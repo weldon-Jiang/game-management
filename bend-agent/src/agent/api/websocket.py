@@ -203,7 +203,9 @@ class WSClient:
                 'type': message_type,
                 'data': data
             }, ensure_ascii=False)
+            self.logger.info(f"Sending message to backend - Type: {message_type}, Data: {message[:500]}")
             await self._ws.send(message)
+            self.logger.info(f"Message sent successfully - Type: {message_type}")
             return True
         except Exception as e:
             self.logger.error(f"Failed to send message: {e}")

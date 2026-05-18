@@ -35,7 +35,7 @@ from typing import Callable, Dict, Any, Optional
 
 from ..core.logger import get_logger
 from ..core.account_logger import get_game_logger
-from .task_context import (
+from ..task.task_context import (
     AgentTaskContext,
     Step4Result,
     TaskStepStatus,

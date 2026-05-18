@@ -1,6 +1,7 @@
 package com.bend.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.AgentInstancePageRequest;
@@ -18,9 +19,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,8 +78,30 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentInstance create(AgentInstance instance) {
-        if (findByAgentId(instance.getAgentId()) != null) {
+        AgentInstance existing = findByAgentId(instance.getAgentId());
+        
+        if (existing != null) {
             throw new BusinessException(ResultCode.AgentInstance.AGENT_ID_DUPLICATE);
+        }
+
+        AgentInstance deletedInstance = findByAgentIdIncludeDeleted(instance.getAgentId());
+        if (deletedInstance != null && Boolean.TRUE.equals(deletedInstance.getDeleted())) {
+            log.info("恢复已删除的Agent实例 - AgentID: {}", instance.getAgentId());
+            deletedInstance.setDeleted(false);
+            deletedInstance.setStatus("online");
+            deletedInstance.setLastHeartbeat(LocalDateTime.now());
+            deletedInstance.setLastOnlineTime(LocalDateTime.now());
+            deletedInstance.setHost(instance.getHost());
+            deletedInstance.setPort(instance.getPort());
+            deletedInstance.setVersion(instance.getVersion());
+            deletedInstance.setOsType(instance.getOsType());
+            deletedInstance.setOsVersion(instance.getOsVersion());
+            deletedInstance.setCpuCount(instance.getCpuCount());
+            deletedInstance.setMaxConcurrentTasks(instance.getMaxConcurrentTasks());
+            deletedInstance.setUninstallReason(null);
+            agentInstanceMapper.updateById(deletedInstance);
+            log.info("Agent实例已恢复 - ID: {}, AgentID: {}", deletedInstance.getId(), deletedInstance.getAgentId());
+            return deletedInstance;
         }
 
         instance.setStatus("online");
@@ -105,22 +130,24 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     public AgentInstance findByAgentId(String agentId) {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getAgentId, agentId);
-        wrapper.eq(AgentInstance::getDeleted, false);
         return agentInstanceMapper.selectOne(wrapper);
+    }
+
+    @Override
+    public AgentInstance findByAgentIdIncludeDeleted(String agentId) {
+        return agentInstanceMapper.selectByAgentIdIncludeDeleted(agentId);
     }
 
     @Override
     public AgentInstance findByRegistrationCode(String registrationCode) {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getRegistrationCode, registrationCode);
-        wrapper.eq(AgentInstance::getDeleted, false);
         return agentInstanceMapper.selectOne(wrapper);
     }
 
     @Override
     public List<AgentInstance> findAll() {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AgentInstance::getDeleted, false);
         wrapper.orderByDesc(AgentInstance::getCreatedTime);
         List<AgentInstance> instances = agentInstanceMapper.selectList(wrapper);
         populateMerchantNames(instances);
@@ -128,9 +155,33 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     }
 
     @Override
+    public List<AgentInstance> findAllOnline() {
+        LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AgentInstance::getStatus, "online");
+        wrapper.orderByDesc(AgentInstance::getLastHeartbeat);
+        List<AgentInstance> instances = agentInstanceMapper.selectList(wrapper);
+        
+        LocalDateTime fiveMinutesAgo = LocalDateTime.now().minusMinutes(5);
+        List<AgentInstance> trulyOnline = new ArrayList<>();
+        for (AgentInstance instance : instances) {
+            // 检查条件：WebSocket连接已建立 并且 最近5分钟内有心跳
+            // 只有WebSocket连接正常的Agent才能接收任务指令
+            boolean hasWebSocket = AgentWebSocketEndpoint.isAgentOnline(instance.getAgentId());
+            boolean hasRecentHeartbeat = instance.getLastHeartbeat() != null && 
+                                        instance.getLastHeartbeat().isAfter(fiveMinutesAgo);
+            
+            if (hasWebSocket && hasRecentHeartbeat) {
+                trulyOnline.add(instance);
+            }
+        }
+        
+        populateMerchantNames(trulyOnline);
+        return trulyOnline;
+    }
+
+    @Override
     public IPage<AgentInstance> findAll(AgentInstancePageRequest request) {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AgentInstance::getDeleted, false);
         wrapper.orderByDesc(AgentInstance::getCreatedTime);
         Page<AgentInstance> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         IPage<AgentInstance> result = agentInstanceMapper.selectPage(page, wrapper);
@@ -142,7 +193,6 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     public List<AgentInstance> findAllByMerchantId(String merchantId) {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getMerchantId, merchantId);
-        wrapper.eq(AgentInstance::getDeleted, false);
         wrapper.orderByDesc(AgentInstance::getCreatedTime);
         return agentInstanceMapper.selectList(wrapper);
     }
@@ -151,7 +201,6 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     public IPage<AgentInstance> findPageByMerchantId(String merchantId, AgentInstancePageRequest request) {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getMerchantId, merchantId);
-        wrapper.eq(AgentInstance::getDeleted, false);
         wrapper.orderByDesc(AgentInstance::getCreatedTime);
         Page<AgentInstance> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return agentInstanceMapper.selectPage(page, wrapper);
@@ -160,7 +209,6 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     @Override
     public IPage<AgentInstance> findPageWithFilters(AgentInstancePageRequest request) {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AgentInstance::getDeleted, false);
         if (StringUtils.hasText(request.getStatus())) {
             wrapper.eq(AgentInstance::getStatus, request.getStatus());
         }
@@ -195,7 +243,27 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     public void updateByAgentId(AgentInstance instance) {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getAgentId, instance.getAgentId());
-        agentInstanceMapper.update(instance, wrapper);
+        int updated = agentInstanceMapper.update(instance, wrapper);
+        
+        if (updated == 0) {
+            AgentInstance deletedInstance = findByAgentIdIncludeDeleted(instance.getAgentId());
+            if (deletedInstance != null) {
+                deletedInstance.setDeleted(false);
+                deletedInstance.setStatus("online");
+                deletedInstance.setLastHeartbeat(LocalDateTime.now());
+                deletedInstance.setLastOnlineTime(LocalDateTime.now());
+                deletedInstance.setHost(instance.getHost());
+                deletedInstance.setPort(instance.getPort());
+                deletedInstance.setVersion(instance.getVersion());
+                deletedInstance.setOsType(instance.getOsType());
+                deletedInstance.setOsVersion(instance.getOsVersion());
+                deletedInstance.setCpuCount(instance.getCpuCount());
+                deletedInstance.setMaxConcurrentTasks(instance.getMaxConcurrentTasks());
+                deletedInstance.setUninstallReason(null);
+                agentInstanceMapper.updateById(deletedInstance);
+                log.info("已删除的Agent实例已恢复并更新 - AgentID: {}", instance.getAgentId());
+            }
+        }
         log.debug("更新Agent实例 - AgentID: {}", instance.getAgentId());
     }
 
@@ -233,15 +301,14 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
         }
 
         instance.setLastHeartbeat(LocalDateTime.now());
+        
         if (status != null) {
             instance.setStatus(status);
+        } else if (!"online".equals(instance.getStatus())) {
+            instance.setStatus("online");
+            instance.setLastOnlineTime(LocalDateTime.now());
         }
-        if (currentTaskId != null) {
-            instance.setCurrentTaskId(currentTaskId);
-        }
-        if (currentStreamingId != null) {
-            instance.setCurrentStreamingId(currentStreamingId);
-        }
+        
         if (version != null) {
             instance.setVersion(version);
         }
@@ -251,53 +318,25 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void bindStreaming(String id, String streamingId) {
-        AgentInstance instance = agentInstanceMapper.selectById(id);
-        if (instance == null) {
-            throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
-        }
-
-        instance.setCurrentStreamingId(streamingId);
-        agentInstanceMapper.updateById(instance);
-        log.info("Agent绑定流媒体账号 - AgentID: {}, StreamingID: {}", id, streamingId);
+        log.info("Agent绑定流媒体账号已废弃 - AgentID: {}, StreamingID: {} (任务状态请通过task表查询)", id, streamingId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void unbindStreaming(String id) {
-        AgentInstance instance = agentInstanceMapper.selectById(id);
-        if (instance == null) {
-            throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
-        }
-
-        instance.setCurrentStreamingId(null);
-        agentInstanceMapper.updateById(instance);
-        log.info("Agent解绑流媒体账号 - AgentID: {}", id);
+        log.info("Agent解绑流媒体账号已废弃 - AgentID: {} (任务状态请通过task表查询)", id);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void bindTask(String id, String taskId) {
-        AgentInstance instance = agentInstanceMapper.selectById(id);
-        if (instance == null) {
-            throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
-        }
-
-        instance.setCurrentTaskId(taskId);
-        agentInstanceMapper.updateById(instance);
-        log.info("Agent绑定任务 - AgentID: {}, TaskID: {}", id, taskId);
+        log.info("Agent绑定任务已废弃 - AgentID: {}, TaskID: {} (任务状态请通过task表查询)", id, taskId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void unbindTask(String id) {
-        AgentInstance instance = agentInstanceMapper.selectById(id);
-        if (instance == null) {
-            throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
-        }
-
-        instance.setCurrentTaskId(null);
-        agentInstanceMapper.updateById(instance);
-        log.info("Agent解绑任务 - AgentID: {}", id);
+        log.info("Agent解绑任务已废弃 - AgentID: {} (任务状态请通过task表查询)", id);
     }
 
     @Override
@@ -308,10 +347,89 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
             throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
         }
 
-        instance.setDeleted(true);
-        instance.setStatus("deleted");
-        agentInstanceMapper.updateById(instance);
-        log.info("删除Agent实例 - ID: {}", id);
+        agentInstanceMapper.deleteById(id);
+        log.info("物理删除Agent实例 - ID: {}", id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteByAgentId(String agentId) {
+        AgentInstance instance = findByAgentId(agentId);
+        if (instance == null) {
+            throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
+        }
+
+        LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AgentInstance::getAgentId, agentId);
+        agentInstanceMapper.delete(wrapper);
+        log.info("物理删除Agent实例 - AgentID: {}", agentId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int cleanupUninstalled(String merchantId) {
+        LambdaQueryWrapper<AgentInstance> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(AgentInstance::getStatus, "uninstalled");
+
+        if (StringUtils.hasText(merchantId)) {
+            queryWrapper.eq(AgentInstance::getMerchantId, merchantId);
+        }
+
+        List<AgentInstance> uninstalledAgents = agentInstanceMapper.selectList(queryWrapper);
+        if (uninstalledAgents.isEmpty()) {
+            return 0;
+        }
+
+        agentInstanceMapper.delete(queryWrapper);
+
+        log.info("物理清理已卸载Agent - 商户ID: {}, 数量: {}", merchantId, uninstalledAgents.size());
+        return uninstalledAgents.size();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int cleanupOffline(int offlineMinutes, String merchantId) {
+        LocalDateTime cutoffTime = LocalDateTime.now().minusMinutes(offlineMinutes);
+
+        LambdaQueryWrapper<AgentInstance> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(AgentInstance::getStatus, "offline")
+               .lt(AgentInstance::getLastHeartbeat, cutoffTime);
+
+        if (StringUtils.hasText(merchantId)) {
+            queryWrapper.eq(AgentInstance::getMerchantId, merchantId);
+        }
+
+        List<AgentInstance> offlineAgents = agentInstanceMapper.selectList(queryWrapper);
+        if (offlineAgents.isEmpty()) {
+            return 0;
+        }
+
+        agentInstanceMapper.delete(queryWrapper);
+
+        log.info("物理清理离线Agent - 商户ID: {}, 离线阈值: {}分钟, 数量: {}", 
+                merchantId, offlineMinutes, offlineAgents.size());
+        return offlineAgents.size();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchDelete(List<String> agentIds) {
+        if (agentIds == null || agentIds.isEmpty()) {
+            return 0;
+        }
+
+        LambdaQueryWrapper<AgentInstance> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.in(AgentInstance::getAgentId, agentIds);
+
+        List<AgentInstance> agents = agentInstanceMapper.selectList(queryWrapper);
+        if (agents.isEmpty()) {
+            return 0;
+        }
+
+        agentInstanceMapper.delete(queryWrapper);
+
+        log.info("物理批量删除Agent - 数量: {}", agents.size());
+        return agents.size();
     }
 
     @Override

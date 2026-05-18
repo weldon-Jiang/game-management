@@ -24,6 +24,23 @@
         <el-button @click="handleSearch">
           <el-icon><Refresh /></el-icon>
         </el-button>
+
+        <div class="toolbar-right">
+          <el-button @click="handleCleanupUninstalled" :loading="cleaningUninstalled">
+            清理已卸载
+          </el-button>
+          <el-button @click="handleCleanupOffline" :loading="cleaningOffline">
+            清理离线(30分钟)
+          </el-button>
+          <el-button
+            type="danger"
+            :disabled="selectedAgents.length === 0"
+            @click="handleBatchDelete"
+            :loading="batchDeleting"
+          >
+            批量删除({{ selectedAgents.length }})
+          </el-button>
+        </div>
       </div>
 
       <div class="table-container">
@@ -32,7 +49,9 @@
           v-loading="loading"
           class="data-table"
           scrollbar-always-on
+          @selection-change="handleSelectionChange"
         >
+        <el-table-column type="selection" width="50" />
         <el-table-column prop="agentId" label="Agent ID" min-width="180" show-overflow-tooltip />
         <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantId" label="商户" width="150" show-overflow-tooltip>
           <template #default="{ row }">
@@ -43,6 +62,21 @@
         <el-table-column prop="host" label="主机地址" width="150" />
         <el-table-column prop="port" label="端口" width="80" align="center" />
         <el-table-column prop="version" label="版本" width="80" align="center" />
+        <el-table-column prop="osType" label="操作系统" width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span>{{ row.osType ? row.osType + ' ' + (row.osVersion || '') : '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="cpuCount" label="CPU核心" width="90" align="center">
+          <template #default="{ row }">
+            <span>{{ row.cpuCount ? row.cpuCount + '核' : '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="maxConcurrentTasks" label="最大并发" width="100" align="center">
+          <template #default="{ row }">
+            <span>{{ row.maxConcurrentTasks || '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="getAgentStatusType(row.status)" size="small">
@@ -55,10 +89,13 @@
             {{ row.lastHeartbeat ? formatDate(row.lastHeartbeat) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
+        <el-table-column label="操作" width="150" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="showTaskDialog(row)">
               查看任务
+            </el-button>
+            <el-button type="danger" link size="small" @click="handleDelete(row)">
+              删除
             </el-button>
           </template>
         </el-table-column>
@@ -91,6 +128,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import { agentApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { getAgentStatusText, getAgentStatusType } from '@/utils/constants'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import AgentTaskDialog from './AgentTaskDialog.vue'
 
 const authStore = useAuthStore()
@@ -99,6 +137,11 @@ const filterStatus = ref('')
 
 const loading = ref(false)
 const tableData = ref([])
+const selectedAgents = ref([])
+
+const cleaningUninstalled = ref(false)
+const cleaningOffline = ref(false)
+const batchDeleting = ref(false)
 
 const pagination = reactive({
   pageNum: 1,
@@ -112,6 +155,10 @@ const selectedAgent = ref(null)
 const handleSearch = () => {
   pagination.pageNum = 1
   loadData()
+}
+
+const handleSelectionChange = (selection) => {
+  selectedAgents.value = selection
 }
 
 const loadData = async () => {
@@ -139,6 +186,130 @@ const loadData = async () => {
 const showTaskDialog = (agent) => {
   selectedAgent.value = agent
   taskDialogVisible.value = true
+}
+
+const handleDelete = async (agent) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除Agent "${agent.agentId}" 吗？删除后无法恢复。`,
+      '确认删除',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const res = await agentApi.delete(agent.agentId)
+    if (res.code === 0 || res.code === 200) {
+      ElMessage.success('删除成功')
+      loadData()
+    } else {
+      ElMessage.error(res.message || '删除失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Failed to delete agent:', error)
+      ElMessage.error('删除失败')
+    }
+  }
+}
+
+const handleBatchDelete = async () => {
+  if (selectedAgents.value.length === 0) {
+    ElMessage.warning('请先选择要删除的Agent')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedAgents.value.length} 个Agent吗？删除后无法恢复。`,
+      '确认批量删除',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    batchDeleting.value = true
+    const agentIds = selectedAgents.value.map(a => a.agentId)
+    const res = await agentApi.batchDelete(agentIds)
+    if (res.code === 0 || res.code === 200) {
+      ElMessage.success(`成功删除 ${res.data?.deletedCount || 0} 个Agent`)
+      selectedAgents.value = []
+      loadData()
+    } else {
+      ElMessage.error(res.message || '批量删除失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Failed to batch delete agents:', error)
+      ElMessage.error('批量删除失败')
+    }
+  } finally {
+    batchDeleting.value = false
+  }
+}
+
+const handleCleanupUninstalled = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要清理所有已卸载状态的Agent吗？清理后无法恢复。',
+      '确认清理',
+      {
+        confirmButtonText: '清理',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    cleaningUninstalled.value = true
+    const res = await agentApi.cleanupUninstalled()
+    if (res.code === 0 || res.code === 200) {
+      ElMessage.success(`成功清理 ${res.data?.cleanedCount || 0} 个已卸载Agent`)
+      loadData()
+    } else {
+      ElMessage.error(res.message || '清理失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Failed to cleanup uninstalled agents:', error)
+      ElMessage.error('清理失败')
+    }
+  } finally {
+    cleaningUninstalled.value = false
+  }
+}
+
+const handleCleanupOffline = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要清理所有离线超过30分钟的Agent吗？清理后无法恢复。',
+      '确认清理',
+      {
+        confirmButtonText: '清理',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    cleaningOffline.value = true
+    const res = await agentApi.cleanupOffline(30)
+    if (res.code === 0 || res.code === 200) {
+      ElMessage.success(`成功清理 ${res.data?.cleanedCount || 0} 个离线Agent`)
+      loadData()
+    } else {
+      ElMessage.error(res.message || '清理失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Failed to cleanup offline agents:', error)
+      ElMessage.error('清理失败')
+    }
+  } finally {
+    cleaningOffline.value = false
+  }
 }
 
 const formatDate = (dateStr) => {
@@ -186,6 +357,13 @@ onMounted(() => {
   display: flex;
   gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.toolbar-right {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
 }
 
 :deep(.el-table) {

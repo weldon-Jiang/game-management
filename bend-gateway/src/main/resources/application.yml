@@ -25,7 +25,7 @@ spring:
           filters:
             - StripPrefix=0
         - id: websocket-service
-          uri: http://${BACKEND_HOST:localhost}:${BACKEND_PORT:8061}
+          uri: ws://${BACKEND_HOST:localhost}:${BACKEND_PORT:8061}
           predicates:
             - Path=/ws/**
           filters:

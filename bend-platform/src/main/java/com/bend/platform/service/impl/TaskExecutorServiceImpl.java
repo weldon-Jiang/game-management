@@ -83,9 +83,13 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
 
             ObjectNode taskData = buildTaskData(task, gameAccounts);
             Map<String, Object> taskDataMap = objectMapper.convertValue(taskData, Map.class);
+            
+            log.info("准备发送任务到Agent - TaskID: {}, AgentID: {}, GameAccountCount: {}", 
+                task.getId(), task.getTargetAgentId(), gameAccountIds.size());
+            
             AgentWebSocketEndpoint.sendTaskToAgent(task.getTargetAgentId(), task.getId(), taskDataMap);
 
-            log.info("Task {} sent to agent {} with {} game accounts",
+            log.info("任务已发送到Agent - TaskID: {}, AgentID: {}, GameAccountCount: {}",
                 task.getId(), task.getTargetAgentId(), gameAccountIds.size());
 
         } catch (Exception e) {
@@ -110,9 +114,12 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
             List<TaskGameAccountStatus> statuses = statusService.findByTaskId(taskId);
             for (TaskGameAccountStatus status : statuses) {
                 if ("pending".equals(status.getStatus()) || "running".equals(status.getStatus())) {
-                    statusService.updateStatus(taskId, status.getGameAccountId(), "skipped");
+                    statusService.updateStatus(taskId, status.getGameAccountId(), "cancelled");
                 }
             }
+
+            AgentWebSocketEndpoint.sendCancelTaskToAgent(task.getTargetAgentId(), taskId);
+            log.info("任务已取消并通知Agent - TaskID: {}, AgentID: {}", taskId, task.getTargetAgentId());
         }
     }
 

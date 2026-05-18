@@ -7,17 +7,23 @@ import com.bend.platform.dto.XboxHostPageRequest;
 import com.bend.platform.dto.XboxHostRequest;
 import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.XboxHost;
+import com.bend.platform.entity.AgentInstance;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
+import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.XboxHostService;
 import com.bend.platform.util.UserContext;
+import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -42,8 +48,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class XboxHostController {
 
+    private static final Logger log = LoggerFactory.getLogger(XboxHostController.class);
+
     private final XboxHostService xboxHostService;
     private final MerchantService merchantService;
+    private final AgentInstanceService agentInstanceService;
 
     /**
      * 创建Xbox主机
@@ -244,5 +253,54 @@ public class XboxHostController {
 
         xboxHostService.delete(id);
         return ApiResponse.success("删除成功", null);
+    }
+
+    /**
+     * 触发Agent发现Xbox主机
+     * 向指定Agent发送发现指令，Agent执行发现后上报结果
+     *
+     * @param agentId Agent实例ID
+     * @return 操作结果
+     */
+    @PostMapping("/discover")
+    public ApiResponse<Void> discoverXbox(@RequestParam String agentId) {
+        log.info("========== 收到Xbox发现请求 ==========");
+        log.info("请求参数 - agentId: {}", agentId);
+        
+        AgentInstance instance = null;
+        String actualAgentId = agentId;
+        
+        if (!agentId.startsWith("AGENT-")) {
+            log.info("agentId不是AGENT-前缀格式，尝试按ID查询Agent实例");
+            instance = agentInstanceService.findById(agentId);
+            if (instance == null) {
+                throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
+            }
+            actualAgentId = instance.getAgentId();
+            log.info("查询到Agent实例 - actualAgentId: {}", actualAgentId);
+        }
+        
+        log.info("检查Agent WebSocket连接状态 - actualAgentId: {}", actualAgentId);
+        boolean hasWebSocket = AgentWebSocketEndpoint.isAgentOnline(actualAgentId);
+        
+        if (!hasWebSocket) {
+            log.warn("Agent WebSocket未连接 - actualAgentId: {}", actualAgentId);
+            if (instance == null) {
+                instance = agentInstanceService.findByAgentId(actualAgentId);
+            }
+            if (instance != null) {
+                LocalDateTime lastHeartbeat = instance.getLastHeartbeat();
+                if (lastHeartbeat != null && lastHeartbeat.isAfter(LocalDateTime.now().minusMinutes(5))) {
+                    throw new BusinessException(ResultCode.System.OPERATION_FAILED, "Agent有心跳但WebSocket未连接，请等待Agent重新连接或重启Agent服务");
+                }
+            }
+            throw new BusinessException(ResultCode.AgentInstance.NOT_ONLINE);
+        }
+        
+        log.info("Agent WebSocket连接正常，发送发现指令 - actualAgentId: {}", actualAgentId);
+        AgentWebSocketEndpoint.sendDiscoverXbox(actualAgentId);
+        log.info("发现指令发送成功 - actualAgentId: {}", actualAgentId);
+        
+        return ApiResponse.success("发现指令已发送", null);
     }
 }

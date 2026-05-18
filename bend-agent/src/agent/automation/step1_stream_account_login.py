@@ -3,19 +3,29 @@
 ========================
 
 功能说明：
-- 使用账号密码直接获取Microsoft OAuth Token
-- 绕过微软设备代码登录窗口（ROPC流程）
-- 复用现有 MicrosoftAuthenticator 模块
+- 使用MSAL设备码认证流程登录微软账号
+- 首次登录需用户手动输入设备代码，后续自动使用Refresh Token刷新
+- 支持多账号Token持久化存储
+- 通过Xbox Live认证获取游戏所需令牌
+
+认证流程：
+1. 验证账号信息完整性
+2. 检查是否有缓存的Refresh Token
+3. 如果有，使用Refresh Token刷新获取新Token
+4. 如果没有，使用设备码认证，等待用户验证
+5. 转换为Xbox Live Token
+6. 保存Refresh Token（如获取到）
 
 方法拆分：
 - step1_execute_login(): 执行登录主流程
 - _validate_account_info(): 验证账号信息
-- _get_microsoft_token(): 获取微软访问令牌
+- _get_microsoft_token(): 获取微软访问令牌（优先使用Refresh Token）
 - _get_xbox_live_token(): 获取Xbox Live令牌
 - _report_progress(): 上报进度到平台
 
 作者：技术团队
-版本：1.0
+版本：3.0
+基于MSAL设备码认证方案
 """
 
 import asyncio
@@ -23,7 +33,7 @@ from typing import Callable, Optional, Dict, Any
 
 from ..core.logger import get_logger
 from ..core.account_logger import get_stream_logger
-from .task_context import AgentTaskContext, Step1Result, TaskStepStatus
+from ..task.task_context import AgentTaskContext, Step1Result, TaskStepStatus
 
 
 async def step1_execute_login(
@@ -63,13 +73,14 @@ async def step1_execute_login(
             return Step1Result(success=False, error_code="CANCELLED", message="任务被取消")
 
         validation = await _validate_account_info(context, logger, stream_logger)
-        if not validation.is_valid:
-            logger.error(f"账号信息验证失败: {validation.error_msg}")
-            stream_logger.error(f"账号信息验证失败: {validation.error_msg}")
-            context.update_step_status("step1", TaskStepStatus.FAILED, validation.error_msg)
-            await report_progress(context.task_id, "STEP1", "FAILED", validation.error_msg)
+        if not validation.get("is_valid", False):
+            error_msg = validation.get("error_msg", "未知错误")
+            logger.error(f"账号信息验证失败: {error_msg}")
+            stream_logger.error(f"账号信息验证失败: {error_msg}")
+            context.update_step_status("step1", TaskStepStatus.FAILED, error_msg)
+            await report_progress(context.task_id, "STEP1", "FAILED", error_msg)
             return Step1Result(success=False, error_code="INVALID_ACCOUNT",
-                             message=validation.error_msg)
+                             message=error_msg)
 
         if check_cancel():
             return Step1Result(success=False, error_code="CANCELLED", message="任务被取消")
@@ -169,8 +180,11 @@ async def _get_microsoft_token(
     """
     获取微软访问令牌
 
-    使用ROPC（Resource Owner Password Credentials）流程
-    绕过微软设备代码登录窗口
+    使用MSAL设备码认证流程：
+    1. 优先检查缓存的Refresh Token
+    2. 如果有Refresh Token，自动刷新获取新Token（无感登录）
+    3. 如果没有，使用设备码认证，等待用户手动验证
+    4. 自动保存Refresh Token到持久化存储
 
     参数：
     - context: 任务上下文
@@ -181,32 +195,38 @@ async def _get_microsoft_token(
     - MicrosoftTokens或None
     """
     try:
-        from ..auth.microsoft_auth import MicrosoftAuthenticator
+        from ..auth.microsoft_auth_msal import MicrosoftMsalAuthenticator
 
-        authenticator = MicrosoftAuthenticator()
+        authenticator = MicrosoftMsalAuthenticator()
 
-        logger.info(f"开始微软账号认证: {context.streaming_account_email}")
-        stream_logger.info(f"开始微软账号认证")
+        logger.info(f"开始微软账号MSAL认证: {context.streaming_account_email}")
+        stream_logger.info(f"开始微软账号MSAL认证（设备码流程）")
 
+        # 检查已存储的账号
+        stored_accounts = MicrosoftMsalAuthenticator.get_stored_accounts()
+        if context.streaming_account_email in stored_accounts:
+            logger.info(f"发现已存储的Refresh Token，将自动刷新...")
+            stream_logger.info(f"发现已存储的Refresh Token，将自动刷新...")
+
+        # 执行认证（优先使用Refresh Token，失败则回退到设备码认证）
+        # 传递密码以启用浏览器自动化登录
         result = await authenticator.login_with_credentials(
             email=context.streaming_account_email,
             password=context.streaming_account_password
         )
 
-        await authenticator.close()
-
         if result.success:
-            logger.info(f"微软账号认证成功")
-            stream_logger.info(f"微软账号认证成功")
+            logger.info(f"微软账号MSAL认证成功")
+            stream_logger.info(f"微软账号MSAL认证成功")
             return result.microsoft_tokens
         else:
-            logger.error(f"微软账号认证失败: {result.message}")
-            stream_logger.error(f"微软账号认证失败: {result.message}")
+            logger.error(f"微软账号MSAL认证失败: {result.message}, 错误码: {result.error_code}")
+            stream_logger.error(f"微软账号MSAL认证失败: {result.message}")
             return None
 
     except Exception as e:
-        logger.error(f"获取Microsoft Token异常: {e}")
-        stream_logger.error(f"获取Microsoft Token异常: {e}")
+        logger.error(f"获取Microsoft Token异常: {e}", exc_info=True)
+        stream_logger.error(f"获取Microsoft Token异常: {e}", exc_info=True)
         return None
 
 
@@ -229,15 +249,14 @@ async def _get_xbox_live_token(
     - XboxLiveTokens或None
     """
     try:
-        from ..auth.microsoft_auth import MicrosoftAuthenticator
+        from ..auth.microsoft_auth_msal import XboxLiveClient
 
-        authenticator = MicrosoftAuthenticator()
-        authenticator._microsoft_tokens = microsoft_tokens
+        xbox_client = XboxLiveClient()
 
         logger.info("开始获取Xbox Live Token")
         stream_logger.info("开始获取Xbox Live Token")
 
-        xbox_tokens = await authenticator._get_xbox_tokens(microsoft_tokens.access_token)
+        xbox_tokens = await xbox_client.get_xbox_tokens(microsoft_tokens.access_token)
 
         if xbox_tokens:
             logger.info(f"Xbox Live Token获取成功, uhs: {xbox_tokens.user_hash}")
@@ -249,6 +268,6 @@ async def _get_xbox_live_token(
         return xbox_tokens
 
     except Exception as e:
-        logger.error(f"获取Xbox Live Token异常: {e}")
-        stream_logger.error(f"获取Xbox Live Token异常: {e}")
+        logger.error(f"获取Xbox Live Token异常: {e}", exc_info=True)
+        stream_logger.error(f"获取Xbox Live Token异常: {e}", exc_info=True)
         return None

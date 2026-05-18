@@ -11,6 +11,7 @@ import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.service.TaskService;
 import com.bend.platform.service.TaskStateMachine;
+import com.bend.platform.service.XboxHostService;
 import com.bend.platform.util.DataSecurityUtil;
 import com.bend.platform.util.UserContext;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
@@ -56,6 +57,7 @@ public class TaskServiceImpl implements TaskService {
     private final TaskMapper taskMapper;
     private final TaskStateMachine stateMachine;
     private final DataSecurityUtil dataSecurityUtil;
+    private final XboxHostService xboxHostService;
 
     /**
      * 创建任务
@@ -106,6 +108,13 @@ public class TaskServiceImpl implements TaskService {
         Task task = taskMapper.selectById(id);
         if (task != null) {
             dataSecurityUtil.validateMerchantAccess(task.getMerchantId(), "Task");
+            if (StringUtils.hasText(task.getXboxHostId())) {
+                var xboxHost = xboxHostService.findById(task.getXboxHostId());
+                if (xboxHost != null) {
+                    task.setXboxHostName(xboxHost.getName());
+                    task.setXboxHostIp(xboxHost.getIpAddress());
+                }
+            }
         }
         return task;
     }
@@ -603,6 +612,14 @@ public class TaskServiceImpl implements TaskService {
         wrapper.eq(Task::getStreamingAccountId, streamingAccountId)
                .orderByDesc(Task::getCreatedTime);
         return taskMapper.selectList(wrapper);
+    }
+
+    @Override
+    public boolean hasRunningTask(String streamingAccountId) {
+        LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Task::getStreamingAccountId, streamingAccountId)
+               .in(Task::getStatus, "pending", "running");
+        return taskMapper.exists(wrapper);
     }
 
     /**

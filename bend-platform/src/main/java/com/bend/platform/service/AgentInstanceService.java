@@ -17,6 +17,8 @@ public interface AgentInstanceService {
 
     AgentInstance findByAgentId(String agentId);
 
+    AgentInstance findByAgentIdIncludeDeleted(String agentId);
+
     AgentInstance findByRegistrationCode(String registrationCode);
 
     List<AgentInstance> findAll();
@@ -49,5 +51,15 @@ public interface AgentInstanceService {
 
     void delete(String id);
 
+    void deleteByAgentId(String agentId);
+
+    int cleanupUninstalled(String merchantId);
+
+    int cleanupOffline(int offlineMinutes, String merchantId);
+
+    int batchDelete(List<String> agentIds);
+
     void offlineByTimeout(int minutes);
+
+    List<AgentInstance> findAllOnline();
 }

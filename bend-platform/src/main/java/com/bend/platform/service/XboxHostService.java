@@ -127,4 +127,24 @@ public interface XboxHostService {
      * @return Xbox主机列表
      */
     List<XboxHost> findByBoundStreamingAccountId(String streamingAccountId);
+
+    /**
+     * 根据IP地址查询主机
+     *
+     * @param ipAddress IP地址
+     * @return 主机实体，不存在返回null
+     */
+    XboxHost findByIpAddress(String ipAddress);
+
+    /**
+     * 创建或更新Xbox主机（用于发现功能）
+     * 如果xboxId已存在则更新，否则创建新主机
+     *
+     * @param merchantId 商户ID
+     * @param xboxId     Xbox主机ID
+     * @param name       主机名称
+     * @param ipAddress  IP地址
+     * @return 创建或更新的主机实体
+     */
+    XboxHost createOrUpdate(String merchantId, String xboxId, String name, String ipAddress);
 }

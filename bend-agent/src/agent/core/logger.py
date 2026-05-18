@@ -16,10 +16,43 @@ Logging configuration for Bend Agent
 import os
 import logging
 import sys
+import json
 from logging.handlers import RotatingFileHandler
-from pythonjsonlogger import jsonlogger
 
 from .paths import get_logs_dir_fallback
+
+
+class CustomJsonFormatter(logging.Formatter):
+    """
+    自定义JSON日志格式化器
+
+    功能说明：
+    - 将日志记录格式化为JSON格式
+    - 不转义Unicode字符（保持中文可读）
+    - 支持自定义日期格式
+    """
+
+    def __init__(self, datefmt: str = '%Y-%m-%d %H:%M:%S'):
+        super().__init__()
+        self.datefmt = datefmt
+
+    def format(self, record: logging.LogRecord) -> str:
+        """
+        格式化日志记录为JSON字符串
+
+        参数说明：
+        - record: 日志记录对象
+
+        返回值：
+        - JSON格式的日志字符串
+        """
+        log_entry = {
+            'asctime': self.formatTime(record, self.datefmt),
+            'name': record.name,
+            'levelname': record.levelname,
+            'message': record.getMessage()
+        }
+        return json.dumps(log_entry, ensure_ascii=False, separators=(', ', ': '))
 
 
 class AgentLogger:
@@ -65,11 +98,8 @@ class AgentLogger:
         logger.setLevel(getattr(logging, level.upper(), logging.INFO))
         logger.handlers.clear()  # 清除默认处理器
 
-        # 配置JSON格式
-        formatter = jsonlogger.JsonFormatter(
-            '%(asctime)s %(name)s %(levelname)s %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        # 配置JSON格式（使用自定义格式化器，不转义Unicode）
+        formatter = CustomJsonFormatter(datefmt='%Y-%m-%d %H:%M:%S')
 
         # 控制台处理器 - 输出到stdout
         console_handler = logging.StreamHandler(sys.stdout)

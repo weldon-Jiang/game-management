@@ -42,6 +42,10 @@ Thumbs.db
 logs/
 *.log
 
+# Runtime data
+tokens/
+*.json
+
 # Build artifacts
 obfuscated/
 *.spec

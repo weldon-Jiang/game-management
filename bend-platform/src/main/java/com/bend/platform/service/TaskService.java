@@ -229,6 +229,14 @@ public interface TaskService {
     List<Task> findByStreamingAccountId(String streamingAccountId);
 
     /**
+     * 检查流媒体账号是否有运行中的任务
+     *
+     * @param streamingAccountId 流媒体账号ID
+     * @return 是否有运行中的任务
+     */
+    boolean hasRunningTask(String streamingAccountId);
+
+    /**
      * 查询卡住的任务
      *
      * <p>查找运行时间超过指定阈值但仍未完成的任务。

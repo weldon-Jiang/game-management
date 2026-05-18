@@ -14,6 +14,7 @@ import com.bend.platform.service.XboxHostService;
 import com.bend.platform.util.DataSecurityUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -239,8 +240,8 @@ public class XboxHostServiceImpl implements XboxHostService {
         // 校验商户是否有效
         merchantService.validateMerchantActive(host.getMerchantId());
 
-        xboxHostMapper.deleteById(id);
-        log.info("删除Xbox主机 - ID: {}", id);
+        xboxHostMapper.physicalDeleteById(id);
+        log.info("物理删除Xbox主机 - ID: {}", id);
     }
 
     private boolean isValidStatus(String status) {
@@ -260,5 +261,53 @@ public class XboxHostServiceImpl implements XboxHostService {
         wrapper.eq(XboxHost::getBoundStreamingAccountId, streamingAccountId);
         wrapper.eq(XboxHost::getStatus, "online");
         return xboxHostMapper.selectList(wrapper);
+    }
+
+    @Override
+    public XboxHost findByIpAddress(String ipAddress) {
+        if (ipAddress == null || ipAddress.isEmpty()) {
+            return null;
+        }
+        LambdaQueryWrapper<XboxHost> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(XboxHost::getIpAddress, ipAddress);
+        return xboxHostMapper.selectOne(wrapper);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public XboxHost createOrUpdate(String merchantId, String xboxId, String name, String ipAddress) {
+        merchantService.validateMerchantActive(merchantId);
+
+        XboxHost host = findByXboxId(xboxId);
+        
+        if (host != null) {
+            updateHostInfo(host, name, ipAddress);
+            xboxHostMapper.updateById(host);
+            log.info("更新已发现的Xbox主机 - ID: {}, XboxID: {}", host.getId(), xboxId);
+            return host;
+        }
+
+        host = new XboxHost();
+        host.setMerchantId(merchantId);
+        host.setXboxId(xboxId);
+        host.setName(StringUtils.trimToEmpty(name));
+        host.setIpAddress(ipAddress);
+        host.setStatus("idle");
+        host.setLastSeenTime(LocalDateTime.now());
+
+        xboxHostMapper.insert(host);
+        log.info("创建新发现的Xbox主机 - ID: {}, XboxID: {}", host.getId(), xboxId);
+        return host;
+    }
+
+    private void updateHostInfo(XboxHost host, String name, String ipAddress) {
+        if (StringUtils.isNotBlank(name)) {
+            host.setName(name.trim());
+        }
+        if (ipAddress != null && !ipAddress.isEmpty()) {
+            host.setIpAddress(ipAddress);
+        }
+        host.setStatus("idle");
+        host.setLastSeenTime(LocalDateTime.now());
     }
 }

@@ -23,7 +23,8 @@ import random
 from typing import Callable, Optional, Dict, Any, List
 
 from ..core.logger import get_logger
-from .task_context import AgentTaskContext, Step2Result, XboxInfo, TaskStepStatus
+from ..core.account_logger import get_stream_logger
+from ..task.task_context import AgentTaskContext, Step2Result, XboxInfo, TaskStepStatus
 
 
 async def step2_execute_streaming(
@@ -51,7 +52,9 @@ async def step2_execute_streaming(
     - Step2Result: 包含Xbox连接结果的Step2Result
     """
     logger = get_logger(f'step2_streaming_{context.task_id}')
+    stream_logger = get_stream_logger(context.streaming_account_email)
     logger.info("=== 步骤二：开始Xbox串流连接 ===")
+    stream_logger.info("=== 开始Xbox串流连接 ===")
 
     context.update_step_status("step2", TaskStepStatus.RUNNING, "正在匹配Xbox主机...")
     await report_progress(context.task_id, "STEP2", "RUNNING", "正在匹配Xbox主机...")
@@ -59,13 +62,15 @@ async def step2_execute_streaming(
     try:
         if check_cancel():
             logger.info("任务被取消，步骤二终止")
+            stream_logger.info("任务被取消")
             context.update_step_status("step2", TaskStepStatus.SKIPPED, "任务被取消")
             return Step2Result(success=False, error_code="CANCELLED", message="任务被取消")
 
-        match_result = await _match_xbox_host(context, logger, check_cancel)
+        match_result = await _match_xbox_host(context, logger, stream_logger, check_cancel)
 
         if not match_result.success:
             logger.error(f"Xbox主机匹配失败: {match_result.message}")
+            stream_logger.error(f"Xbox主机匹配失败: {match_result.message}")
             context.update_step_status("step2", TaskStepStatus.FAILED, match_result.message)
             await report_progress(context.task_id, "STEP2", "FAILED", match_result.message)
             return Step2Result(success=False, error_code="XBOX_MATCH_FAILED",
@@ -75,18 +80,22 @@ async def step2_execute_streaming(
         logger.info(f"Xbox匹配成功: {match_result.xbox_info.name} "
                    f"({match_result.xbox_info.ip_address}), "
                    f"匹配方式: {match_result.match_type}")
+        stream_logger.info(f"Xbox匹配成功: {match_result.xbox_info.name} "
+                          f"({match_result.xbox_info.ip_address})")
 
         if check_cancel():
             return Step2Result(success=False, error_code="CANCELLED", message="任务被取消")
 
         context.update_step_status("step2", TaskStepStatus.RUNNING,
                                   f"正在连接{context.current_xbox.name}...")
+        stream_logger.info(f"正在连接Xbox: {context.current_xbox.name}")
 
-        connect_success = await _connect_to_xbox(context, logger)
+        connect_success = await _connect_to_xbox(context, logger, stream_logger)
 
         if not connect_success:
             error_msg = f"连接Xbox失败: {context.current_xbox.ip_address}"
             logger.error(error_msg)
+            stream_logger.error(error_msg)
             context.update_step_status("step2", TaskStepStatus.FAILED, error_msg)
             await report_progress(context.task_id, "STEP2", "FAILED", error_msg)
             return Step2Result(success=False, error_code="XBOX_CONNECT_FAILED",
@@ -94,6 +103,7 @@ async def step2_execute_streaming(
 
         success_msg = f"Xbox串流连接成功: {context.current_xbox.name}"
         logger.info(success_msg)
+        stream_logger.info(success_msg)
         context.update_step_status("step2", TaskStepStatus.COMPLETED, success_msg)
         await report_progress(context.task_id, "STEP2", "COMPLETED", success_msg)
 
@@ -101,12 +111,14 @@ async def step2_execute_streaming(
 
     except asyncio.CancelledError:
         logger.info("步骤二被取消")
+        stream_logger.info("步骤二被取消")
         context.update_step_status("step2", TaskStepStatus.SKIPPED, "任务被取消")
         return Step2Result(success=False, error_code="CANCELLED", message="任务被取消")
 
     except Exception as e:
         error_msg = f"步骤二执行异常: {str(e)}"
         logger.error(f"{error_msg}", exc_info=True)
+        stream_logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step2", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP2", "FAILED", error_msg)
         return Step2Result(success=False, error_code="EXCEPTION", message=error_msg)
@@ -115,6 +127,7 @@ async def step2_execute_streaming(
 async def _match_xbox_host(
     context: AgentTaskContext,
     logger,
+    stream_logger,
     check_cancel: Callable[[], bool]
 ) -> Dict[str, Any]:
     """
@@ -127,7 +140,8 @@ async def _match_xbox_host(
 
     参数：
     - context: 任务上下文
-    - logger: 日志记录器
+    - logger: 主日志记录器
+    - stream_logger: 流媒体账号日志记录器
     - check_cancel: 取消检查函数
 
     返回：
@@ -136,6 +150,7 @@ async def _match_xbox_host(
     if context.assigned_xbox:
         logger.info(f"使用指定的Xbox主机: {context.assigned_xbox.name} "
                    f"({context.assigned_xbox.ip_address})")
+        stream_logger.info(f"使用指定的Xbox主机: {context.assigned_xbox.name}")
 
         online = await _test_xbox_connection(context.assigned_xbox.ip_address, logger)
         if online:
@@ -154,6 +169,7 @@ async def _match_xbox_host(
             }
 
     logger.info("未指定Xbox主机，开始自动匹配...")
+    stream_logger.info("未指定Xbox主机，开始自动匹配...")
     discovered_xboxes = await _discover_xbox_devices(logger)
 
     if not discovered_xboxes:
@@ -165,10 +181,12 @@ async def _match_xbox_host(
         }
 
     logger.info(f"发现 {len(discovered_xboxes)} 个Xbox主机")
+    stream_logger.info(f"发现 {len(discovered_xboxes)} 个Xbox主机")
 
     if len(discovered_xboxes) == 1:
         selected = discovered_xboxes[0]
         logger.info(f"只有一台Xbox，直接选择: {selected.name}")
+        stream_logger.info(f"只有一台Xbox，直接选择: {selected.name}")
         return {
             "success": True,
             "xbox_info": selected,
@@ -178,6 +196,7 @@ async def _match_xbox_host(
 
     selected = random.choice(discovered_xboxes)
     logger.info(f"多台Xbox，随机选择: {selected.name} ({selected.ip_address})")
+    stream_logger.info(f"多台Xbox，随机选择: {selected.name}")
     return {
         "success": True,
         "xbox_info": selected,
@@ -249,13 +268,14 @@ async def _test_xbox_connection(ip_address: str, logger) -> bool:
         return False
 
 
-async def _connect_to_xbox(context: AgentTaskContext, logger) -> bool:
+async def _connect_to_xbox(context: AgentTaskContext, logger, stream_logger) -> bool:
     """
     连接到Xbox主机
 
     参数：
     - context: 任务上下文
-    - logger: 日志记录器
+    - logger: 主日志记录器
+    - stream_logger: 流媒体账号日志记录器
 
     返回：
     - bool: 是否成功
@@ -267,10 +287,11 @@ async def _connect_to_xbox(context: AgentTaskContext, logger) -> bool:
         context.xbox_session = xbox_controller
 
         xbox_info = context.current_xbox
-        xbox_token = context.xbox_tokens.xbox_token
+        xbox_token = context.xbox_tokens.xsts_token
         user_hash = context.xbox_tokens.user_hash
 
         logger.info(f"开始连接Xbox: {xbox_info.ip_address}")
+        stream_logger.info(f"开始连接Xbox: {xbox_info.name} ({xbox_info.ip_address})")
 
         success = await xbox_controller.connect_with_token(
             xbox_ip=xbox_info.ip_address,
@@ -280,11 +301,14 @@ async def _connect_to_xbox(context: AgentTaskContext, logger) -> bool:
 
         if success:
             logger.info(f"Xbox连接成功: {xbox_info.name}")
+            stream_logger.info(f"Xbox连接成功: {xbox_info.name}")
             return True
         else:
             logger.error(f"Xbox连接失败: {xbox_info.ip_address}")
+            stream_logger.error(f"Xbox连接失败: {xbox_info.ip_address}")
             return False
 
     except Exception as e:
         logger.error(f"连接Xbox异常: {e}")
+        stream_logger.error(f"连接Xbox异常: {e}")
         return False

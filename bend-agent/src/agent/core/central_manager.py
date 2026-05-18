@@ -52,6 +52,10 @@ class AgentInfo:
     - status: Agent当前状态（online/offline/updating等）
     - last_heartbeat: 最后一次心跳时间
     - capabilities: Agent能力列表，包含支持的视频捕获、模板匹配等功能
+    - os_type: 操作系统类型（Windows/Linux等）
+    - os_version: 操作系统版本号
+    - cpu_count: CPU核心数量
+    - max_concurrent_tasks: 最大并发任务数
     """
     agent_id: str                          # Agent唯一标识符
     agent_secret: str                      # Agent密钥
@@ -62,6 +66,10 @@ class AgentInfo:
     status: str = "offline"               # 当前状态
     last_heartbeat: Optional[datetime] = None  # 最后心跳时间
     capabilities: Optional[Dict] = None    # Agent能力列表
+    os_type: Optional[str] = None          # 操作系统类型
+    os_version: Optional[str] = None       # 操作系统版本
+    cpu_count: Optional[int] = None        # CPU核心数
+    max_concurrent_tasks: Optional[int] = None  # 最大并发任务数
 
 
 class CentralManager:
@@ -266,6 +274,9 @@ class CentralManager:
             uninstall=self._uninstall_requested,
             clear_registry=self._clear_registry_requested
         ))
+        loop = asyncio.get_event_loop()
+        if not loop.is_closed():
+            loop.stop()
 
     async def _notify_offline(self):
         """
@@ -352,6 +363,7 @@ class CentralManager:
             self.ws.on('command', self._handle_command)      # 命令处理
             self.ws.on('version_update', self._handle_version_update)  # 版本更新
             self.ws.on('automation_control', self._handle_automation_control)  # 自动化控制
+            self.ws.on('discover_xbox', self._handle_discover_xbox)  # Xbox发现指令
 
             # 启动各任务
             self._ws_task = asyncio.create_task(self.ws.listen())  # WebSocket监听
@@ -445,13 +457,39 @@ class CentralManager:
         """
         try:
             self._agent_info.port = config.get('agent.port', 8888)
+            
+            from .system_resource_detector import SystemResourceDetector
+            sys_info = SystemResourceDetector.get_system_info()
+            max_tasks = SystemResourceDetector.recommend_max_concurrent_tasks()
+            
+            self._agent_info.os_type = sys_info.get('platform')
+            self._agent_info.os_version = sys_info.get('platform_version')
+            self._agent_info.cpu_count = sys_info.get('cpu_count')
+            self._agent_info.max_concurrent_tasks = max_tasks
+            
             result = await self.api.register(
                 registration_code=self.registration_code,
                 host=self._agent_info.host,
                 port=self._agent_info.port,
-                version=self._agent_info.version
+                version=self._agent_info.version,
+                os_type=self._agent_info.os_type,
+                os_version=self._agent_info.os_version,
+                cpu_count=self._agent_info.cpu_count,
+                max_concurrent_tasks=self._agent_info.max_concurrent_tasks,
+                agent_id=self._agent_info.agent_id
             )
             if result.get('code') == 0 or result.get('code') == 200:
+                # 检查后端是否返回了新的agentSecret
+                data = result.get('data', {})
+                if data.get('agentSecret'):
+                    new_secret = data['agentSecret']
+                    self.agent_secret = new_secret
+                    # 同步更新API客户端和WSClient的secret
+                    self.api.agent_secret = new_secret
+                    self.api._headers['X-Agent-Secret'] = new_secret
+                    self.ws.agent_secret = new_secret
+                    self.logger.info("Agent secret updated from server")
+                    
                 self._agent_info.status = 'online'
                 self.logger.info(f"Agent registered successfully: {self.agent_id}")
                 return True
@@ -798,3 +836,55 @@ class CentralManager:
                 self.logger.info(f"Cancelling {running_count} running tasks")
                 task_executor.cancel_all()
             self.logger.info("Automation stopped successfully")
+
+    async def _handle_discover_xbox(self, data: Dict):
+        """
+        处理后端下发的Xbox发现指令
+
+        参数说明：
+        - data: 指令数据，包含：
+          - timestamp: 指令时间戳
+
+        功能说明：
+        - 触发局域网Xbox主机发现
+        - 将发现结果上报到平台
+        """
+        self.logger.info("Received discover_xbox command from platform")
+
+        try:
+            from ..xbox.xbox_discovery import xbox_discovery
+
+            xboxes = await xbox_discovery.discover()
+
+            xbox_list = []
+            seen_device_ids = set()
+            
+            for xbox in xboxes:
+                if xbox.device_id and xbox.device_id not in seen_device_ids:
+                    seen_device_ids.add(xbox.device_id)
+                    xbox_list.append({
+                        'device_id': xbox.device_id,
+                        'name': xbox.name,
+                        'ip_address': xbox.ip_address,
+                        'port': xbox.port,
+                        'live_id': xbox.live_id,
+                        'console_type': xbox.console_type,
+                        'firmware_version': xbox.firmware_version
+                    })
+                elif xbox.device_id:
+                    self.logger.debug(f"Skipping duplicate Xbox device: {xbox.device_id}")
+
+            await self.ws.send_xbox_discovered({
+                'xboxes': xbox_list,
+                'count': len(xbox_list)
+            })
+
+            self.logger.info(f"Xbox discovery completed, found {len(xbox_list)} unique devices")
+
+        except Exception as e:
+            self.logger.error(f"Xbox discovery failed: {e}")
+            await self.ws.send_xbox_discovered({
+                'xboxes': [],
+                'count': 0,
+                'error': str(e)
+            })

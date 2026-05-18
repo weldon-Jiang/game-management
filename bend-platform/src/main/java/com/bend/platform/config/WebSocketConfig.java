@@ -1,9 +1,10 @@
 package com.bend.platform.config;
 
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
-import org.springframework.web.socket.server.standard.SpringConfigurator;
+import org.springframework.web.socket.server.standard.ServerEndpointExporter;
 
 /**
  * WebSocket配置类
@@ -28,6 +29,14 @@ import org.springframework.web.socket.server.standard.SpringConfigurator;
 @Configuration
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
+
+    /**
+     * 注册ServerEndpointExporter，让@ServerEndpoint注解生效
+     */
+    @Bean
+    public ServerEndpointExporter serverEndpointExporter() {
+        return new ServerEndpointExporter();
+    }
 
     /**
      * 注册WebSocket处理器

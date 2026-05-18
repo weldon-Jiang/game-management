@@ -9,6 +9,10 @@
         <el-button @click="loadData">
           <el-icon><Refresh /></el-icon>
         </el-button>
+        <el-button type="success" @click="showDiscoverDialog">
+          <el-icon><Plus /></el-icon>
+          发现主机
+        </el-button>
         <el-button type="primary" @click="showAddDialog">
           <el-icon><Plus /></el-icon>
           新增主机
@@ -25,7 +29,12 @@
       >
         <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" />
         <el-table-column prop="xboxId" label="Xbox ID" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="name" label="主机名称" min-width="120" />
+        <el-table-column prop="name" label="主机名称" min-width="120">
+          <template #default="{ row }">
+            <span v-if="row.name" class="text-muted">{{ row.name }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="ipAddress" label="IP地址" width="140" />
         <el-table-column prop="macAddress" label="MAC地址" width="170">
           <template #default="{ row }">
@@ -179,16 +188,84 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 发现主机对话框 -->
+    <el-dialog
+      v-model="discoverDialogVisible"
+      title="发现Xbox主机"
+      width="650px"
+      :close-on-click-modal="false"
+    >
+      <el-form ref="discoverFormRef" :model="discoverFormData" label-width="90px" class="dialog-form">
+        <el-form-item label="选择Agent" prop="agentId">
+          <el-select
+            v-model="discoverFormData.agentId"
+            placeholder="请选择在线的Agent"
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="agent in onlineAgents"
+              :key="agent.agentId"
+              :label="`${agent.agentId} - ${agent.merchantName || '未知商户'}`"
+              :value="agent.agentId"
+            />
+          </el-select>
+        </el-form-item>
+        <div v-if="discoverStatus === 'scanning'" class="scanning-indicator">
+          <div class="scanning-content">
+            <el-icon size="18" class="scanning-icon">
+              <Refresh />
+            </el-icon>
+            <p>正在扫描局域网...</p>
+            <el-progress
+              :percentage="scanningProgress"
+              :status="scanningProgress === 100 ? 'success' : 'active'"
+              :text-inside="true"
+              stroke-width="6"
+              :show-text="false"
+              style="width: 200px; margin: 16px auto 0;"
+            />
+          </div>
+        </div>
+        <div v-else-if="discoverStatus === 'result'" class="discover-result-box">
+          <div :class="['result-icon', discoverResultData.discoveredCount > 0 ? 'success' : 'empty']">
+            <Check v-if="discoverResultData.discoveredCount > 0" :size="14" />
+            <Search v-else :size="14" />
+          </div>
+          <p class="result-message">{{ discoverResultData.message }}</p>
+        </div>
+        <div v-else class="discover-tips">
+          <el-alert
+            title="提示"
+            type="info"
+            :closable="false"
+          >
+            <p>点击确定后，系统将向指定Agent发送发现指令。</p>
+            <p>Agent会扫描局域网内的Xbox主机并自动上报结果。</p>
+          </el-alert>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="handleDiscoverClose">取消</el-button>
+        <el-button v-if="discoverStatus !== 'scanning'" type="success" :loading="discoverLoading" @click="handleDiscover">
+          {{ discoverStatus === 'result' ? '再次扫描' : '开始发现' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Plus, Refresh, Check, Search } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { xboxApi, streamingApi, merchantApi } from '@/api'
+import { xboxApi, streamingApi, merchantApi, agentApi } from '@/api'
 import { getXboxHostStatusText, getXboxHostStatusType } from '@/utils/constants'
+import { connectStomp, subscribeToTopic, getStompClient } from '@/utils/stompClient'
+
+let discoverySubscription = null
 
 const authStore = useAuthStore()
 
@@ -233,11 +310,15 @@ const pagination = reactive({
  */
 const dialogVisible = ref(false)
 const bindDialogVisible = ref(false)
+const discoverDialogVisible = ref(false)
 const dialogType = ref('add')
 const formRef = ref(null)
 const bindFormRef = ref(null)
+const discoverFormRef = ref(null)
 const currentHost = ref(null)
 const availableAccounts = ref([])
+const onlineAgents = ref([])
+const discoverLoading = ref(false)
 
 /**
  * 表单数据
@@ -280,6 +361,39 @@ const formRules = {
 const bindFormData = reactive({
   streamingAccountId: '',
   gamertag: ''
+})
+
+/**
+ * 发现表单数据
+ */
+const discoverFormData = reactive({
+  agentId: ''
+})
+
+/**
+ * 发现状态: select | scanning | result
+ */
+const discoverStatus = ref('select')
+
+/**
+ * 扫描进度
+ */
+const scanningProgress = ref(0)
+
+/**
+ * 扫描进度定时器
+ */
+let scanningTimer = null
+
+/**
+ * 发现结果数据
+ */
+const discoverResultData = reactive({
+  discoveredCount: 0,
+  message: '',
+  xboxes: [],
+  agentId: '',
+  agentName: ''
 })
 
 // ==================== 方法定义 ====================
@@ -466,6 +580,221 @@ const handleDelete = async (row) => {
   }
 }
 
+/**
+ * 加载在线Agent列表
+ */
+const loadOnlineAgents = async () => {
+  try {
+    const res = await agentApi.listOnline()
+    onlineAgents.value = res.data || []
+  } catch (error) {
+    console.error('Failed to load online agents:', error)
+    onlineAgents.value = []
+  }
+}
+
+/**
+ * 显示发现主机对话框
+ */
+const showDiscoverDialog = async () => {
+  discoverFormData.agentId = ''
+  await loadOnlineAgents()
+  
+  if (onlineAgents.value.length === 0) {
+    ElMessage.warning('当前没有在线的Agent，请确保Agent服务已启动并连接')
+    return
+  }
+  
+  discoverDialogVisible.value = true
+}
+
+/**
+ * 初始化WebSocket连接并订阅Xbox发现消息
+ */
+const initWebSocket = async () => {
+  try {
+    await connectStomp()
+    console.log('WebSocket connected successfully for Xbox discovery')
+    
+    if (discoverySubscription) {
+      discoverySubscription.unsubscribe()
+    }
+    
+    discoverySubscription = await subscribeToTopic('/topic/admins/xbox_discovered', (data) => {
+      console.log('Xbox discovery result received:', data)
+      
+      if (discoverStatus.value === 'scanning') {
+        handleDiscoverResult(data)
+      } else {
+        if (data.message) {
+          ElMessage.info(data.message)
+        }
+        
+        if (data.discoveredCount !== undefined) {
+          loadData()
+        }
+      }
+    })
+  } catch (error) {
+    console.error('Failed to connect WebSocket:', error)
+  }
+}
+
+/**
+ * 取消订阅Xbox发现消息
+ */
+const unsubscribeXboxDiscovery = () => {
+  if (discoverySubscription) {
+    discoverySubscription.unsubscribe()
+    discoverySubscription = null
+    console.log('Unsubscribed from Xbox discovery topic')
+  }
+}
+
+/**
+ * 发现超时定时器
+ */
+let discoverTimeoutTimer = null
+
+/**
+ * 检查WebSocket连接状态
+ */
+const checkWebSocketConnected = () => {
+  return new Promise((resolve) => {
+    const client = getStompClient()
+    if (client && client.connected) {
+      resolve(true)
+    } else {
+      // 尝试重新连接
+      initWebSocket().then(() => {
+        const newClient = getStompClient()
+        resolve(newClient && newClient.connected)
+      }).catch(() => {
+        resolve(false)
+      })
+    }
+  })
+}
+
+/**
+ * 处理发现主机
+ */
+const handleDiscover = async () => {
+  if (!discoverFormData.agentId) {
+    ElMessage.warning('请选择要执行发现的Agent')
+    return
+  }
+
+  if (discoverStatus.value === 'result') {
+    discoverStatus.value = 'select'
+    return
+  }
+
+  // 检查WebSocket连接状态
+  const isConnected = await checkWebSocketConnected()
+  if (!isConnected) {
+    ElMessage.error('WebSocket连接失败，请刷新页面重试')
+    return
+  }
+
+  discoverLoading.value = true
+  try {
+    await xboxApi.discover(discoverFormData.agentId)
+    
+    discoverStatus.value = 'scanning'
+    scanningProgress.value = 0
+    
+    startScanningAnimation()
+    
+    // 设置超时处理（30秒，考虑到SSDP发现和网络扫描可能需要较长时间）
+    if (discoverTimeoutTimer) {
+      clearTimeout(discoverTimeoutTimer)
+    }
+    discoverTimeoutTimer = setTimeout(() => {
+      if (discoverStatus.value === 'scanning') {
+        ElMessage.warning('发现超时，请检查Agent连接并重试')
+        discoverStatus.value = 'result'
+        discoverResultData.discoveredCount = 0
+        discoverResultData.message = '发现超时，请检查Agent连接并重试'
+        stopScanningAnimation()
+      }
+    }, 30000)
+    
+    discoverLoading.value = false
+  } catch (error) {
+    discoverLoading.value = false
+    discoverStatus.value = 'select'
+    ElMessage.error('发起发现请求失败，请重试')
+  }
+}
+
+/**
+ * 启动扫描动画
+ */
+const startScanningAnimation = () => {
+  if (scanningTimer) {
+    clearInterval(scanningTimer)
+  }
+  
+  scanningProgress.value = 0
+  const increment = 2
+  scanningTimer = setInterval(() => {
+    if (scanningProgress.value < 95) {
+      scanningProgress.value += increment
+    }
+  }, 100)
+}
+
+/**
+ * 停止扫描动画
+ */
+const stopScanningAnimation = () => {
+  if (scanningTimer) {
+    clearInterval(scanningTimer)
+    scanningTimer = null
+  }
+  scanningProgress.value = 100
+}
+
+/**
+ * 处理发现结果
+ * @param {Object} data - 发现结果数据
+ */
+const handleDiscoverResult = (data) => {
+  // 清除超时定时器
+  if (discoverTimeoutTimer) {
+    clearTimeout(discoverTimeoutTimer)
+    discoverTimeoutTimer = null
+  }
+  
+  stopScanningAnimation()
+  
+  discoverResultData.discoveredCount = data.discoveredCount || 0
+  discoverResultData.message = data.message || '发现完成'
+  discoverResultData.xboxes = data.xboxes || []
+  discoverResultData.agentId = data.agentId || ''
+  discoverResultData.agentName = data.agentName || ''
+  
+  discoverStatus.value = 'result'
+  
+  loadData()
+}
+
+/**
+ * 关闭发现对话框
+ */
+const handleDiscoverClose = () => {
+  // 清除超时定时器
+  if (discoverTimeoutTimer) {
+    clearTimeout(discoverTimeoutTimer)
+    discoverTimeoutTimer = null
+  }
+  
+  stopScanningAnimation()
+  discoverStatus.value = 'select'
+  discoverDialogVisible.value = false
+}
+
 // ==================== 工具函数 ====================
 
 /**
@@ -490,6 +819,11 @@ const formatDate = (dateStr) => {
 onMounted(() => {
   loadMerchants()
   loadData()
+  initWebSocket()
+})
+
+onUnmounted(() => {
+  unsubscribeXboxDiscovery()
 })
 </script>
 
@@ -629,5 +963,69 @@ onMounted(() => {
 
 :deep(.el-table__body-wrapper .el-table__row:hover td.el-table__cell) {
   background-color: #1a1a2e !important;
+}
+
+/* 发现主机对话框样式 */
+.scanning-indicator {
+  margin-top: 20px;
+}
+
+.scanning-content {
+  text-align: center;
+  padding: 20px;
+}
+
+.scanning-icon {
+  animation: spin 2s linear infinite;
+  color: #6366f1;
+  display: block;
+  margin: 0 auto 12px;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scanning-content p {
+  color: #b0b0b0;
+  margin: 0;
+}
+
+.discover-result-box {
+  text-align: center;
+  padding: 20px;
+  margin-top: 16px;
+}
+
+.result-icon {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 12px;
+}
+
+.result-icon.success {
+  color: #22c55e;
+}
+
+.result-icon.empty {
+  color: #6b7280;
+}
+
+.result-message {
+  color: #b0b0b0;
+  margin: 0;
+  font-size: 14px;
+}
+
+.discover-tips {
+  margin-top: 16px;
 }
 </style>

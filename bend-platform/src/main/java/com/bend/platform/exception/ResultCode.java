@@ -297,7 +297,8 @@ public interface ResultCode {
         BIND_STREAMING_FAILED(19008, "绑定流媒体账号失败"),
         UNBIND_STREAMING_FAILED(19009, "解绑流媒体账号失败"),
         BIND_TASK_FAILED(19010, "绑定任务失败"),
-        UNBIND_TASK_FAILED(19011, "解绑任务失败");
+        UNBIND_TASK_FAILED(19011, "解绑任务失败"),
+        NOT_ONLINE(19012, "Agent实例不在线");
 
         private final int code;
         private final String message;

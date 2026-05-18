@@ -89,20 +89,9 @@ public class AgentInstance {
     private String status;
 
     /**
-     * 当前流媒体账号ID
-     * Agent当前正在控制的流媒体账号
-     */
-    private String currentStreamingId;
-
-    /**
-     * 当前任务ID
-     * Agent当前正在执行的任务
-     */
-    private String currentTaskId;
-
-    /**
      * 最大并发任务数
      * Agent同时执行的最大任务数量
+     * 根据系统资源自动计算
      */
     private Integer maxConcurrentTasks;
 
@@ -124,6 +113,24 @@ public class AgentInstance {
      * 记录Agent被卸载的原因
      */
     private String uninstallReason;
+
+    /**
+     * 操作系统类型
+     * Agent所在机器的操作系统类型（如Windows、Linux）
+     */
+    private String osType;
+
+    /**
+     * 操作系统版本
+     * Agent所在机器的操作系统版本号
+     */
+    private String osVersion;
+
+    /**
+     * CPU核心数
+     * Agent所在机器的CPU核心数量
+     */
+    private Integer cpuCount;
 
     /**
      * 创建时间

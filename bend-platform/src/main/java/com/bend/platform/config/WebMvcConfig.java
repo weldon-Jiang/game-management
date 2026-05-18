@@ -23,10 +23,16 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
                         "/api/auth/**",
-                        "/api/agents/**",
+                        "/api/agents/register",
+                        "/api/agents/heartbeat",
+                        "/api/agents/uninstall",
+                        "/api/agents/offline",
+                        "/api/agents/status",
                         "/api/agent-callback/**",
                         "/api/monitoring/**",
-                        "/api/registration-codes/**",
+                        "/api/registration-codes/validate/**",
+                        "/api/registration-codes/check/**",
+                        "/api/registration-codes/activate/**",
                         "/api/test/**"
                 );
     }

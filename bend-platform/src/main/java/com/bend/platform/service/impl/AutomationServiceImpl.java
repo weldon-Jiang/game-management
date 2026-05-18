@@ -64,6 +64,17 @@ public class AutomationServiceImpl implements AutomationService {
                 continue;
             }
 
+            if (taskService.hasRunningTask(streamingAccountId)) {
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("streamingAccountId", streamingAccountId);
+                errorResult.put("streamingAccountName", streamingAccount.getName());
+                errorResult.put("success", false);
+                errorResult.put("message", "该流媒体账号已有运行中的任务，请先停止当前任务");
+                results.add(errorResult);
+                log.warn("自动化启动失败 - 流媒体账号已有运行中的任务: {}", streamingAccount.getName());
+                continue;
+            }
+
             List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
             List<XboxHost> xboxHosts = xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
 
@@ -134,6 +145,10 @@ public class AutomationServiceImpl implements AutomationService {
         response.put("total", results.size());
         response.put("taskIds", createdTaskIds);
         response.put("results", results);
+        
+        boolean allFailed = results.stream().allMatch(r -> !Boolean.TRUE.equals(r.get("success")));
+        response.put("success", !allFailed && !createdTaskIds.isEmpty());
+        response.put("message", createdTaskIds.isEmpty() ? "没有成功创建任何任务" : "成功创建" + createdTaskIds.size() + "个任务");
 
         return response;
     }

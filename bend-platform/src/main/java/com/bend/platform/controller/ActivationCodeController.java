@@ -2,6 +2,7 @@ package com.bend.platform.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.bend.platform.dto.ActivationCodeDto;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.ActivationCode;
 import com.bend.platform.entity.ActivationCodeBatch;
@@ -21,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
+import org.springframework.beans.BeanUtils;
 
 /**
  * 激活码管理控制器
@@ -70,7 +72,7 @@ public class ActivationCodeController {
      * - 普通商户只返回自己商户的激活码
      */
     @GetMapping("/list")
-    public ApiResponse<IPage<ActivationCode>> listCodes(
+    public ApiResponse<IPage<ActivationCodeDto>> listCodes(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
             @RequestParam(required = false) String status) {
@@ -81,7 +83,45 @@ public class ActivationCodeController {
         } else {
             pageResult = activationCodeService.pageByMerchant(merchantId, pageNum, pageSize, status);
         }
-        return ApiResponse.success(pageResult);
+        IPage<ActivationCodeDto> dtoPage = convertToDtoPage(pageResult);
+        return ApiResponse.success(dtoPage);
+    }
+
+    private IPage<ActivationCodeDto> convertToDtoPage(IPage<ActivationCode> page) {
+        List<ActivationCode> records = page.getRecords();
+        if (records == null || records.isEmpty()) {
+            return new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        }
+
+        Set<String> merchantIds = new HashSet<>();
+        for (ActivationCode code : records) {
+            if (code.getMerchantId() != null) {
+                merchantIds.add(code.getMerchantId());
+            }
+        }
+
+        Map<String, String> merchantNameMap = new HashMap<>();
+        if (!merchantIds.isEmpty()) {
+            List<Merchant> merchants = merchantMapper.selectList(
+                new LambdaQueryWrapper<Merchant>().in(Merchant::getId, merchantIds)
+            );
+            for (Merchant merchant : merchants) {
+                merchantNameMap.put(merchant.getId(), merchant.getName());
+            }
+        }
+
+        List<ActivationCodeDto> dtos = new ArrayList<>();
+        for (ActivationCode code : records) {
+            ActivationCodeDto dto = new ActivationCodeDto();
+            BeanUtils.copyProperties(code, dto);
+            dto.setMerchantName(merchantNameMap.get(code.getMerchantId()));
+            dtos.add(dto);
+        }
+
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<ActivationCodeDto> resultPage =
+            new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        resultPage.setRecords(dtos);
+        return resultPage;
     }
 
     /**

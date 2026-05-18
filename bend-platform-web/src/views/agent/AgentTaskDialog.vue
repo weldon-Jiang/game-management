@@ -145,6 +145,9 @@
             <el-descriptions-item label="当前账号" :span="2">
               {{ selectedTask.currentGameAccount || '-' }}
             </el-descriptions-item>
+            <el-descriptions-item label="Xbox主机" :span="2">
+              {{ selectedTask.xboxHostName || selectedTask.xboxHostIp || '-' }}
+            </el-descriptions-item>
             <el-descriptions-item label="当前状态" :span="2">
               <span class="task-message">{{ selectedTask.message || '-' }}</span>
             </el-descriptions-item>
@@ -155,6 +158,62 @@
         </div>
         <div v-else class="empty-tip">
           请在运行中任务选择一个任务查看详情
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="子任务（游戏账号）" name="subtasks">
+        <div v-if="selectedTask" class="subtask-container">
+          <el-table :data="gameAccountStatuses" v-loading="subtaskLoading" max-height="350">
+            <el-table-column prop="gameAccountName" label="游戏账号" min-width="150">
+              <template #default="{ row }">
+                <span>{{ row.gameAccountName || row.gameAccountId }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag :type="getSubtaskStatusType(row.status)" size="small">
+                  {{ getSubtaskStatusText(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="completedCount" label="完成场次" width="100" align="center">
+              <template #default="{ row }">
+                <span>{{ row.completedCount || 0 }} / {{ row.totalMatches || 0 }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="failedCount" label="失败场次" width="90" align="center">
+              <template #default="{ row }">
+                <span :class="{ 'failed-count': row.failedCount > 0 }">{{ row.failedCount || 0 }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="lastMatchTime" label="最后比赛时间" width="160">
+              <template #default="{ row }">
+                {{ formatDate(row.lastMatchTime) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="startedTime" label="开始时间" width="160">
+              <template #default="{ row }">
+                {{ formatDate(row.startedTime) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="completedTime" label="完成时间" width="160">
+              <template #default="{ row }">
+                {{ formatDate(row.completedTime) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="errorMessage" label="错误信息" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.errorMessage" class="error-message">{{ row.errorMessage }}</span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-if="!subtaskLoading && gameAccountStatuses.length === 0" class="empty-tip">
+            暂无子任务数据
+          </div>
+        </div>
+        <div v-else class="empty-tip">
+          请先选择一个任务查看子任务
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -190,9 +249,11 @@ const emit = defineEmits(['update:visible'])
 const dialogVisible = ref(false)
 const activeTab = ref('running')
 const loading = ref(false)
+const subtaskLoading = ref(false)
 const runningTasks = ref([])
 const allTasks = ref([])
 const selectedTask = ref(null)
+const gameAccountStatuses = ref([])
 let wsConnection = null
 
 watch(() => props.visible, (val) => {
@@ -221,6 +282,18 @@ watch(runningTasks, (tasks) => {
   }
 }, { deep: true })
 
+watch(selectedTask, (task) => {
+  if (task && activeTab.value === 'subtasks') {
+    loadGameAccountStatuses()
+  }
+})
+
+watch(activeTab, (tab) => {
+  if (tab === 'subtasks' && selectedTask.value) {
+    loadGameAccountStatuses()
+  }
+})
+
 const loadTasks = async () => {
   if (!props.agent?.agentId) return
   loading.value = true
@@ -240,6 +313,46 @@ const loadTasks = async () => {
 
 const handleRefresh = () => {
   loadTasks()
+  if (selectedTask.value && activeTab.value === 'subtasks') {
+    loadGameAccountStatuses()
+  }
+}
+
+const loadGameAccountStatuses = async () => {
+  if (!selectedTask.value?.id) return
+  subtaskLoading.value = true
+  try {
+    const res = await taskApi.getGameAccountStatus(selectedTask.value.id)
+    if (res.code === 0 || res.code === 200) {
+      gameAccountStatuses.value = res.data || []
+    }
+  } catch (error) {
+    console.error('Failed to load game account statuses:', error)
+  } finally {
+    subtaskLoading.value = false
+  }
+}
+
+const getSubtaskStatusText = (status) => {
+  const statusMap = {
+    'pending': '待执行',
+    'running': '执行中',
+    'completed': '已完成',
+    'failed': '失败',
+    'skipped': '跳过'
+  }
+  return statusMap[status] || status
+}
+
+const getSubtaskStatusType = (status) => {
+  const typeMap = {
+    'pending': 'info',
+    'running': 'warning',
+    'completed': 'success',
+    'failed': 'danger',
+    'skipped': 'info'
+  }
+  return typeMap[status] || 'info'
 }
 
 const handlePause = async (task) => {
@@ -421,6 +534,15 @@ onUnmounted(() => {
 .step-STEP2 { color: #e6a23c; }
 .step-STEP3 { color: #f56c6c; }
 .step-STEP4 { color: #67c23a; }
+
+.failed-count {
+  color: #f56c6c;
+  font-weight: 600;
+}
+
+.subtask-container {
+  padding: 10px 0;
+}
 
 :deep(.el-dialog) {
   background: rgba(18, 18, 26, 0.95);

@@ -92,6 +92,14 @@ export const TASK_TYPE_MAP = {
   custom: '自定义'
 }
 
+/**
+ * 自动化任务类型配置
+ * 当前仅支持串流控制
+ */
+export const AUTOMATION_TASK_TYPES = [
+  { code: 'stream_control', name: '串流控制' }
+]
+
 export const FEATURE_CODE_MAP = {
   stream_control: '串流控制',
   sqb: 'SQB任务',

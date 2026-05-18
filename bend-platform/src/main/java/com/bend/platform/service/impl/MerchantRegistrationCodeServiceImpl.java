@@ -4,13 +4,17 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.MerchantRegistrationCodePageRequest;
+import com.bend.platform.entity.AgentInstance;
 import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.MerchantRegistrationCode;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
+import com.bend.platform.repository.AgentInstanceMapper;
 import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.repository.MerchantRegistrationCodeMapper;
 import com.bend.platform.service.MerchantRegistrationCodeService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,13 +50,17 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
 
     private final MerchantRegistrationCodeMapper registrationCodeMapper;
     private final MerchantMapper merchantMapper;
+    private final AgentInstanceMapper agentInstanceMapper;
     
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;
 
-    public MerchantRegistrationCodeServiceImpl(MerchantRegistrationCodeMapper registrationCodeMapper, MerchantMapper merchantMapper) {
+    public MerchantRegistrationCodeServiceImpl(MerchantRegistrationCodeMapper registrationCodeMapper, 
+                                               MerchantMapper merchantMapper,
+                                               AgentInstanceMapper agentInstanceMapper) {
         this.registrationCodeMapper = registrationCodeMapper;
         this.merchantMapper = merchantMapper;
+        this.agentInstanceMapper = agentInstanceMapper;
     }
 
     private static final String CODE_PREFIX = "AGENT";
@@ -91,7 +99,6 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ActivationResult activateCode(String code, String agentId, String agentSecret) {
-        // 检查失败次数是否超限
         if (isExcessiveAttempts(code)) {
             log.warn("注册码激活失败 - 失败次数超限: {}", code);
             return ActivationResult.failure("注册码验证失败次数过多，请稍后再试");
@@ -132,8 +139,116 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public ActivationResult activateCodeWithSystemInfo(String code, String agentId, String agentSecret, String systemInfo) {
+        if (isExcessiveAttempts(code)) {
+            log.warn("注册码激活失败 - 失败次数超限: {}", code);
+            return ActivationResult.failure("注册码验证失败次数过多，请稍后再试");
+        }
+
+        MerchantRegistrationCode registrationCode = findByCode(code);
+
+        if (registrationCode == null) {
+            log.warn("注册码激活失败 - 注册码不存在: {}", code);
+            recordFailedAttempt(code);
+            return ActivationResult.failure("注册码不存在");
+        }
+
+        if ("used".equals(registrationCode.getStatus())) {
+            log.warn("注册码激活失败 - 已被使用: {}", code);
+            recordFailedAttempt(code);
+            return ActivationResult.failure("注册码已被使用");
+        }
+
+        if (registrationCode.getExpireTime() != null &&
+                registrationCode.getExpireTime().isBefore(LocalDateTime.now())) {
+            log.warn("注册码激活失败 - 已过期: {}", code);
+            recordFailedAttempt(code);
+            return ActivationResult.failure("注册码已过期");
+        }
+
+        String merchantId = registrationCode.getMerchantId();
+        
+        registrationCode.setStatus("used");
+        registrationCode.setUsedTime(LocalDateTime.now());
+        registrationCode.setUsedByAgentId(agentId);
+        registrationCode.setAgentId(agentId);
+        registrationCodeMapper.updateById(registrationCode);
+
+        updateAgentInstanceWithSystemInfo(agentId, agentSecret, merchantId, code, systemInfo);
+
+        log.info("注册码激活成功（带系统信息）- 注册码: {}, AgentID: {}, 商户ID: {}", code, agentId, merchantId);
+
+        return ActivationResult.success(merchantId);
+    }
+
+    private void updateAgentInstanceWithSystemInfo(String agentId, String agentSecret, 
+                                                   String merchantId, String registrationCode, String systemInfo) {
+        try {
+            AgentInstance existing = agentInstanceMapper.selectOne(
+                new LambdaQueryWrapper<AgentInstance>().eq(AgentInstance::getAgentId, agentId)
+            );
+
+            if (existing != null) {
+                existing.setAgentSecret(agentSecret);
+                existing.setMerchantId(merchantId);
+                existing.setRegistrationCode(registrationCode);
+                existing.setStatus("offline");
+                existing.setUpdatedTime(LocalDateTime.now());
+
+                if (systemInfo != null && !systemInfo.isEmpty()) {
+                    ObjectMapper mapper = new ObjectMapper();
+                    JsonNode node = mapper.readTree(systemInfo);
+                    
+                    existing.setOsType(getJsonNodeValue(node, "osType"));
+                    existing.setOsVersion(getJsonNodeValue(node, "osVersion"));
+                    existing.setCpuCount(getJsonNodeIntValue(node, "cpuCount"));
+                    existing.setMaxConcurrentTasks(getJsonNodeIntValue(node, "maxConcurrentTasks"));
+                }
+
+                agentInstanceMapper.updateById(existing);
+                log.info("Agent实例更新成功，包含系统信息 - AgentID: {}", agentId);
+            } else {
+                AgentInstance agentInstance = new AgentInstance();
+                agentInstance.setAgentId(agentId);
+                agentInstance.setAgentSecret(agentSecret);
+                agentInstance.setMerchantId(merchantId);
+                agentInstance.setRegistrationCode(registrationCode);
+                agentInstance.setStatus("offline");
+                agentInstance.setCreatedTime(LocalDateTime.now());
+                agentInstance.setUpdatedTime(LocalDateTime.now());
+
+                if (systemInfo != null && !systemInfo.isEmpty()) {
+                    ObjectMapper mapper = new ObjectMapper();
+                    JsonNode node = mapper.readTree(systemInfo);
+                    
+                    agentInstance.setOsType(getJsonNodeValue(node, "osType"));
+                    agentInstance.setOsVersion(getJsonNodeValue(node, "osVersion"));
+                    agentInstance.setCpuCount(getJsonNodeIntValue(node, "cpuCount"));
+                    agentInstance.setMaxConcurrentTasks(getJsonNodeIntValue(node, "maxConcurrentTasks"));
+                }
+
+                agentInstanceMapper.insert(agentInstance);
+                log.info("Agent实例创建成功，包含系统信息 - AgentID: {}", agentId);
+            }
+            
+        } catch (Exception e) {
+            log.error("创建/更新Agent实例失败 - AgentID: {}, 错误: {}", agentId, e.getMessage());
+        }
+    }
+
+    private String getJsonNodeValue(JsonNode node, String fieldName) {
+        JsonNode valueNode = node.get(fieldName);
+        return valueNode != null && !valueNode.isNull() ? valueNode.asText() : null;
+    }
+
+    private Integer getJsonNodeIntValue(JsonNode node, String fieldName) {
+        JsonNode valueNode = node.get(fieldName);
+        return valueNode != null && !valueNode.isNull() && valueNode.isNumber() ? valueNode.asInt() : null;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public ActivationResult validateAndConsume(String code) {
-        // 检查失败次数是否超限
         if (isExcessiveAttempts(code)) {
             log.warn("注册码验证失败 - 失败次数超限: {}", code);
             return ActivationResult.failure("注册码验证失败次数过多，请稍后再试");
@@ -162,7 +277,6 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
 
         String merchantId = registrationCode.getMerchantId();
 
-        // 标记为已使用（但不需要绑定agent信息，由Agent注册时自己绑定）
         registrationCode.setStatus("used");
         registrationCode.setUsedTime(LocalDateTime.now());
         registrationCodeMapper.updateById(registrationCode);
@@ -274,7 +388,6 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
     @Override
     public boolean isExcessiveAttempts(String code) {
         if (redisTemplate == null) {
-            // Redis不可用时，暂时不限制
             return false;
         }
         String key = FAILED_ATTEMPT_KEY_PREFIX + code;
@@ -289,7 +402,6 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
     @Override
     public void recordFailedAttempt(String code) {
         if (redisTemplate == null) {
-            // Redis不可用时，只记录日志
             log.warn("注册码激活失败 - 注册码: {}, Redis不可用，无法记录失败次数", code);
             return;
         }

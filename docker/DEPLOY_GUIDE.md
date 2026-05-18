@@ -260,17 +260,17 @@ docker volume inspect bend_platform_redis_data
 
 ```bash
 # 创建 SQL 备份
-docker exec bend-mysql mysqldump -u root -pD$U@GAMECeKfidb bend_platform > backup_$(date +%Y%m%d_%H%M%S).sql
+docker exec bend-mysql mysqldump -u root -pD@GAMECeKfidb bend_platform > backup_$(date +%Y%m%d_%H%M%S).sql
 
 # 备份到指定文件
-docker exec bend-mysql mysqldump -u root -pD$U@GAMECeKfidb bend_platform > backup.sql
+docker exec bend-mysql mysqldump -u root -pD@GAMECeKfidb bend_platform > backup.sql
 ```
 
 ### 恢复数据库
 
 ```bash
 # 从备份文件恢复
-docker exec -i bend-mysql mysql -u root -pD$U@GAMECeKfidb bend_platform < backup.sql
+docker exec -i bend-mysql mysql -u root -pD@GAMECeKfidb bend_platform < backup.sql
 ```
 
 ### 清理数据卷（谨慎！）

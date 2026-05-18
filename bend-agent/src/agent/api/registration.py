@@ -5,12 +5,14 @@ Handles the registration code activation flow
 import asyncio
 import json
 import os
+import sys
 from typing import Optional, Tuple
 from dataclasses import dataclass
 
 from ..core.config import config
 from ..core.logger import get_logger
 from ..core.machine_identity import machine_identity
+from ..core.system_resource_detector import SystemResourceDetector
 
 
 @dataclass
@@ -19,6 +21,28 @@ class AgentCredentials:
     agent_id: str
     agent_secret: str
     merchant_id: str
+    registration_code: str
+
+
+@dataclass
+class AgentSystemInfo:
+    """
+    Agent system information for registration
+    Only includes static fields that don't change frequently
+    """
+    os_type: str
+    os_version: str
+    cpu_count: int
+    max_concurrent_tasks: int
+
+    def to_dict(self):
+        """Convert to dictionary for API request"""
+        return {
+            'osType': self.os_type,
+            'osVersion': self.os_version,
+            'cpuCount': self.cpu_count,
+            'maxConcurrentTasks': self.max_concurrent_tasks
+        }
 
 
 class RegistrationActivator:
@@ -29,10 +53,66 @@ class RegistrationActivator:
 
     def __init__(self):
         self.logger = get_logger('activation')
-        self._config_dir = os.path.join(os.environ.get('APPDATA', ''), 'BendPlatform', 'Agent')
+        self._config_dir = self._get_config_dir()
         os.makedirs(self._config_dir, exist_ok=True)
         self._credentials_file = os.path.join(self._config_dir, 'agent_credentials.json')
         self._credentials: Optional[AgentCredentials] = None
+
+    def _get_config_dir(self) -> str:
+        """
+        Determine the appropriate configuration directory based on runtime environment.
+        
+        Returns:
+            Path to the credentials directory:
+            - Development: Project root / credentials
+            - Production (frozen): Executable directory / credentials
+            - Fallback: APPDATA / BendPlatform / Agent
+        """
+        # Check if running from a frozen executable (PyInstaller)
+        if getattr(sys, 'frozen', False):
+            # Running as compiled executable
+            exe_dir = os.path.dirname(sys.executable)
+            config_dir = os.path.join(exe_dir, 'credentials')
+            self.logger.info(f"Running as frozen executable, using credentials directory: {config_dir}")
+            return config_dir
+        
+        # Check if running from project directory (development)
+        # Try to find the project root by looking for known files/directories
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # Go up several levels to find the project root
+        for _ in range(5):
+            parent_dir = os.path.dirname(current_dir)
+            # Check for project markers
+            if os.path.exists(os.path.join(parent_dir, 'configs', 'agent.yaml')):
+                config_dir = os.path.join(parent_dir, 'credentials')
+                self.logger.info(f"Running in development mode, using credentials directory: {config_dir}")
+                return config_dir
+            current_dir = parent_dir
+        
+        # Fallback to APPDATA directory (original behavior)
+        fallback_dir = os.path.join(os.environ.get('APPDATA', ''), 'BendPlatform', 'Agent')
+        self.logger.info(f"Using fallback credentials directory: {fallback_dir}")
+        return fallback_dir
+
+    @classmethod
+    def get_system_info(cls) -> AgentSystemInfo:
+        """
+        Get system information for registration
+        
+        Returns:
+            AgentSystemInfo containing static system details
+        """
+        detector = SystemResourceDetector()
+        info = detector.get_system_info()
+        
+        max_concurrent = detector.recommend_concurrent_tasks(50)
+
+        return AgentSystemInfo(
+            os_type=info['platform'],
+            os_version=info['platform_version'],
+            cpu_count=info['cpu_count'],
+            max_concurrent_tasks=max_concurrent
+        )
 
     async def activate(self, registration_code: str) -> AgentCredentials:
         """
@@ -51,19 +131,24 @@ class RegistrationActivator:
 
         agent_id = self._get_or_generate_agent_id()
         agent_secret = self._generate_agent_secret()
+        
+        system_info = self.get_system_info()
+        self.logger.info(f"System info for registration: {system_info.to_dict()}")
 
         try:
             result = await self._send_activation_request(
                 registration_code,
                 agent_id,
-                agent_secret
+                agent_secret,
+                system_info
             )
 
             if result['success']:
                 self._credentials = AgentCredentials(
                     agent_id=agent_id,
                     agent_secret=agent_secret,
-                    merchant_id=result['merchantId']
+                    merchant_id=result['merchantId'],
+                    registration_code=registration_code
                 )
                 self._save_credentials()
                 self.logger.info(f"Agent activated successfully, Merchant ID: {result['merchantId']}")
@@ -79,7 +164,8 @@ class RegistrationActivator:
         self,
         code: str,
         agent_id: str,
-        agent_secret: str
+        agent_secret: str,
+        system_info: AgentSystemInfo
     ) -> dict:
         """Send activation request to backend"""
         import aiohttp
@@ -90,16 +176,18 @@ class RegistrationActivator:
         payload = {
             'code': code,
             'agentId': agent_id,
-            'agentSecret': agent_secret
+            'agentSecret': agent_secret,
+            'systemInfo': system_info.to_dict()
         }
 
         self.logger.info(f"Sending activation request to {url}")
+        self.logger.debug(f"Activation payload: {json.dumps(payload, indent=2)}")
 
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload) as response:
                 result = await response.json()
 
-                if response.status == 200 and result.get('code') == 0:
+                if response.status == 200 and result.get('code') == 200:
                     data = result.get('data', {})
                     return {
                         'success': True,
@@ -163,7 +251,8 @@ class RegistrationActivator:
         credentials_data = {
             'agentId': self._credentials.agent_id,
             'agentSecret': self._credentials.agent_secret,
-            'merchantId': self._credentials.merchant_id
+            'merchantId': self._credentials.merchant_id,
+            'registrationCode': self._credentials.registration_code
         }
 
         with open(self._credentials_file, 'w', encoding='utf-8') as f:
@@ -183,7 +272,8 @@ class RegistrationActivator:
             self._credentials = AgentCredentials(
                 agent_id=data['agentId'],
                 agent_secret=data['agentSecret'],
-                merchant_id=data['merchantId']
+                merchant_id=data['merchantId'],
+                registration_code=data.get('registrationCode', '')
             )
             self.logger.info(f"Loaded credentials for Agent: {self._credentials.agent_id}")
             return self._credentials

@@ -30,6 +30,18 @@ public interface MerchantRegistrationCodeService {
     ActivationResult activateCode(String code, String agentId, String agentSecret);
 
     /**
+     * 激活注册码（带系统信息）
+     * Agent注册时调用，将系统资源信息一起保存到Agent实例
+     *
+     * @param code 注册码
+     * @param agentId Agent实例ID
+     * @param agentSecret Agent密钥
+     * @param systemInfo 系统信息JSON字符串
+     * @return 激活结果，包含merchantId
+     */
+    ActivationResult activateCodeWithSystemInfo(String code, String agentId, String agentSecret, String systemInfo);
+
+    /**
      * 验证注册码（不激活）
      *
      * @param code 注册码

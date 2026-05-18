@@ -11,4 +11,7 @@ public interface AgentInstanceMapper extends BaseMapper<AgentInstance> {
 
     @Select("SELECT * FROM agent_instance WHERE agent_id = #{agentId} AND deleted = 0 LIMIT 1")
     AgentInstance selectByAgentId(@Param("agentId") String agentId);
+
+    @Select("SELECT * FROM agent_instance WHERE agent_id = #{agentId} LIMIT 1")
+    AgentInstance selectByAgentIdIncludeDeleted(@Param("agentId") String agentId);
 }

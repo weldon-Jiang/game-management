@@ -93,6 +93,12 @@ public class Task {
     private String gameAccountId;
 
     /**
+     * 使用的Xbox主机ID
+     * Agent执行任务时选择的Xbox主机
+     */
+    private String xboxHostId;
+
+    /**
      * 任务状态
      * 标识任务当前所处阶段
      */
@@ -190,4 +196,10 @@ public class Task {
      */
     @TableLogic
     private Boolean deleted;
+
+    @TableField(exist = false)
+    private String xboxHostName;
+
+    @TableField(exist = false)
+    private String xboxHostIp;
 }

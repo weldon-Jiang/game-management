@@ -80,7 +80,8 @@ class AgentRunner:
 
         self.manager = CentralManager(
             credentials.agent_id,
-            credentials.agent_secret
+            credentials.agent_secret,
+            credentials.registration_code
         )
 
         try:

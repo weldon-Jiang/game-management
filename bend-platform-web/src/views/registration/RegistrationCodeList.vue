@@ -60,16 +60,17 @@
           :data="tableData"
           v-loading="loading"
           class="data-table"
+          :table-layout="'fixed'"
           scrollbar-always-on
           @selection-change="handleSelectionChange"
         >
-        <el-table-column type="selection" width="50" />
-        <el-table-column prop="code" label="注册码" min-width="180">
+        <el-table-column type="selection" width="60" />
+        <el-table-column prop="code" label="注册码" min-width="150">
           <template #default="{ row }">
             <span class="code-text">{{ row.code }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="isPlatformAdmin" prop="merchantName" label="商户" width="120" align="center">
+        <el-table-column prop="merchantName" label="商户" min-width="120" align="center">
           <template #default="{ row }">
             <span v-if="row.merchantName">{{ row.merchantName }}</span>
             <span v-else class="text-muted">-</span>
@@ -82,13 +83,13 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="usedByAgentId" label="绑定的Agent" width="180">
+        <el-table-column prop="usedByAgentId" label="绑定的Agent" min-width="150">
           <template #default="{ row }">
             <span v-if="row.usedByAgentId" class="text-muted">{{ row.usedByAgentId }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdTime" label="创建时间" width="170">
+        <el-table-column prop="createdTime" label="创建时间" min-width="160">
           <template #default="{ row }">
             {{ formatDate(row.createdTime) }}
           </template>

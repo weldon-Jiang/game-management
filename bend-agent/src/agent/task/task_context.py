@@ -144,6 +144,7 @@ class AgentTaskContext:
     - streaming_account_id: 串流账号ID
     - streaming_account_email: 串流账号邮箱
     - streaming_account_password: 串流账号密码（已解密）
+    - streaming_account_encrypted_password: 串流账号加密密码（平台传递）
     - window_id: 关联的窗口ID
     - game_accounts: 游戏账号列表
     - assigned_xbox: 指定Xbox主机（可选）
@@ -156,6 +157,7 @@ class AgentTaskContext:
     streaming_account_id: str
     streaming_account_email: str
     streaming_account_password: str
+    streaming_account_encrypted_password: str = ""
     window_id: str = ""
     game_accounts: List[GameAccountInfo] = field(default_factory=list)
     assigned_xbox: Optional[XboxInfo] = None

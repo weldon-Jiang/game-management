@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS `agent_version` (
 
 -- ---------------------------------------------
 -- Agent实例表
+-- 只保留静态字段：os_type, os_version, cpu_count
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `agent_instance` (
     `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
@@ -164,12 +165,13 @@ CREATE TABLE IF NOT EXISTS `agent_instance` (
     `port` INT DEFAULT 8888 COMMENT 'Agent监听端口',
     `version` VARCHAR(32) DEFAULT NULL COMMENT 'Agent版本号',
     `status` VARCHAR(16) DEFAULT 'offline' COMMENT '状态：online-在线,offline-离线,uninstalled-已卸载',
-    `current_streaming_id` VARCHAR(64) DEFAULT NULL COMMENT '当前流媒体账号ID',
-    `current_task_id` VARCHAR(64) DEFAULT NULL COMMENT '当前任务ID',
     `max_concurrent_tasks` INT DEFAULT 5 COMMENT '最大并发任务数',
     `last_heartbeat` DATETIME DEFAULT NULL COMMENT '最后心跳时间',
     `last_online_time` DATETIME DEFAULT NULL COMMENT '最后上线时间',
     `uninstall_reason` VARCHAR(255) DEFAULT NULL COMMENT '卸载原因',
+    `os_type` VARCHAR(50) DEFAULT NULL COMMENT '操作系统类型',
+    `os_version` VARCHAR(100) DEFAULT NULL COMMENT '操作系统版本',
+    `cpu_count` INT DEFAULT NULL COMMENT 'CPU核心数',
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
@@ -194,6 +196,7 @@ CREATE TABLE IF NOT EXISTS `task` (
     `target_agent_id` VARCHAR(64) DEFAULT NULL COMMENT '目标Agent ID',
     `streaming_account_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的流媒体账号ID',
     `game_account_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的游戏账号ID',
+    `xbox_host_id` VARCHAR(36) DEFAULT NULL COMMENT '使用的Xbox主机ID',
     `status` VARCHAR(16) DEFAULT 'pending' COMMENT '状态：pending-待执行,running-执行中,completed-已完成,failed-失败,cancelled-已取消',
     `priority` INT DEFAULT 0 COMMENT '优先级',
     `params` TEXT DEFAULT NULL COMMENT '任务参数JSON',

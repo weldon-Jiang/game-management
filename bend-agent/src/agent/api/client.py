@@ -174,17 +174,18 @@ class ApiClient:
         """
         return await self._request('GET', path, params=params)
 
-    async def post(self, path: str, data: Optional[Dict] = None) -> Dict[str, Any]:
+    async def post(self, path: str, data: Optional[Dict] = None, params: Optional[Dict] = None) -> Dict[str, Any]:
         """
         发送POST请求
 
         参数说明：
         - path: API路径
         - data: 请求体数据
+        - params: URL查询参数
 
         返回值：响应JSON数据的字典
         """
-        return await self._request('POST', path, data=data)
+        return await self._request('POST', path, data=data, params=params)
 
     async def put(self, path: str, data: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -209,7 +210,9 @@ class ApiClient:
         """
         return await self._request('DELETE', path)
 
-    async def register(self, registration_code: str, host: str, port: int, version: str = None) -> Dict[str, Any]:
+    async def register(self, registration_code: str, host: str, port: int, version: str = None, 
+                       os_type: str = None, os_version: str = None, cpu_count: int = None, 
+                       max_concurrent_tasks: int = None, agent_id: str = None) -> Dict[str, Any]:
         """
         向后端注册Agent
 
@@ -218,6 +221,10 @@ class ApiClient:
         - host: Agent所在主机IP
         - port: Agent监听端口
         - version: Agent版本号
+        - os_type: 操作系统类型
+        - os_version: 操作系统版本
+        - cpu_count: CPU核心数
+        - max_concurrent_tasks: 最大并发任务数
 
         返回值：
         - 注册结果字典，包含code字段表示成功与否
@@ -228,14 +235,24 @@ class ApiClient:
         3. 返回注册结果
         """
         self._current_version = version or self._current_version
-        data = {
+        params = {
             'registrationCode': registration_code,
             'host': host,
             'port': port
         }
         if self._current_version:
-            data['version'] = self._current_version
-        return await self.post('/agents/register', data)
+            params['version'] = self._current_version
+        if os_type:
+            params['osType'] = os_type
+        if os_version:
+            params['osVersion'] = os_version
+        if cpu_count:
+            params['cpuCount'] = cpu_count
+        if max_concurrent_tasks:
+            params['maxConcurrentTasks'] = max_concurrent_tasks
+        if agent_id:
+            params['agentId'] = agent_id
+        return await self.post('/agents/register', params=params)
 
     async def heartbeat(self, status: str = None, current_task_id: str = None, current_streaming_id: str = None, version: str = None, running_task_count: int = None, xbox_session_count: int = None) -> Dict[str, Any]:
         """

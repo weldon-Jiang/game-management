@@ -27,7 +27,7 @@ import asyncio
 from typing import Callable, Optional, Any
 
 from ..core.logger import get_logger
-from .task_context import AgentTaskContext, Step3Result, TaskStepStatus
+from ..task.task_context import AgentTaskContext, Step3Result, TaskStepStatus
 
 
 async def step3_execute_decode(

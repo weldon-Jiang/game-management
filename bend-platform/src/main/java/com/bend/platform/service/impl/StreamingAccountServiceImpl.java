@@ -348,7 +348,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
 
         account.setAgentId(agentId);
         if (agentId != null) {
-            account.setStatus("busy");
+            account.setStatus("running");
         } else {
             account.setStatus("idle");
         }

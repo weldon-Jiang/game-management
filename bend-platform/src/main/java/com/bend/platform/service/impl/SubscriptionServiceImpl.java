@@ -10,7 +10,9 @@ import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.GameAccountMapper;
 import com.bend.platform.repository.SubscriptionMapper;
+import com.bend.platform.entity.MerchantBalance;
 import com.bend.platform.service.GameAccountService;
+import com.bend.platform.service.MerchantBalanceService;
 import com.bend.platform.service.SubscriptionService;
 import com.bend.platform.service.XboxHostService;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -37,6 +39,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     private final XboxHostService xboxHostService;
     private final GameAccountMapper gameAccountMapper;
     private final ObjectMapper objectMapper;
+    private final MerchantBalanceService balanceService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -241,12 +244,22 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         Subscription subscription = getCurrentActiveSubscription(merchantId);
 
         if (subscription == null) {
-            allErrors.add("当前没有有效的包月，请先购买订阅");
-            result.put("canStart", false);
-            result.put("errors", allErrors);
-            result.put("subscriptionType", null);
-            result.put("chargeType", null);
-            return result;
+            MerchantBalance merchantBalance = balanceService.getByMerchantId(merchantId);
+            Integer balance = merchantBalance != null ? merchantBalance.getBalance() : 0;
+            if (balance == null || balance <= 0) {
+                allErrors.add("当前没有有效的包月且余额不足，请先购买订阅或充值点数");
+                result.put("canStart", false);
+                result.put("errors", allErrors);
+                result.put("subscriptionType", null);
+                result.put("chargeType", null);
+                return result;
+            } else {
+                result.put("canStart", true);
+                result.put("errors", allErrors);
+                result.put("subscriptionType", null);
+                result.put("chargeType", "per_use");
+                return result;
+            }
         }
 
         String subscriptionType = subscription.getSubscriptionType();

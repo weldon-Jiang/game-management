@@ -45,9 +45,11 @@
           </template>
         </el-table-column>
         <!-- 运行Agent -->
-        <el-table-column prop="agentId" label="运行Agent" width="180" show-overflow-tooltip>
+        <el-table-column prop="agentId" label="运行Agent" width="180">
           <template #default="{ row }">
-            <span v-if="row.agentId" class="agent-id">{{ row.agentId.substring(0, 8) }}...</span>
+            <el-tooltip v-if="row.agentId" :content="row.agentId" placement="top">
+              <span class="agent-id">{{ row.agentId.substring(0, 8) }}...</span>
+            </el-tooltip>
             <span v-else class="text-muted">未运行</span>
           </template>
         </el-table-column>
@@ -64,7 +66,7 @@
           </template>
         </el-table-column>
         <!-- 操作列 -->
-        <el-table-column label="操作" width="280" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
+        <el-table-column label="操作" width="230" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <!-- 启动自动化按钮（非busy状态显示） -->
             <el-button
@@ -89,10 +91,6 @@
             <!-- 编辑按钮 -->
             <el-button type="primary" link size="small" @click="showEditDialog(row)">
               编辑
-            </el-button>
-            <!-- 登录记录按钮 -->
-            <el-button type="info" link size="small" @click="showLoginRecords(row)">
-              登录记录
             </el-button>
             <!-- 关联游戏账号按钮 -->
             <el-button type="warning" link size="small" @click="showBindGameAccountsDialog(row)">
@@ -213,20 +211,9 @@
             />
           </el-select>
         </el-form-item>
-        <!-- 任务类型 -->
+        <!-- 任务类型（只读显示） -->
         <el-form-item label="任务类型">
-          <el-select v-model="taskType" style="width: 100%">
-            <el-option
-              v-for="task in availableTaskTypes"
-              :key="task.code"
-              :label="task.name"
-              :value="task.code"
-            />
-          </el-select>
-        </el-form-item>
-        <!-- 优先级 -->
-        <el-form-item label="优先级">
-          <el-input-number v-model="priority" :min="0" :max="100" />
+          <span class="automation-account-name">{{ automationTaskTypeName }}</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -235,25 +222,6 @@
           启动
         </el-button>
       </template>
-    </el-dialog>
-
-    <!-- 登录记录对话框 -->
-    <el-dialog
-      v-model="recordsDialogVisible"
-      title="Xbox主机登录记录"
-      width="600px"
-    >
-      <div class="records-list" v-if="loginRecords.length > 0">
-        <div
-          v-for="hostId in loginRecords"
-          :key="hostId"
-          class="record-item"
-        >
-          <el-icon><Monitor /></el-icon>
-          <span>{{ hostId }}</span>
-        </div>
-      </div>
-      <el-empty v-else description="暂无登录记录" />
     </el-dialog>
 
     <!-- 批量导入对话框 -->
@@ -409,7 +377,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi } from '@/api'
-import { getStreamingAccountStatusText, getStreamingAccountStatusType, TASK_TYPE_MAP } from '@/utils/constants'
+import { getStreamingAccountStatusText, getStreamingAccountStatusType, AUTOMATION_TASK_TYPES } from '@/utils/constants'
 
 // ==================== 状态定义 ====================
 
@@ -496,7 +464,6 @@ const formRef = ref(null)
 /**
  * 登录记录列表
  */
-const loginRecords = ref([])
 
 /**
  * 批量导入相关状态
@@ -533,76 +500,15 @@ const selectedAccount = ref(null)
 const selectedAgentId = ref('')
 
 /**
- * 任务类型
- * - stream_control: 串流控制
- * - template_match: 模板匹配
- * - scene_detection: 场景检测
+ * 自动化任务类型（从配置常量获取）
+ * 当前仅支持串流控制
  */
-const taskType = ref('stream_control')
+const automationTaskType = AUTOMATION_TASK_TYPES[0]?.code || 'stream_control'
 
 /**
- * 任务优先级
- * 数值越小优先级越高
+ * 自动化任务类型名称（显示用）
  */
-const priority = ref(0)
-
-/**
- * 可用的任务类型列表
- * 根据VIP分组的权限动态加载
- */
-const availableTaskTypes = ref([])
-
-/**
- * 加载VIP分组的功能权限
- * 用于动态显示可用的任务类型
- * 如果商户没有VIP等级，默认只展示"串流控制"
- * @param {string} merchantId 商户ID
- */
-const loadMerchantFeatures = async (merchantId) => {
-  try {
-    if (!merchantId) {
-      availableTaskTypes.value = [{ code: 'stream_control', name: '串流控制' }]
-      taskType.value = 'stream_control'
-      return
-    }
-    const res = await merchantGroupApi.getByMerchantId(merchantId)
-    if (res.code === 200 || res.code === 0) {
-      const group = res.data
-      if (group && group.features) {
-        try {
-          const features = typeof group.features === 'string' ? JSON.parse(group.features) : group.features
-          if (Array.isArray(features) && features.length > 0) {
-            availableTaskTypes.value = features.map(code => ({
-              code,
-              name: TASK_TYPE_MAP[code] || code
-            })).filter(item => TASK_TYPE_MAP[item.code])
-            if (availableTaskTypes.value.length > 0) {
-              if (!availableTaskTypes.value.find(t => t.code === taskType.value)) {
-                taskType.value = availableTaskTypes.value[0]?.code || 'stream_control'
-              }
-              return
-            }
-          }
-        } catch (e) {
-          console.error('Failed to parse features:', e)
-        }
-      }
-      if (!group || !group.vipLevel || group.vipLevel === 0) {
-        availableTaskTypes.value = [{ code: 'stream_control', name: '串流控制' }]
-        taskType.value = 'stream_control'
-      } else {
-        availableTaskTypes.value = Object.entries(TASK_TYPE_MAP).map(([code, name]) => ({ code, name }))
-      }
-    } else {
-      availableTaskTypes.value = [{ code: 'stream_control', name: '串流控制' }]
-      taskType.value = 'stream_control'
-    }
-  } catch (error) {
-    console.error('Failed to load merchant features:', error)
-    availableTaskTypes.value = [{ code: 'stream_control', name: '串流控制' }]
-    taskType.value = 'stream_control'
-  }
-}
+const automationTaskTypeName = AUTOMATION_TASK_TYPES[0]?.name || '串流控制'
 
 /**
  * 表单数据
@@ -814,8 +720,11 @@ const handleSubmit = async () => {
 const showStartAutomationDialog = async (row) => {
   try {
     const subRes = await subscriptionApi.getStatus()
-    if (!subRes.data?.currentSubscription) {
-      ElMessage.warning('当前没有有效的包月，请先购买订阅')
+    const hasSubscription = subRes.data?.currentSubscription
+    const balance = subRes.data?.balance || 0
+    
+    if (!hasSubscription && balance <= 0) {
+      ElMessage.warning('当前没有有效的包月且余额不足，请先购买订阅或充值点数')
       return
     }
 
@@ -843,9 +752,6 @@ const showStartAutomationDialog = async (row) => {
 
   selectedAccount.value = row
   selectedAgentId.value = ''
-  taskType.value = 'stream_control'
-  priority.value = 0
-  await loadMerchantFeatures(row.merchantId)
   await loadOnlineAgents()
   automationDialogVisible.value = true
 }
@@ -889,8 +795,7 @@ const handleStartAutomation = async () => {
     const res = await automationApi.start({
       streamingAccountIds: [selectedAccount.value.id],
       agentId: selectedAgentId.value,
-      taskType: taskType.value,
-      priority: priority.value,
+      taskType: automationTaskType,
       description: `为账号 ${selectedAccount.value.name} 启动自动化`
     })
 
@@ -947,24 +852,6 @@ const handleStopAutomation = async (row) => {
 /**
  * 显示登录记录
  *
- * 功能说明：
- * - 调用API获取该账号的Xbox主机登录记录
- * - 打开登录记录对话框显示结果
- *
- * 参数说明：
- * - row: 账号行数据
- */
-const showLoginRecords = async (row) => {
-  try {
-    const res = await streamingApi.getXboxHosts(row.id)
-    loginRecords.value = res.data || []
-    recordsDialogVisible.value = true
-  } catch (error) {
-    console.error('Failed to load login records:', error)
-  }
-}
-
-/**
  * 显示导入对话框
  */
 const showImportDialog = async () => {

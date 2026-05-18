@@ -4,8 +4,10 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.bend.platform.dto.AgentInstancePageRequest;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.AgentInstance;
+import com.bend.platform.entity.MerchantRegistrationCode;
 import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.MerchantRegistrationCodeService;
+import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import com.bend.platform.service.MerchantRegistrationCodeService.ActivationResult;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -62,84 +65,129 @@ public class AgentController {
      * @return 注册结果，包含 agentId 和 agentSecret
      */
     @PostMapping("/register")
-    public ApiResponse<Map<String, String>> register(
+    public ApiResponse<Map<String, Object>> register(
             @RequestParam String registrationCode,
             @RequestParam String host,
             @RequestParam(defaultValue = "8888") Integer port,
-            @RequestParam(required = false) String version) {
+            @RequestParam(required = false) String version,
+            @RequestParam(required = false) String osType,
+            @RequestParam(required = false) String osVersion,
+            @RequestParam(required = false) Integer cpuCount,
+            @RequestParam(required = false) Integer maxConcurrentTasks,
+            @RequestParam(required = false) String agentId) {
 
-        log.info("Agent注册请求 - 注册码: {}, 主机: {}", registrationCode, host);
+        log.info("Agent注册请求 - 注册码: {}, 主机: {}, 操作系统: {}", registrationCode, host, osType);
 
-        // 验证注册码
-        ActivationResult result = registrationCodeService.validateAndConsume(registrationCode);
-        if (!result.isSuccess()) {
-            log.warn("Agent注册失败 - 注册码: {}, 原因: {}", registrationCode, result.getMessage());
-            return ApiResponse.error(400, result.getMessage());
+        // 检查注册码
+        MerchantRegistrationCode codeEntity = registrationCodeService.findByCode(registrationCode);
+        if (codeEntity == null) {
+            log.warn("Agent注册失败 - 注册码不存在: {}", registrationCode);
+            return ApiResponse.error(400, "注册码不存在");
         }
 
-        String merchantId = result.getMerchantId();
+        // 检查注册码是否已过期
+        if (codeEntity.getExpireTime() != null && codeEntity.getExpireTime().isBefore(LocalDateTime.now())) {
+            log.warn("Agent注册失败 - 注册码已过期: {}", registrationCode);
+            return ApiResponse.error(400, "注册码已过期");
+        }
 
-        // 后端生成 agentId 和 agentSecret
-        String agentId = "agent-" + UUID.randomUUID().toString().substring(0, 8);
-        String agentSecret = generateSecureSecret();
+        String merchantId = codeEntity.getMerchantId();
 
-        // 检查是否已存在该注册码对应的Agent（重新安装场景）
-        AgentInstance existing = agentInstanceService.findByRegistrationCode(registrationCode);
+        // 优先使用传入的 agentId 查找（Agent 已经激活过，有 agentId 的情况）
+        AgentInstance existing = null;
+        if (agentId != null && !agentId.isEmpty()) {
+            existing = agentInstanceService.findByAgentId(agentId);
+        }
+        
+        // 如果没有通过 agentId 找到，再尝试通过注册码查找
+        if (existing == null) {
+            existing = agentInstanceService.findByRegistrationCode(registrationCode);
+        }
+        
+        // 如果还是没找到，检查是否存在已删除的记录（deleted=1）
+        if (existing == null && agentId != null && !agentId.isEmpty()) {
+            existing = agentInstanceService.findByAgentIdIncludeDeleted(agentId);
+            if (existing != null && Boolean.TRUE.equals(existing.getDeleted())) {
+                log.info("发现已删除的Agent记录，将恢复 - AgentID: {}", agentId);
+            }
+        }
+        
+        // 统一处理凭证
+        String finalAgentId;
+        String finalAgentSecret;
+        
         if (existing != null) {
-            if ("uninstalled".equals(existing.getStatus())) {
-                // 重新安装上线 - 更新信息
-                existing.setAgentId(agentId);
-                existing.setAgentSecret(agentSecret);
-                existing.setHost(host);
-                existing.setPort(port);
-                existing.setVersion(version);
+            // 已存在的Agent，保留原有的agentSecret
+            finalAgentId = existing.getAgentId();
+            finalAgentSecret = existing.getAgentSecret();
+            
+            // 检查注册码是否被其他Agent使用（排除当前Agent）
+            if ("used".equals(codeEntity.getStatus()) && 
+                !finalAgentId.equals(agentId)) {
+                log.warn("Agent注册失败 - 注册码已被其他Agent使用: {}", registrationCode);
+                return ApiResponse.error(400, "注册码已被使用");
+            }
+            
+            // 更新Agent信息
+            existing.setHost(host);
+            existing.setPort(port);
+            existing.setVersion(version);
+            existing.setOsType(osType);
+            existing.setOsVersion(osVersion);
+            existing.setCpuCount(cpuCount);
+            existing.setMaxConcurrentTasks(maxConcurrentTasks);
+            existing.setLastHeartbeat(LocalDateTime.now());
+            
+            if (Boolean.TRUE.equals(existing.getDeleted())) {
+                // 恢复已删除的Agent
+                existing.setDeleted(false);
                 existing.setStatus("online");
-                existing.setLastHeartbeat(LocalDateTime.now());
                 existing.setLastOnlineTime(LocalDateTime.now());
                 existing.setUninstallReason(null);
-                agentInstanceService.updateByAgentId(existing);
-                log.info("Agent重新安装上线 - AgentID: {}, 商户ID: {}", agentId, merchantId);
-            } else {
-                // 已存在的Agent重新上线
+                log.info("Agent已恢复 - AgentID: {}, 商户ID: {}", finalAgentId, merchantId);
+            } else if ("uninstalled".equals(existing.getStatus()) || "offline".equals(existing.getStatus())) {
+                // 重新上线 - 更新状态
                 existing.setStatus("online");
-                existing.setHost(host);
-                existing.setPort(port);
-                existing.setVersion(version);
-                existing.setLastHeartbeat(LocalDateTime.now());
                 existing.setLastOnlineTime(LocalDateTime.now());
-                agentInstanceService.updateByAgentId(existing);
-                log.info("Agent重新上线 - AgentID: {}, 商户ID: {}", existing.getAgentId(), merchantId);
-
-                // 返回已有的凭证
-                Map<String, String> response = new HashMap<>();
-                response.put("agentId", existing.getAgentId());
-                response.put("agentSecret", existing.getAgentSecret());
-                response.put("merchantId", merchantId);
-                return ApiResponse.success("注册成功", response);
+                existing.setUninstallReason(null);
+                log.info("Agent重新上线 - AgentID: {}, 商户ID: {}", finalAgentId, merchantId);
             }
+            
+            agentInstanceService.updateByAgentId(existing);
         } else {
-            // 创建新的Agent实例
+            // 创建新的Agent实例 - 生成新的凭证
+            finalAgentId = agentId != null && !agentId.isEmpty() ? agentId : "agent-" + UUID.randomUUID().toString().substring(0, 8);
+            finalAgentSecret = generateSecureSecret();
+            
             AgentInstance instance = new AgentInstance();
-            instance.setAgentId(agentId);
-            instance.setAgentSecret(agentSecret);
+            instance.setAgentId(finalAgentId);
+            instance.setAgentSecret(finalAgentSecret);
             instance.setMerchantId(merchantId);
             instance.setRegistrationCode(registrationCode);
             instance.setHost(host);
             instance.setPort(port);
             instance.setVersion(version);
+            instance.setOsType(osType);
+            instance.setOsVersion(osVersion);
+            instance.setCpuCount(cpuCount);
+            instance.setMaxConcurrentTasks(maxConcurrentTasks);
             instance.setStatus("online");
             instance.setLastHeartbeat(LocalDateTime.now());
             instance.setLastOnlineTime(LocalDateTime.now());
 
             agentInstanceService.create(instance);
-            log.info("Agent注册成功 - AgentID: {}, 商户ID: {}", agentId, merchantId);
+            log.info("Agent注册成功 - AgentID: {}, 商户ID: {}", finalAgentId, merchantId);
         }
 
         // 返回凭证（Secret只返回这一次）
-        Map<String, String> response = new HashMap<>();
-        response.put("agentId", agentId);
-        response.put("agentSecret", agentSecret);
+        Map<String, Object> response = new HashMap<>();
+        response.put("agentId", finalAgentId);
+        response.put("agentSecret", finalAgentSecret);
         response.put("merchantId", merchantId);
+        response.put("osType", osType);
+        response.put("osVersion", osVersion);
+        response.put("cpuCount", cpuCount);
+        response.put("maxConcurrentTasks", maxConcurrentTasks);
 
         return ApiResponse.success("注册成功", response);
     }
@@ -324,5 +372,132 @@ public class AgentController {
         }
         IPage<AgentInstance> page = agentInstanceService.findPageWithFilters(request);
         return ApiResponse.success(page);
+    }
+
+    /**
+     * 清理已卸载状态的Agent
+     *
+     * 权限说明：
+     * - 平台管理员：清理所有商户的已卸载Agent
+     * - 商户用户：只清理自己商户的已卸载Agent
+     *
+     * @return 清理的数量
+     */
+    @DeleteMapping("/cleanup/uninstalled")
+    public ApiResponse<Map<String, Object>> cleanupUninstalled() {
+        String merchantId = null;
+        if (!UserContext.isPlatformAdmin()) {
+            merchantId = UserContext.getMerchantId();
+        }
+
+        int count = agentInstanceService.cleanupUninstalled(merchantId);
+        log.info("清理已卸载Agent完成 - 商户ID: {}, 清理数量: {}", merchantId, count);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("cleanedCount", count);
+        return ApiResponse.success("清理完成", response);
+    }
+
+    /**
+     * 清理离线超过指定时间的Agent
+     *
+     * 权限说明：
+     * - 平台管理员：清理所有商户的离线Agent
+     * - 商户用户：只清理自己商户的离线Agent
+     *
+     * @param offlineMinutes 离线分钟数阈值（默认30分钟）
+     * @return 清理的数量
+     */
+    @DeleteMapping("/cleanup/offline")
+    public ApiResponse<Map<String, Object>> cleanupOffline(
+            @RequestParam(defaultValue = "30") Integer offlineMinutes) {
+        String merchantId = null;
+        if (!UserContext.isPlatformAdmin()) {
+            merchantId = UserContext.getMerchantId();
+        }
+
+        int count = agentInstanceService.cleanupOffline(offlineMinutes, merchantId);
+        log.info("清理离线Agent完成 - 商户ID: {}, 离线阈值: {}分钟, 清理数量: {}", 
+                merchantId, offlineMinutes, count);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("offlineMinutes", offlineMinutes);
+        response.put("cleanedCount", count);
+        return ApiResponse.success("清理完成", response);
+    }
+
+    /**
+     * 批量删除Agent
+     *
+     * 权限说明：
+     * - 平台管理员：删除任意Agent
+     * - 商户用户：只能删除自己商户的Agent
+     *
+     * @param agentIds AgentID列表
+     * @return 删除的数量
+     */
+    @DeleteMapping("/batch")
+    public ApiResponse<Map<String, Object>> batchDelete(@RequestBody List<String> agentIds) {
+        if (agentIds == null || agentIds.isEmpty()) {
+            return ApiResponse.error(400, "AgentID列表不能为空");
+        }
+
+        int count = agentInstanceService.batchDelete(agentIds);
+        log.info("批量删除Agent完成 - 删除数量: {}", count);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("deletedCount", count);
+        return ApiResponse.success("删除完成", response);
+    }
+
+    /**
+     * 删除单个Agent
+     *
+     * 权限说明：
+     * - 平台管理员：删除任意Agent
+     * - 商户用户：只能删除自己商户的Agent
+     *
+     * @param agentId AgentID
+     * @return 删除结果
+     */
+    @DeleteMapping("/{agentId}")
+    public ApiResponse<Void> deleteAgent(@PathVariable String agentId) {
+        agentInstanceService.deleteByAgentId(agentId);
+        log.info("删除Agent完成 - AgentID: {}", agentId);
+        return ApiResponse.success("删除成功", null);
+    }
+
+    /**
+     * 获取在线Agent列表
+     *
+     * 功能说明：
+     * - 查询当前WebSocket连接在线的Agent实例
+     * - 返回Agent基本信息（ID、商户、状态等）
+     *
+     * 权限说明：
+     * - 平台管理员：查询所有在线Agent
+     * - 商户用户：只查询自己商户下的在线Agent
+     *
+     * @return 在线Agent列表
+     */
+    @GetMapping("/online")
+    public ApiResponse<List<AgentInstance>> listOnline() {
+        List<AgentInstance> allAgents = agentInstanceService.findAllOnline();
+        
+        if (UserContext.getUserInfo() == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+        
+        if (!UserContext.isPlatformAdmin()) {
+            String merchantId = UserContext.getMerchantId();
+            if (merchantId == null) {
+                return ApiResponse.error(403, "无权访问");
+            }
+            allAgents = allAgents.stream()
+                    .filter(agent -> merchantId.equals(agent.getMerchantId()))
+                    .toList();
+        }
+        
+        return ApiResponse.success(allAgents);
     }
 }

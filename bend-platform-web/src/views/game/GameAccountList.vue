@@ -37,30 +37,9 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="isPrimary" label="主账号" width="80" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.isPrimary" type="warning" size="small">是</el-tag>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="priority" label="优先级" width="80" align="center">
-          <template #default="{ row }">
-            {{ row.priority ?? '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="dailyMatchLimit" label="每日限制" width="90" align="center">
-          <template #default="{ row }">
-            <span>{{ row.todayMatchCount ?? 0 }}/{{ row.dailyMatchLimit ?? '-' }}</span>
-          </template>
-        </el-table-column>
         <el-table-column prop="totalMatchCount" label="总场次" width="80" align="center">
           <template #default="{ row }">
             {{ row.totalMatchCount ?? 0 }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="lastUsedTime" label="最后使用" width="170">
-          <template #default="{ row }">
-            {{ formatDate(row.lastUsedTime) }}
           </template>
         </el-table-column>
         <el-table-column prop="createdTime" label="创建时间" width="170">

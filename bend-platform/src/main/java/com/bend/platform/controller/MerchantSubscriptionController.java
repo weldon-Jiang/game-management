@@ -9,6 +9,7 @@ import com.bend.platform.entity.Subscription;
 import com.bend.platform.repository.ActivationCodeBatchMapper;
 import com.bend.platform.repository.ActivationCodeMapper;
 import com.bend.platform.repository.MerchantMapper;
+import com.bend.platform.service.AutomationUsageService;
 import com.bend.platform.service.MerchantBalanceService;
 import com.bend.platform.service.SubscriptionService;
 import com.bend.platform.service.impl.VipLevelService;
@@ -59,6 +60,7 @@ public class MerchantSubscriptionController {
     private final SubscriptionService subscriptionService;
     private final VipLevelService vipLevelService;
     private final ObjectMapper objectMapper;
+    private final AutomationUsageService automationUsageService;
 
     /**
      * 获取商户订阅状态
@@ -395,5 +397,86 @@ public class MerchantSubscriptionController {
         types.add(Map.of("value", "full", "label", "全功能包月"));
         types.add(Map.of("value", "points", "label", "点数充值"));
         return ApiResponse.success(types);
+    }
+
+    /**
+     * 验证自动化启动条件
+     *
+     * @param request 包含流媒体账号ID和游戏账号ID列表
+     * @return 验证结果
+     */
+    @PostMapping("/validate-automation")
+    public ApiResponse<Map<String, Object>> validateAutomation(@RequestBody Map<String, Object> request) {
+        String merchantId = UserContext.getMerchantId();
+        String streamingAccountId = (String) request.get("streamingAccountId");
+        @SuppressWarnings("unchecked")
+        List<String> gameAccountIds = (List<String>) request.get("gameAccountIds");
+
+        log.info("验证自动化启动条件 - merchantId: {}, streamingAccountId: {}, gameAccountIds: {}",
+                merchantId, streamingAccountId, gameAccountIds);
+
+        Map<String, Object> result = new HashMap<>();
+        List<String> errors = new ArrayList<>();
+
+        if (streamingAccountId == null || streamingAccountId.isEmpty()) {
+            errors.add("流媒体账号ID不能为空");
+        }
+
+        if (gameAccountIds == null || gameAccountIds.isEmpty()) {
+            errors.add("游戏账号列表不能为空");
+        }
+
+        if (!errors.isEmpty()) {
+            result.put("canStart", false);
+            result.put("errors", errors);
+            return ApiResponse.success(result);
+        }
+
+        try {
+            List<Subscription> activeSubscriptions = subscriptionService.getActiveSubscriptions(merchantId);
+            
+            boolean hasValidSubscription = false;
+            String subscriptionType = null;
+
+            for (Subscription sub : activeSubscriptions) {
+                if ("active".equals(sub.getStatus())) {
+                    hasValidSubscription = true;
+                    subscriptionType = sub.getSubscriptionType();
+                    break;
+                }
+            }
+
+            if (hasValidSubscription) {
+                result.put("canStart", true);
+                result.put("errors", new ArrayList<>());
+                result.put("subscriptionType", subscriptionType);
+                result.put("chargeType", "subscription");
+                log.info("自动化验证通过 - merchantId: {}, subscriptionType: {}", merchantId, subscriptionType);
+            } else {
+                MerchantBalance merchantBalance = balanceService.getByMerchantId(merchantId);
+                Integer balance = merchantBalance != null ? merchantBalance.getBalance() : 0;
+                if (balance != null && balance > 0) {
+                    result.put("canStart", true);
+                    result.put("errors", new ArrayList<>());
+                    result.put("subscriptionType", null);
+                    result.put("chargeType", "per_use");
+                    result.put("balance", balance);
+                    log.info("自动化验证通过 - 使用点数余额 - merchantId: {}, balance: {}", merchantId, balance);
+                } else {
+                    errors.add("当前没有生效中的订阅且余额不足，请先激活订阅或充值点数");
+                    result.put("canStart", false);
+                    result.put("errors", errors);
+                    log.warn("自动化验证失败 - 没有生效中的订阅且余额不足 - merchantId: {}", merchantId);
+                }
+            }
+
+            return ApiResponse.success(result);
+        } catch (Exception e) {
+            log.error("验证自动化条件失败 - merchantId: {}, error: {}", merchantId, e.getMessage(), e);
+            errors.add("验证失败：" + e.getMessage());
+            result.put("canStart", false);
+            result.put("errors", errors);
+            return ApiResponse.success(result);
+        }
     }
 }

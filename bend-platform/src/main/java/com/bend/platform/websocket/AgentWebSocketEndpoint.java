@@ -1,8 +1,11 @@
 package com.bend.platform.websocket;
 
 import com.bend.platform.config.AgentWebSocketConfigurator;
+import com.bend.platform.entity.AgentInstance;
 import com.bend.platform.entity.AgentVersion;
+import com.bend.platform.entity.XboxHost;
 import com.bend.platform.service.AgentInstanceService;
+import com.bend.platform.service.XboxHostService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +17,7 @@ import jakarta.websocket.server.ServerEndpoint;
 import org.springframework.context.ApplicationContext;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class AgentWebSocketEndpoint {
 
     private static AgentInstanceService agentInstanceService;
+    private static XboxHostService xboxHostService;
     private static ApplicationContext applicationContext;
 
     public static void setApplicationContext(ApplicationContext context) {
@@ -36,6 +41,7 @@ public class AgentWebSocketEndpoint {
     public void init() {
         if (applicationContext != null) {
             agentInstanceService = applicationContext.getBean(AgentInstanceService.class);
+            xboxHostService = applicationContext.getBean(XboxHostService.class);
         }
     }
 
@@ -43,9 +49,20 @@ public class AgentWebSocketEndpoint {
     private static final Map<String, AtomicInteger> AGENT_RECONNECT_COUNT = new ConcurrentHashMap<>();
     private static final int MAX_RECONNECT_COUNT = 10;
 
+    private static void ensureServicesInitialized() {
+        if (applicationContext != null && agentInstanceService == null) {
+            agentInstanceService = applicationContext.getBean(AgentInstanceService.class);
+        }
+        if (applicationContext != null && xboxHostService == null) {
+            xboxHostService = applicationContext.getBean(XboxHostService.class);
+        }
+    }
+
     @OnOpen
     public void onOpen(Session session, @PathParam("agentId") String agentId) {
         log.info("Agent WebSocket连接请求 - AgentID: {}, SessionID: {}", agentId, session.getId());
+
+        ensureServicesInitialized();
 
         String agentSecret = getAuthToken(session);
         if (agentSecret == null) {
@@ -92,6 +109,8 @@ public class AgentWebSocketEndpoint {
     @OnMessage
     public void onMessage(String message, Session session, @PathParam("agentId") String agentId) {
         try {
+            log.info("收到Agent消息 - AgentID: {}, Message长度: {}, Message: {}", agentId, message.length(), message);
+            
             ObjectMapper mapper = new ObjectMapper();
             JsonNode json = mapper.readTree(message);
             JsonNode typeNode = json.get("type");
@@ -102,7 +121,7 @@ public class AgentWebSocketEndpoint {
             String type = typeNode.asText();
             JsonNode data = json.get("data");
 
-            log.debug("收到Agent消息 - AgentID: {}, Type: {}", agentId, type);
+            log.info("解析Agent消息成功 - AgentID: {}, Type: {}", agentId, type);
 
             if ("heartbeat".equals(type)) {
                 handleHeartbeat(agentId, data);
@@ -114,6 +133,8 @@ public class AgentWebSocketEndpoint {
                 handleTaskProgress(agentId, data);
             } else if ("log".equals(type)) {
                 handleAgentLog(agentId, data);
+            } else if ("xbox_discovered".equals(type)) {
+                handleXboxDiscovered(agentId, data);
             } else {
                 log.warn("未知消息类型 - AgentID: {}, Type: {}", agentId, type);
             }
@@ -150,16 +171,17 @@ public class AgentWebSocketEndpoint {
 
     private boolean validateAgent(String agentId, String agentSecret) {
         try {
+            ensureServicesInitialized();
             if (agentInstanceService == null) {
                 log.warn("AgentInstanceService未初始化");
                 return false;
             }
             return agentInstanceService.validateCredentials(agentId, agentSecret);
         } catch (Exception e) {
-            log.error("验证Agent失败 - AgentID: {}", agentId, e);
-            return false;
+                log.error("验证Agent失败 - AgentID: {}", agentId, e);
+                return false;
+            }
         }
-    }
 
     private void closeSession(Session session, int code, String reason) {
         try {
@@ -198,6 +220,13 @@ public class AgentWebSocketEndpoint {
         sendMessageToAgent(agentId, "task", data);
     }
 
+    public static void sendCancelTaskToAgent(String agentId, String taskId) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("taskId", taskId);
+        sendMessageToAgent(agentId, "cancel_task", data);
+        log.info("发送任务取消指令 - AgentID: {}, TaskID: {}", agentId, taskId);
+    }
+
     public static void sendVersionUpdate(String agentId, AgentVersion version) {
         Map<String, Object> data = new HashMap<>();
         data.put("version", version.getVersion());
@@ -209,6 +238,13 @@ public class AgentWebSocketEndpoint {
         data.put("timestamp", System.currentTimeMillis());
         sendMessageToAgent(agentId, "version_update", data);
         log.info("发送版本更新通知 - AgentID: {}, 版本: {}", agentId, version.getVersion());
+    }
+
+    public static void sendDiscoverXbox(String agentId) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("timestamp", System.currentTimeMillis());
+        sendMessageToAgent(agentId, "discover_xbox", data);
+        log.info("发送Xbox发现指令 - AgentID: {}", agentId);
     }
 
     public static void broadcastToAdmins(String type, Map<String, Object> data) {
@@ -228,6 +264,17 @@ public class AgentWebSocketEndpoint {
         return session != null && session.isOpen();
     }
 
+    /**
+     * 检查Agent是否可用（WebSocket连接已建立或最近有心跳）
+     */
+    public static boolean isAgentAvailable(String agentId) {
+        // 首先检查WebSocket连接
+        if (isAgentOnline(agentId)) {
+            return true;
+        }
+        return false;
+    }
+
     public static int getOnlineAgentCount() {
         return AGENT_SESSIONS.size();
     }
@@ -243,6 +290,7 @@ public class AgentWebSocketEndpoint {
             String currentStreamingId = data.has("currentStreamingId") ? data.get("currentStreamingId").asText() : null;
             String version = data.has("version") ? data.get("version").asText() : null;
 
+            ensureServicesInitialized();
             if (agentInstanceService != null) {
                 agentInstanceService.updateHeartbeat(agentId, status, currentTaskId, currentStreamingId, version);
             }
@@ -305,5 +353,76 @@ public class AgentWebSocketEndpoint {
 
     private void handleAgentLog(String agentId, JsonNode data) {
         log.debug("Agent日志 - AgentID: {}, Data: {}", agentId, data);
+    }
+
+    private void handleXboxDiscovered(String agentId, JsonNode data) {
+        try {
+            log.info("========== 开始处理Xbox发现消息 ==========");
+            log.info("Agent发现Xbox主机 - AgentID: {}, Data: {}", agentId, data);
+
+            ensureServicesInitialized();
+            log.info("服务初始化完成");
+            
+            AgentInstance agent = agentInstanceService.findByAgentId(agentId);
+            if (agent == null) {
+                log.warn("Agent实例不存在 - AgentID: {}", agentId);
+                return;
+            }
+            log.info("找到Agent实例 - MerchantID: {}", agent.getMerchantId());
+
+            String merchantId = agent.getMerchantId();
+            int discoveredCount = 0;
+            List<Map<String, Object>> discoveredXboxes = new ArrayList<>();
+
+            if (data.has("xboxes") && data.get("xboxes").isArray()) {
+                JsonNode xboxes = data.get("xboxes");
+                discoveredCount = xboxes.size();
+                
+                for (JsonNode xbox : xboxes) {
+                    String xboxId = xbox.has("device_id") ? xbox.get("device_id").asText() : null;
+                    String name = xbox.has("name") ? xbox.get("name").asText() : null;
+                    String ipAddress = xbox.has("ip_address") ? xbox.get("ip_address").asText() : null;
+
+                    if (xboxId == null || xboxId.isEmpty()) {
+                        log.warn("Xbox设备ID为空，跳过 - AgentID: {}", agentId);
+                        continue;
+                    }
+
+                    XboxHost host = xboxHostService.createOrUpdate(merchantId, xboxId, name, ipAddress);
+                    
+                    Map<String, Object> xboxInfo = new HashMap<>();
+                    xboxInfo.put("id", host.getId());
+                    xboxInfo.put("deviceId", xboxId);
+                    xboxInfo.put("name", name);
+                    xboxInfo.put("ipAddress", ipAddress);
+                    xboxInfo.put("status", host.getStatus());
+                    discoveredXboxes.add(xboxInfo);
+                    
+                    log.info("Xbox主机已注册 - XboxID: {}, Name: {}, IP: {}", xboxId, name, ipAddress);
+                }
+            }
+
+            if (discoveredCount == 0) {
+                log.info("Agent未发现Xbox主机 - AgentID: {}", agentId);
+            }
+
+            Map<String, Object> adminData = new HashMap<>();
+            adminData.put("agentId", agentId);
+            adminData.put("agentName", agent.getHost());
+            adminData.put("merchantId", merchantId);
+            adminData.put("discoveredCount", discoveredCount);
+            adminData.put("xboxes", discoveredXboxes);
+            adminData.put("timestamp", System.currentTimeMillis());
+            adminData.put("message", discoveredCount > 0 
+                ? String.format("成功发现 %d 台Xbox主机", discoveredCount) 
+                : "未发现Xbox主机，请确保Xbox主机已开机并连接到同一网络");
+            
+            log.info("准备广播Xbox发现结果 - 发现数量: {}, 商户ID: {}", discoveredCount, merchantId);
+            broadcastToAdmins("xbox_discovered", adminData);
+            log.info("Xbox发现消息广播完成");
+
+        } catch (Exception e) {
+            log.error("处理Xbox发现消息失败 - AgentID: {}", agentId, e);
+        }
     }
 }

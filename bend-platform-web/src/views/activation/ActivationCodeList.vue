@@ -46,6 +46,7 @@
         :data="tableData"
         v-loading="loading"
         class="data-table"
+        :table-layout="'fixed'"
         scrollbar-always-on
       >
         <el-table-column prop="code" label="激活码" min-width="150">
@@ -53,7 +54,13 @@
             <span class="code-text">{{ row.code }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="subscriptionType" label="类型" width="160" align="center">
+        <el-table-column prop="merchantName" label="商户" min-width="120" align="center">
+          <template #default="{ row }">
+            <span v-if="row.merchantName">{{ row.merchantName }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="subscriptionType" label="类型" width="120" align="center">
           <template #default="{ row }">
             <el-tag :type="getTypeTag(row.subscriptionType)" size="small">
               {{ getTypeName(row.subscriptionType) }}
