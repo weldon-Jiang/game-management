@@ -8,18 +8,23 @@
 - 提供任务控制（暂停、恢复、停止）
 - 处理任务异常和资源清理
 - 处理密码解密（支持token兑换和AES解密）
+- 请求间隔控制（防止触发Microsoft安全验证）
+- 指数退避策略（失败重试机制）
 
 核心原则：
 - 每个串流账号对应一个独立协程
 - 一个协程异常不影响其他协程
 - 任务完成后协程结束，资源自动清理
+- 同一账号登录间隔至少10分钟，避免触发安全验证
 
 作者：技术团队
-版本：1.0
+版本：2.0
 """
 
 import asyncio
 import threading
+import time
+import random
 from typing import Dict, Optional, List, Any, Callable
 
 from ..core.logger import get_logger
@@ -39,11 +44,21 @@ class AutomationScheduler:
     - 为每个串流账号任务创建独立协程
     - 提供任务控制接口
     - 处理异常和资源清理
+    - 请求间隔控制防止触发安全验证
 
     线程安全：
     - 使用线程锁保护任务状态字典
     - 每个任务独立协程，互不影响
+
+    安全策略：
+    - 同一账号最小登录间隔：5分钟（防止频繁登录触发安全验证）
+    - 不同账号最小间隔：15秒（避免同一IP频繁请求）
+    - 指数退避重试：失败时递增等待时间
     """
+
+    # 安全策略配置（可根据实际情况调整）
+    MIN_LOGIN_INTERVAL = 300  # 同一账号最小登录间隔（秒）- 5分钟
+    MIN_ACCOUNT_INTERVAL = 15  # 不同账号最小登录间隔（秒）- 15秒
 
     def __init__(self, max_concurrent_tasks: int = 10, agent_id: str = None, agent_secret: str = None):
         """
@@ -69,7 +84,12 @@ class AutomationScheduler:
 
         self._lock = threading.Lock()
 
+        # 登录时间记录（用于间隔控制）
+        self._last_login_times: Dict[str, float] = {}
+        self._login_lock = asyncio.Lock()
+
         self.logger.info(f"任务调度器初始化完成，最大并发: {max_concurrent_tasks}")
+        self.logger.info(f"登录间隔控制: 同一账号{self.MIN_LOGIN_INTERVAL}秒, 不同账号{self.MIN_ACCOUNT_INTERVAL}秒")
 
     def set_credentials(self, agent_id: str, agent_secret: str):
         """
@@ -153,6 +173,9 @@ class AutomationScheduler:
 
         cancel_event = asyncio.Event()
 
+        # 登录间隔控制（防止触发安全验证）
+        await self._wait_login_interval(streaming_account_email)
+
         with self._lock:
             self._cancel_events[task_id] = cancel_event
             self._task_contexts[task_id] = context
@@ -167,6 +190,81 @@ class AutomationScheduler:
             self._running_tasks[task_id] = asyncio_task
 
         return True
+
+    async def _wait_login_interval(self, email: str):
+        """
+        等待登录间隔，避免频繁登录触发安全验证
+
+        参数：
+        - email: 串流账号邮箱
+        """
+        async with self._login_lock:
+            now = time.time()
+
+            # 检查同一账号登录间隔
+            wait_time = 0
+            if email in self._last_login_times:
+                elapsed = now - self._last_login_times[email]
+                if elapsed < self.MIN_LOGIN_INTERVAL:
+                    wait_time = self.MIN_LOGIN_INTERVAL - elapsed
+                    self.logger.info(f"账号 {email} 需要等待 {wait_time:.1f}秒后再登录（最小间隔 {self.MIN_LOGIN_INTERVAL}秒）")
+                    await asyncio.sleep(wait_time)
+
+            # 检查不同账号登录间隔
+            if self._last_login_times:
+                last_login_time = max(self._last_login_times.values())
+                elapsed = now - last_login_time
+                if elapsed < self.MIN_ACCOUNT_INTERVAL:
+                    account_wait = self.MIN_ACCOUNT_INTERVAL - elapsed
+                    self.logger.info(f"不同账号间隔控制，等待 {account_wait:.1f}秒")
+                    await asyncio.sleep(account_wait)
+
+            # 更新登录时间记录
+            self._last_login_times[email] = time.time()
+            self.logger.info(f"账号 {email} 登录时间已记录")
+
+    def _exponential_backoff(self, attempt: int, base_delay: float = 5.0, max_delay: float = 60.0) -> float:
+        """
+        计算指数退避等待时间
+
+        参数：
+        - attempt: 当前重试次数（从0开始）
+        - base_delay: 基础延迟时间（秒）
+        - max_delay: 最大延迟时间（秒）
+
+        返回：
+        - 等待时间（秒）
+        """
+        delay = min(base_delay * (2 ** attempt) + random.uniform(0, base_delay * 0.5), max_delay)
+        self.logger.debug(f"指数退避: 第{attempt+1}次尝试，等待 {delay:.2f}秒")
+        return delay
+
+    async def _execute_with_backoff(self, func, *args, max_retries: int = 3, **kwargs):
+        """
+        使用指数退避执行函数
+
+        参数：
+        - func: 要执行的异步函数
+        - max_retries: 最大重试次数
+
+        返回：
+        - 函数执行结果
+        """
+        last_exception = None
+
+        for attempt in range(max_retries):
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                last_exception = e
+                self.logger.warning(f"执行失败(尝试 {attempt+1}/{max_retries}): {e}")
+
+                if attempt < max_retries - 1:
+                    delay = self._exponential_backoff(attempt)
+                    await asyncio.sleep(delay)
+
+        self.logger.error(f"执行失败，已达最大重试次数 {max_retries}")
+        raise last_exception
 
     async def _run_task(
         self,

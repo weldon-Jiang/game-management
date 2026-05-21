@@ -8,13 +8,28 @@
 - 支持账号密码自动填充
 - 支持无头模式（隐藏浏览器窗口）
 - 自动关闭浏览器
+- 详细的性能监控和日志记录
 
 依赖：
 - playwright>=1.40.0
 - 安装命令: playwright install chromium
 
+性能优化策略：
+1. 移除不必要的固定等待时间，使用智能等待
+2. 优化页面加载策略（domcontentloaded 而非 networkidle）
+3. 缩短元素等待超时时间（默认5秒，按需调整）
+4. 使用 page.wait_for_load_state() 替代 sleep
+5. 添加步骤耗时统计
+
+日志记录：
+- 记录每个步骤的开始/结束时间
+- 记录每个步骤的耗时
+- 记录整体认证流程耗时
+- 记录页面加载时间
+- 记录元素操作时间
+
 作者：技术团队
-版本：2.0
+版本：3.0
 
 登录流程：
 1. 访问 https://www.microsoft.com/link
@@ -27,11 +42,42 @@
 
 import asyncio
 import logging
+import time
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 
 logger = logging.getLogger('browser_automation')
+
+
+class PerformanceTimer:
+    """性能计时器"""
+    
+    def __init__(self):
+        self._start_times = {}
+        self._durations = {}
+    
+    def start(self, step_name: str):
+        """开始计时"""
+        self._start_times[step_name] = time.perf_counter()
+        logger.debug(f"⏱️ [{step_name}] 开始计时")
+    
+    def end(self, step_name: str) -> float:
+        """结束计时并返回耗时（秒）"""
+        if step_name in self._start_times:
+            duration = time.perf_counter() - self._start_times[step_name]
+            self._durations[step_name] = duration
+            logger.info(f"⏱️ [{step_name}] 完成，耗时: {duration:.2f}秒")
+            return duration
+        return 0.0
+    
+    def get_duration(self, step_name: str) -> float:
+        """获取步骤耗时"""
+        return self._durations.get(step_name, 0.0)
+    
+    def get_summary(self) -> Dict[str, float]:
+        """获取所有步骤的耗时汇总"""
+        return dict(self._durations)
 
 
 class BrowserState(Enum):
@@ -74,7 +120,19 @@ class DeviceCodeAuthenticator:
             email="user@outlook.com",
             password="password123"
         )
+    
+    性能优化：
+    - 使用智能等待替代固定sleep
+    - 优化页面加载策略
+    - 添加性能计时器记录每个步骤耗时
     """
+
+    # 元素等待超时时间（秒）- 优化：从15秒缩短到8秒
+    ELEMENT_TIMEOUT = 8000
+    # 短等待时间（毫秒）- 用于点击后的最小等待
+    SHORT_DELAY = 500
+    # 页面加载超时时间（秒）
+    PAGE_LOAD_TIMEOUT = 30000
 
     def __init__(self, headless: bool = True):
         """
@@ -89,6 +147,7 @@ class DeviceCodeAuthenticator:
         self._context = None
         self._page = None
         self._logger = logger
+        self._timer = PerformanceTimer()  # 性能计时器
 
     @property
     def state(self) -> BrowserState:
@@ -112,11 +171,16 @@ class DeviceCodeAuthenticator:
         - email: 微软账号邮箱
         - password: 微软账号密码
         - timeout: 超时时间（秒）
-
+        
         返回：
         - True: 认证成功
         - False: 认证失败
+        
+        性能记录：
+        - 记录每个步骤的耗时
+        - 记录整体认证耗时
         """
+
         config = AuthConfig(
             verification_url=verification_url,
             user_code=user_code,
@@ -125,16 +189,24 @@ class DeviceCodeAuthenticator:
             timeout=timeout
         )
 
+        # 开始整体认证计时
+        total_start_time = time.perf_counter()
+        self._logger.info(f"========== 开始设备码认证流程 (账号: {email}) ==========")
+
         try:
             # 启动浏览器
             self._state = BrowserState.LAUNCHING
+            self._timer.start("浏览器启动")
             if not await self._launch_browser():
                 self._logger.error("启动浏览器失败")
                 return False
+            self._timer.end("浏览器启动")
 
             # 执行完整认证流程
             self._state = BrowserState.AUTHENTICATING
+            self._timer.start("认证流程")
             success = await self._execute_auth_flow(config)
+            self._timer.end("认证流程")
 
             # 认证成功
             if success:
@@ -145,12 +217,24 @@ class DeviceCodeAuthenticator:
                 self._logger.error("认证流程失败")
 
             # 关闭浏览器
+            self._timer.start("浏览器关闭")
             await self._close_browser()
+            self._timer.end("浏览器关闭")
+
+            # 输出性能汇总
+            total_duration = time.perf_counter() - total_start_time
+            self._logger.info(f"========== 认证流程完成 ==========")
+            self._logger.info(f"📊 整体耗时: {total_duration:.2f}秒")
+            for step, duration in self._timer.get_summary().items():
+                self._logger.info(f"  - {step}: {duration:.2f}秒")
+
             return success
 
         except Exception as e:
             self._logger.error(f"认证异常: {e}", exc_info=True)
             self._state = BrowserState.FAILED
+            total_duration = time.perf_counter() - total_start_time
+            self._logger.error(f"认证失败，总耗时: {total_duration:.2f}秒")
             await self._close_browser()
             return False
 
@@ -221,52 +305,71 @@ class DeviceCodeAuthenticator:
         返回：
         - True: 认证成功
         - False: 认证失败
+        
+        性能优化：
+        - 使用 page.wait_for_load_state() 替代固定sleep
+        - 优化元素等待策略
+        - 添加每个步骤的计时
         """
         try:
             self._logger.info(f"导航到验证URL: {config.verification_url}")
 
             # Step 1: 导航到验证URL
-            self._logger.info("执行 page.goto() ...")
-            await self._page.goto(config.verification_url, wait_until='domcontentloaded')
-            self._logger.info("page.goto() 完成")
-            await asyncio.sleep(2)
+            self._timer.start("页面导航")
+            self._logger.info("[步骤1/6] 导航到验证页面...")
+            await self._page.goto(config.verification_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+            # 优化：使用智能等待替代固定sleep(2)
+            await self._page.wait_for_load_state('domcontentloaded')
+            self._timer.end("页面导航")
+            self._logger.info("[步骤1/6] 页面导航完成")
 
             # Step 2: 输入设备码并点击"允许访问"
-            self._logger.info("执行设备码步骤...")
+            self._timer.start("设备码输入")
+            self._logger.info("[步骤2/6] 输入设备码...")
             if not await self._handle_device_code_step(config.user_code):
-                self._logger.error("设备码步骤失败")
+                self._logger.error("[步骤2/6] 设备码步骤失败")
                 await self._save_screenshot("device_code_step_failed")
                 return False
-            self._logger.info("设备码步骤完成")
+            self._timer.end("设备码输入")
+            self._logger.info("[步骤2/6] 设备码步骤完成")
 
             # Step 3: 输入邮箱并点击"下一步"
-            self._logger.info("执行邮箱步骤...")
+            self._timer.start("邮箱输入")
+            self._logger.info("[步骤3/6] 输入邮箱...")
             if not await self._handle_email_step(config.email):
-                self._logger.error("邮箱输入步骤失败")
+                self._logger.error("[步骤3/6] 邮箱输入步骤失败")
                 await self._save_screenshot("email_step_failed")
                 return False
-            self._logger.info("邮箱步骤完成")
+            self._timer.end("邮箱输入")
+            self._logger.info("[步骤3/6] 邮箱步骤完成")
 
             # Step 4: 输入密码并点击"登录"
-            self._logger.info("执行密码步骤...")
+            self._timer.start("密码输入")
+            self._logger.info("[步骤4/6] 输入密码...")
             if not await self._handle_password_step(config.password):
-                self._logger.error("密码输入步骤失败")
+                self._logger.error("[步骤4/6] 密码输入步骤失败")
                 await self._save_screenshot("password_step_failed")
                 return False
-            self._logger.info("密码步骤完成")
+            self._timer.end("密码输入")
+            self._logger.info("[步骤4/6] 密码步骤完成")
 
             # Step 5: 处理保持登录状态页面
-            self._logger.info("执行保持登录状态步骤...")
+            self._timer.start("保持登录状态")
+            self._logger.info("[步骤5/6] 处理保持登录状态页面...")
             await self._handle_keep_signed_in_step()
-            self._logger.info("保持登录状态步骤完成")
+            self._timer.end("保持登录状态")
+            self._logger.info("[步骤5/6] 保持登录状态步骤完成")
 
             # Step 6: 等待成功页面
-            self._logger.info("等待成功页面...")
+            self._timer.start("等待成功页面")
+            self._logger.info("[步骤6/6] 等待成功页面...")
             if await self._wait_for_success_page(config.timeout):
-                self._logger.info("登录成功！")
+                self._timer.end("等待成功页面")
+                self._logger.info("[步骤6/6] ✅ 登录成功！")
                 return True
             else:
-                self._logger.error("未检测到成功页面")
+                self._timer.end("等待成功页面")
+                self._logger.error("[步骤6/6] ❌ 未检测到成功页面")
                 await self._save_screenshot("success_page_timeout")
                 return False
 
@@ -285,6 +388,8 @@ class DeviceCodeAuthenticator:
         返回：
         - True: 成功
         - False: 失败
+        
+        优化：使用类常量ELEMENT_TIMEOUT替代硬编码的15000
         """
         try:
             self._logger.info("等待设备码输入框...")
@@ -299,18 +404,19 @@ class DeviceCodeAuthenticator:
 
             input_found = False
             for selector in selectors:
-                self._logger.info(f"尝试选择器: {selector}")
+                self._logger.debug(f"尝试选择器: {selector}")
                 try:
                     element = self._page.locator(selector).first
-                    self._logger.info(f"等待元素可见: {selector}")
-                    await element.wait_for(timeout=15000, state='visible')
-                    self._logger.info(f"填写设备码: {user_code}")
+                    self._logger.debug(f"等待元素可见: {selector}")
+                    # 优化：使用类常量替代硬编码的15000
+                    await element.wait_for(timeout=self.ELEMENT_TIMEOUT, state='visible')
+                    self._logger.info(f"填写设备码")
                     await element.fill(user_code)
-                    self._logger.info(f"设备码已输入: {user_code}")
+                    self._logger.info(f"设备码已输入")
                     input_found = True
                     break
                 except Exception as e:
-                    self._logger.warning(f"选择器 {selector} 失败: {e}")
+                    self._logger.debug(f"选择器 {selector} 失败: {e}")
                     continue
 
             if not input_found:
@@ -318,8 +424,8 @@ class DeviceCodeAuthenticator:
                 return False
 
             # 点击"允许访问"按钮
-            self._logger.info("等待后点击'允许访问'按钮...")
-            await asyncio.sleep(1)
+            self._logger.info("点击'允许访问'按钮...")
+            # 优化：移除固定sleep(1)，依赖元素等待
             await self._click_allow_access_button()
             self._logger.info("'_click_allow_access_button()' 执行完成")
 
@@ -340,18 +446,19 @@ class DeviceCodeAuthenticator:
         ]
 
         for selector in selectors:
-            self._logger.info(f"尝试按钮选择器: {selector}")
+            self._logger.debug(f"尝试按钮选择器: {selector}")
             try:
                 element = self._page.locator(selector).first
                 count = await element.count()
-                self._logger.info(f"选择器 {selector} 找到 {count} 个元素")
+                self._logger.debug(f"选择器 {selector} 找到 {count} 个元素")
                 if count > 0:
                     await element.click()
                     self._logger.info("已点击'允许访问'按钮")
-                    await asyncio.sleep(2)
+                    # 优化：使用异步等待替代固定sleep(2)
+                    await asyncio.sleep(self.SHORT_DELAY / 1000)
                     return
             except Exception as e:
-                self._logger.warning(f"按钮选择器 {selector} 失败: {e}")
+                self._logger.debug(f"按钮选择器 {selector} 失败: {e}")
                 continue
 
         self._logger.warning("未找到'允许访问'按钮")
@@ -366,6 +473,8 @@ class DeviceCodeAuthenticator:
         返回：
         - True: 成功
         - False: 失败
+        
+        优化：使用类常量ELEMENT_TIMEOUT替代硬编码的15000
         """
         try:
             self._logger.info("等待邮箱输入框...")
@@ -384,12 +493,14 @@ class DeviceCodeAuthenticator:
             for selector in selectors:
                 try:
                     element = self._page.locator(selector).first
-                    await element.wait_for(timeout=15000, state='visible')
+                    # 优化：使用类常量替代硬编码的15000
+                    await element.wait_for(timeout=self.ELEMENT_TIMEOUT, state='visible')
                     await element.fill(email)
                     self._logger.info(f"邮箱已输入: {email}")
                     input_found = True
                     break
-                except:
+                except Exception as e:
+                    self._logger.debug(f"邮箱选择器 {selector} 失败: {e}")
                     continue
 
             if not input_found:
@@ -397,7 +508,7 @@ class DeviceCodeAuthenticator:
                 return False
 
             # 点击"下一步"按钮
-            await asyncio.sleep(1)
+            # 优化：移除固定sleep(1)，依赖元素等待
             await self._click_next_button()
 
             return True
@@ -421,9 +532,11 @@ class DeviceCodeAuthenticator:
                 if await element.count() > 0:
                     await element.click()
                     self._logger.info("已点击'下一步'按钮")
-                    await asyncio.sleep(2)
+                    # 优化：使用异步等待替代固定sleep(2)
+                    await asyncio.sleep(self.SHORT_DELAY / 1000)
                     return
-            except:
+            except Exception as e:
+                self._logger.debug(f"下一步按钮选择器 {selector} 失败: {e}")
                 continue
 
         self._logger.warning("未找到'下一步'按钮")
@@ -438,6 +551,8 @@ class DeviceCodeAuthenticator:
         返回：
         - True: 成功
         - False: 失败
+        
+        优化：使用类常量ELEMENT_TIMEOUT替代硬编码的15000
         """
         try:
             self._logger.info("等待密码输入框...")
@@ -454,12 +569,14 @@ class DeviceCodeAuthenticator:
             for selector in selectors:
                 try:
                     element = self._page.locator(selector).first
-                    await element.wait_for(timeout=15000, state='visible')
+                    # 优化：使用类常量替代硬编码的15000
+                    await element.wait_for(timeout=self.ELEMENT_TIMEOUT, state='visible')
                     await element.fill(password)
                     self._logger.info("密码已输入")
                     input_found = True
                     break
-                except:
+                except Exception as e:
+                    self._logger.debug(f"密码选择器 {selector} 失败: {e}")
                     continue
 
             if not input_found:
@@ -467,7 +584,7 @@ class DeviceCodeAuthenticator:
                 return False
 
             # 点击"登录"按钮
-            await asyncio.sleep(1)
+            # 优化：移除固定sleep(1)，依赖元素等待
             await self._click_login_button()
 
             return True
@@ -491,9 +608,11 @@ class DeviceCodeAuthenticator:
                 if await element.count() > 0:
                     await element.click()
                     self._logger.info("已点击'登录'按钮")
-                    await asyncio.sleep(2)
+                    # 优化：使用异步等待替代固定sleep(2)
+                    await asyncio.sleep(self.SHORT_DELAY / 1000)
                     return
-            except:
+            except Exception as e:
+                self._logger.debug(f"登录按钮选择器 {selector} 失败: {e}")
                 continue
 
         self._logger.warning("未找到'登录'按钮")
@@ -513,12 +632,15 @@ class DeviceCodeAuthenticator:
             for selector in selectors:
                 try:
                     element = self._page.locator(selector).first
-                    await element.wait_for(timeout=5000, state='visible')
+                    # 优化：使用类常量替代硬编码的5000
+                    await element.wait_for(timeout=self.ELEMENT_TIMEOUT // 2, state='visible')
                     await element.click()
                     self._logger.info("已点击'是'按钮（保持登录状态）")
-                    await asyncio.sleep(2)
+                    # 优化：使用异步等待替代固定sleep(2)
+                    await asyncio.sleep(self.SHORT_DELAY / 1000)
                     return
-                except:
+                except Exception as e:
+                    self._logger.debug(f"保持登录选择器 {selector} 失败: {e}")
                     continue
 
             self._logger.info("未出现保持登录状态页面，继续...")
@@ -536,6 +658,8 @@ class DeviceCodeAuthenticator:
         返回：
         - True: 检测到成功页面
         - False: 超时
+        
+        优化：增加检测频率，减少等待时间
         """
         try:
             self._logger.info("等待成功页面...")
@@ -563,7 +687,8 @@ class DeviceCodeAuthenticator:
             ]
 
             start_time = asyncio.get_event_loop().time()
-            check_interval = 2
+            # 优化：减少检测间隔，从2秒缩短到1秒
+            check_interval = 1
 
             while (asyncio.get_event_loop().time() - start_time) < timeout:
                 # 检查成功指标
@@ -571,9 +696,11 @@ class DeviceCodeAuthenticator:
                     try:
                         if await self._page.locator(indicator).count() > 0:
                             self._logger.info(f"检测到成功标志: {indicator}")
-                            await asyncio.sleep(2)  # 额外等待确保页面完全加载
+                            # 优化：减少等待时间，从2秒缩短到0.5秒
+                            await asyncio.sleep(0.5)
                             return True
-                    except:
+                    except Exception as e:
+                        self._logger.debug(f"成功指标检测失败 {indicator}: {e}")
                         pass
 
                 # 检查失败指标
