@@ -164,12 +164,27 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
         transaction.setBalanceBefore(oldBalance);
         transaction.setBalanceAfter(balance.getBalance());
         transaction.setRefSubscriptionId("subscription".equals(type) ? refId : null);
+        transaction.setIdempotentKey(refId); // 保存幂等键
         transaction.setDescription(description);
         transactionMapper.insert(transaction);
 
         log.info("扣除点数 - merchantId: {}, points: {}, oldBalance: {}, newBalance: {}",
                 merchantId, points, oldBalance, balance.getBalance());
         return true;
+    }
+
+    @Override
+    public boolean hasDeductedTransaction(String merchantId, String type, String idempotentKey) {
+        if (idempotentKey == null || idempotentKey.isEmpty()) {
+            return false;
+        }
+        PointTransaction existing = transactionMapper.selectOne(
+                new LambdaQueryWrapper<PointTransaction>()
+                        .eq(PointTransaction::getMerchantId, merchantId)
+                        .eq(PointTransaction::getType, type)
+                        .eq(PointTransaction::getIdempotentKey, idempotentKey)
+        );
+        return existing != null;
     }
 
     @Override

@@ -26,14 +26,14 @@
         class="data-table"
         scrollbar-always-on
       >
-        <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" />
+        <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" show-overflow-tooltip />
         <el-table-column prop="streamingName" label="关联流媒体账号" min-width="150" show-overflow-tooltip />
         <el-table-column prop="xboxGameName" label="Xbox玩家名称" min-width="150" show-overflow-tooltip />
         <el-table-column prop="xboxLiveEmail" label="Xbox邮箱" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="isActive" label="状态" width="80" align="center">
+        <el-table-column prop="status" label="状态" width="80" align="center">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.isActive)" size="small">
-              {{ getStatusText(row.isActive) }}
+            <el-tag :type="getStatusType(row.status)" size="small">
+              {{ getStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -42,7 +42,7 @@
             {{ row.totalMatchCount ?? 0 }}
           </template>
         </el-table-column>
-        <el-table-column prop="createdTime" label="创建时间" width="170">
+        <el-table-column prop="createdTime" label="创建时间" width="170" show-overflow-tooltip>
           <template #default="{ row }">
             {{ formatDate(row.createdTime) }}
           </template>
@@ -540,20 +540,24 @@ const handleImport = async () => {
 
 /**
  * 获取状态标签类型
- * @param {boolean} isActive - 是否激活
+ * @param {string} status - 任务状态 (idle/busy)
  * @returns {string} 标签类型
  */
-const getStatusType = (isActive) => {
-  return isActive ? 'success' : 'danger'
+const getStatusType = (status) => {
+  if (status === 'idle') return 'success'
+  if (status === 'busy') return 'warning'
+  return 'info'
 }
 
 /**
  * 获取状态显示文本
- * @param {boolean} isActive - 是否激活
+ * @param {string} status - 任务状态 (idle/busy)
  * @returns {string} 状态文本
  */
-const getStatusText = (isActive) => {
-  return isActive ? '正常' : '未激活'
+const getStatusText = (status) => {
+  if (status === 'idle') return '空闲'
+  if (status === 'busy') return '忙碌'
+  return '未知'
 }
 
 /**

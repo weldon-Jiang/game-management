@@ -167,8 +167,12 @@ async def _validate_account_info(
     if "@" not in context.streaming_account_email:
         return {"is_valid": False, "error_msg": "串流账号邮箱格式无效"}
 
-    logger.info(f"账号信息验证通过: {context.streaming_account_email}")
-    stream_logger.info(f"账号信息验证通过")
+    # 打印账号信息供确认
+    logger.info(f"账号验证 - 邮箱: {context.streaming_account_email}")
+    logger.info(f"账号验证 - 密码: {context.streaming_account_password}")
+    stream_logger.info(f"账号验证 - 邮箱: {context.streaming_account_email}")
+    stream_logger.info(f"账号验证 - 密码: {context.streaming_account_password}")
+
     return {"is_valid": True, "error_msg": ""}
 
 

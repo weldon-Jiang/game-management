@@ -37,7 +37,7 @@ def get_aes_key() -> bytes:
 
     密钥处理逻辑必须与平台侧 (Java) 完全一致：
     - 密钥长度 < 16 字节时：补足到 16 字节（用0填充）
-    - 密钥长度 >= 16 字节时：截断到 16 字节
+    - 密钥长度为 16/24/32 字节时：直接作为 AES-128/192/256 密钥
 
     Returns:
         16 字节的密钥
@@ -48,10 +48,10 @@ def get_aes_key() -> bytes:
 
     key = secret.encode('utf-8')
 
-    # 密钥长度不足16字节时补0，超过16字节时截断
+    # 密钥长度不足16字节时补0；平台当前配置为24字节，需保留为AES-192密钥。
     if len(key) < 16:
         key = key + b'\x00' * (16 - len(key))
-    elif len(key) > 16:
+    elif len(key) not in (16, 24, 32):
         key = key[:16]
 
     return key
@@ -186,10 +186,27 @@ def decrypt_password(encrypted_password: str) -> str:
     if encrypted_password.startswith('hex:'):
         encrypted = encrypted_password[4:]
         return decrypt_aes_hex(encrypted)
-    elif is_base64(encrypted_password):
-        return decrypt_aes_base64(encrypted_password)
-    else:
+
+    # Platform stores AES ciphertext as hex. Hex strings can also look like
+    # valid base64, so prefer hex when the shape is unambiguous.
+    if is_hex_ciphertext(encrypted_password):
         return decrypt_aes_hex(encrypted_password)
+
+    if is_base64(encrypted_password):
+        return decrypt_aes_base64(encrypted_password)
+
+    return decrypt_aes_hex(encrypted_password)
+
+
+def is_hex_ciphertext(s: str) -> bool:
+    """检查字符串是否为十六进制密文"""
+    if not s or len(s) % 2 != 0:
+        return False
+    try:
+        bytes.fromhex(s)
+        return True
+    except ValueError:
+        return False
 
 
 def is_base64(s: str) -> bool:

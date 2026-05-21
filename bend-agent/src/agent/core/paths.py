@@ -32,7 +32,15 @@ def get_config_path() -> str:
     返回值：agent.yaml 配置文件完整路径
     """
     base_dir = get_base_dir()
-    return os.path.join(base_dir, 'agent.yaml')
+    candidates = [
+        os.path.join(base_dir, 'agent.yaml'),
+        os.path.join(base_dir, 'configs', 'agent.yaml'),
+        os.path.join(os.path.dirname(base_dir), 'configs', 'agent.yaml'),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
 
 
 def get_templates_dir() -> str:

@@ -18,7 +18,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(rateLimitInterceptor)
                 .addPathPatterns("/api/**");
 
-        // JWT 认证拦截器 - 对所有 API 生效，但排除公开接口
+        // JWT 认证拦截器 - 对所有 API 生效，但排除公开接口和 Agent 回调接口
+        // 注意：Agent 回调接口（如 /api/{taskId}/progress）由 AgentAuthFilter 处理，不需要 JWT
         registry.addInterceptor(jwtAuthInterceptor)
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
@@ -33,7 +34,16 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/registration-codes/validate/**",
                         "/api/registration-codes/check/**",
                         "/api/registration-codes/activate/**",
-                        "/api/test/**"
+                        "/api/test/**",
+                        "/api/tasks/*/complete",
+                        "/api/tasks/*/fail",
+                        "/api/*/progress",
+                        "/api/*/match/complete",
+                        "/api/*/game-accounts/status",
+                        "/api/*/game-account/*/complete",
+                        "/api/*/game-account/*/status",
+                        "/api/daily-match-count/reset",
+                        "/api/agent/credentials/**"
                 );
     }
 }

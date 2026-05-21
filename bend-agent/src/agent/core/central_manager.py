@@ -364,6 +364,8 @@ class CentralManager:
             self.ws.on('version_update', self._handle_version_update)  # 版本更新
             self.ws.on('automation_control', self._handle_automation_control)  # 自动化控制
             self.ws.on('discover_xbox', self._handle_discover_xbox)  # Xbox发现指令
+            self.ws.on('stop_task', self._handle_stop_task)  # 停止任务指令
+            self.ws.on('cancel_task', self._handle_cancel_task)  # 取消任务指令
 
             # 启动各任务
             self._ws_task = asyncio.create_task(self.ws.listen())  # WebSocket监听
@@ -405,29 +407,25 @@ class CentralManager:
             await self._notify_uninstall(reason or "用户主动卸载", clear_registry)
             self._uninstall_requested = True
 
-        # 取消心跳任务
-        if self._heartbeat_task:
+        # 收集所有需要取消的任务
+        tasks_to_cancel = []
+        if self._heartbeat_task and not self._heartbeat_task.done():
             self._heartbeat_task.cancel()
-            try:
-                await self._heartbeat_task
-            except asyncio.CancelledError:
-                pass
-
-        # 取消WebSocket任务
-        if self._ws_task:
+            tasks_to_cancel.append(self._heartbeat_task)
+        if self._ws_task and not self._ws_task.done():
             self._ws_task.cancel()
-            try:
-                await self._ws_task
-            except asyncio.CancelledError:
-                pass
-
-        # 取消版本检查任务
-        if self._update_check_task:
+            tasks_to_cancel.append(self._ws_task)
+        if self._update_check_task and not self._update_check_task.done():
             self._update_check_task.cancel()
+            tasks_to_cancel.append(self._update_check_task)
+
+        # 等待所有任务完成取消
+        if tasks_to_cancel:
+            # 使用 shield 保护取消操作不被外部取消
             try:
-                await self._update_check_task
-            except asyncio.CancelledError:
-                pass
+                await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+            except Exception as e:
+                self.logger.debug(f"Task cancellation completed: {e}")
 
         # 停止任务执行器
         try:
@@ -436,9 +434,11 @@ class CentralManager:
         except Exception as e:
             self.logger.error(f"Error stopping task executor: {e}")
 
-        # 断开连接
-        await self.ws.disconnect()
+        # 先关闭API客户端（防止任务清理时继续上报）
         await self.api.close()
+        
+        # 断开WebSocket连接
+        await self.ws.disconnect()
 
         self.logger.info("Bend Agent stopped")
 
@@ -598,13 +598,27 @@ class CentralManager:
 
             # 通知后端任务结果
             if result.get('success'):
-                await self.api.complete_task(task_id, result)
+                await self._notify_task_complete(task_id, result)
             else:
-                await self.api.fail_task(task_id, result.get('error', 'Task failed'))
+                await self._notify_task_fail(task_id, result.get('error', 'Task failed'))
 
         except Exception as e:
             self.logger.error(f"Task execution error: {e}")
-            await self.api.fail_task(task_id, str(e))
+            await self._notify_task_fail(task_id, str(e))
+
+    async def _notify_task_complete(self, task_id: str, result: Dict):
+        """通知后端任务完成"""
+        try:
+            await self.api.complete_task(task_id, result)
+        except Exception as e:
+            self.logger.error(f"Failed to notify task complete to backend: {e}")
+
+    async def _notify_task_fail(self, task_id: str, error: str):
+        """通知后端任务失败"""
+        try:
+            await self.api.fail_task(task_id, error)
+        except Exception as e:
+            self.logger.error(f"Failed to notify task fail to backend: {e}")
 
     async def _handle_command(self, command_data: Dict):
         """
@@ -836,6 +850,44 @@ class CentralManager:
                 self.logger.info(f"Cancelling {running_count} running tasks")
                 task_executor.cancel_all()
             self.logger.info("Automation stopped successfully")
+
+    async def _handle_stop_task(self, data: Dict):
+        """
+        处理后端下发的停止任务指令
+
+        参数说明：
+        - data: 指令数据，包含：
+          - taskId: 要停止的任务ID
+
+        功能说明：
+        - 停止指定的运行中任务
+        - 释放相关资源（Xbox会话、窗口等）
+        """
+        task_id = data.get('taskId')
+        self.logger.info(f"Received stop_task command for task: {task_id}")
+
+        from ..task.task_executor import task_executor
+        task_executor.request_cancel(task_id)
+        self.logger.info(f"Task stop requested: {task_id}")
+
+    async def _handle_cancel_task(self, data: Dict):
+        """
+        处理后端下发的取消任务指令
+
+        参数说明：
+        - data: 指令数据，包含：
+          - taskId: 要取消的任务ID
+
+        功能说明：
+        - 取消指定的任务
+        - 释放相关资源（Xbox会话、窗口等）
+        """
+        task_id = data.get('taskId')
+        self.logger.info(f"Received cancel_task command for task: {task_id}")
+
+        from ..task.task_executor import task_executor
+        task_executor.request_cancel(task_id)
+        self.logger.info(f"Task cancel requested: {task_id}")
 
     async def _handle_discover_xbox(self, data: Dict):
         """

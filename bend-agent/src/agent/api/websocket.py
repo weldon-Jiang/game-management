@@ -149,14 +149,23 @@ class WSClient:
         - 重置状态
         """
         self._running = False
-        if self._heartbeat_task:
+        
+        if self._heartbeat_task and not self._heartbeat_task.done():
             self._heartbeat_task.cancel()
             try:
-                await self._heartbeat_task
+                await asyncio.wait_for(self._heartbeat_task, timeout=2.0)
             except asyncio.CancelledError:
                 pass
+            except asyncio.TimeoutError:
+                self.logger.warning("心跳任务取消超时")
+        
         if self._ws:
-            await self._ws.close()
+            try:
+                await asyncio.wait_for(self._ws.close(), timeout=3.0)
+            except asyncio.TimeoutError:
+                self.logger.warning("WebSocket关闭超时")
+            except Exception as e:
+                self.logger.debug(f"WebSocket关闭异常: {e}")
             self._ws = None
         self.logger.info("WebSocket disconnected")
 

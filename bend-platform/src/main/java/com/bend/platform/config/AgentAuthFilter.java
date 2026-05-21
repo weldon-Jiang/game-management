@@ -128,10 +128,22 @@ public class AgentAuthFilter implements Filter {
             path.matches("/api/agents/[a-zA-Z0-9-]+$")) {
             return false;
         }
-        
+
+        // Agent 凭证兑换接口，不需要 Agent 凭证（否则会先有鸡还是先有蛋的问题）
+        if (path.startsWith("/api/agent/credentials/")) {
+            return false;
+        }
+
+        // Agent 回调接口，需要 Agent 凭证
+        // 匹配 /api/{taskId}/progress, /api/{taskId}/match/complete, /api/{taskId}/game-accounts/status 等
+        // 同时匹配 /api/agent-callback/task/{taskId}/...
+        if (path.matches("/api/[^/]+/(progress|match/complete|game-accounts/status|game-account/[^/]+/(status|complete)).*") ||
+            path.startsWith("/api/agent-callback/")) {
+            return true;
+        }
+
         // Agent 服务调用的接口需要凭证
-        return path.startsWith("/api/agent-callback/") ||
-               path.equals("/ws/agents") ||
+        return path.equals("/ws/agents") ||
                isAgentServiceEndpoint(path);
     }
     

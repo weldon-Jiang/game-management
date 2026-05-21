@@ -118,6 +118,12 @@ public class GameAccount {
     private String agentId;
 
     /**
+     * 当前状态
+     * idle-空闲 busy-忙碌
+     */
+    private String status;
+
+    /**
      * 创建时间
      */
     @TableField(fill = FieldFill.INSERT)

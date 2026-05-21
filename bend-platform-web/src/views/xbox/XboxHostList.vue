@@ -27,16 +27,16 @@
         class="data-table"
         scrollbar-always-on
       >
-        <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" />
+        <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" show-overflow-tooltip />
         <el-table-column prop="xboxId" label="Xbox ID" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="name" label="主机名称" min-width="120">
+        <el-table-column prop="name" label="主机名称" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.name" class="text-muted">{{ row.name }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="ipAddress" label="IP地址" width="140" />
-        <el-table-column prop="macAddress" label="MAC地址" width="170">
+        <el-table-column prop="macAddress" label="MAC地址" width="170" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.macAddress" class="mac-address">{{ row.macAddress }}</span>
             <span v-else class="text-muted">-</span>
@@ -49,13 +49,13 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="boundStreamingAccountId" label="绑定账号" width="150">
+        <el-table-column prop="boundStreamingAccountId" label="绑定账号" width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.boundGamertag">{{ row.boundGamertag }}</span>
             <span v-else class="text-muted">未绑定</span>
           </template>
         </el-table-column>
-        <el-table-column prop="lastSeenTime" label="最后在线" width="170">
+        <el-table-column prop="lastSeenTime" label="最后在线" width="170" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.lastSeenTime ? formatDate(row.lastSeenTime) : '-' }}
           </template>

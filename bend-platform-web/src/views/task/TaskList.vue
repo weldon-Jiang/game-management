@@ -42,6 +42,7 @@
           <el-option label="场景检测" value="scene_detection" />
           <el-option label="账号切换" value="account_switch" />
           <el-option label="串流控制" value="stream_control" />
+          <el-option label="自动化任务" value="automation" />
         </el-select>
         <el-button @click="handleSearch">
           <el-icon><Refresh /></el-icon>
@@ -56,7 +57,7 @@
           scrollbar-always-on
         >
         <el-table-column prop="name" label="任务名称" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="type" label="类型" width="120" align="center">
+        <el-table-column prop="type" label="类型" width="120" align="center" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag size="small" type="info">{{ getTaskTypeText(row.type) }}</el-tag>
           </template>
@@ -68,7 +69,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="游戏账号进度" width="140" align="center">
+        <el-table-column label="游戏账号进度" width="140" align="center" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.result && row.result.includes('/')">
               {{ row.result }}
@@ -94,12 +95,18 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdTime" label="创建时间" width="170">
+        <el-table-column prop="errorMessage" label="错误信息" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.errorMessage" class="text-danger">{{ row.errorMessage }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="createdTime" label="创建时间" width="170" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.createdTime ? formatDate(row.createdTime) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="assignedTime" label="分配时间" width="170">
+        <el-table-column prop="assignedTime" label="分配时间" width="170" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.assignedTime ? formatDate(row.assignedTime) : '-' }}
           </template>
@@ -125,7 +132,7 @@
               重试
             </el-button>
             <el-button
-              v-if="row.status === 'running'"
+              v-if="row.status === 'running' || row.status === 'pending'"
               type="danger"
               link
               size="small"

@@ -1,0 +1,2 @@
+$sql = "SELECT id, name, task_status, agent_id FROM streaming_account WHERE id = '575f67249be844b0730249b1aab38bb0'"
+docker exec bend-xbox-mysql mysql -u root -p'D@GAMECeKfidb' -D bend_platform -e $sql

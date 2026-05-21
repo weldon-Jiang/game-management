@@ -31,11 +31,11 @@
         scrollbar-always-on
       >
         <!-- 商户列（仅平台管理员可见） -->
-        <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" />
+        <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" show-overflow-tooltip />
         <!-- 账号名称 -->
-        <el-table-column prop="name" label="账号名称" min-width="150" />
+        <el-table-column prop="name" label="账号名称" min-width="150" show-overflow-tooltip />
         <!-- 邮箱 -->
-        <el-table-column prop="email" label="邮箱" min-width="200" />
+        <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip />
         <!-- 状态 -->
         <el-table-column prop="status" label="状态" width="100" align="center">
           <template #default="{ row }">
@@ -44,23 +44,29 @@
             </el-tag>
           </template>
         </el-table-column>
-        <!-- 运行Agent -->
-        <el-table-column prop="agentId" label="运行Agent" width="180">
+        <!-- 任务状态 -->
+        <el-table-column prop="taskStatus" label="任务状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tooltip v-if="row.agentId" :content="row.agentId" placement="top">
-              <span class="agent-id">{{ row.agentId.substring(0, 8) }}...</span>
-            </el-tooltip>
+            <el-tag :type="getAccountTaskStatusType(row.taskStatus)" size="small">
+              {{ getAccountTaskStatusText(row.taskStatus) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <!-- 运行Agent -->
+        <el-table-column prop="agentId" label="运行Agent" width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.agentId" class="agent-id">{{ row.agentId.substring(0, 8) }}...</span>
             <span v-else class="text-muted">未运行</span>
           </template>
         </el-table-column>
         <!-- 最后心跳 -->
-        <el-table-column prop="lastHeartbeat" label="最后心跳" width="170">
+        <el-table-column prop="lastHeartbeat" label="最后心跳" width="170" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.lastHeartbeat ? formatDate(row.lastHeartbeat) : '-' }}
           </template>
         </el-table-column>
         <!-- 创建时间 -->
-        <el-table-column prop="createdTime" label="创建时间" width="170">
+        <el-table-column prop="createdTime" label="创建时间" width="170" show-overflow-tooltip>
           <template #default="{ row }">
             {{ formatDate(row.createdTime) }}
           </template>
@@ -70,7 +76,7 @@
           <template #default="{ row }">
             <!-- 启动自动化按钮（非busy状态显示） -->
             <el-button
-              v-if="row.status !== 'busy'"
+              v-if="row.taskStatus !== 'busy'"
               type="success"
               link
               size="small"
@@ -377,7 +383,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi } from '@/api'
-import { getStreamingAccountStatusText, getStreamingAccountStatusType, AUTOMATION_TASK_TYPES } from '@/utils/constants'
+import { getStreamingAccountStatusText, getStreamingAccountStatusType, getAccountTaskStatusText, getAccountTaskStatusType, AUTOMATION_TASK_TYPES } from '@/utils/constants'
 
 // ==================== 状态定义 ====================
 

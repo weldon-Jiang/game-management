@@ -44,5 +44,15 @@ public interface GameAccountService {
 
     void updateAgentId(String id, String agentId);
 
+    /**
+     * 更新账号状态（忙碌/空闲）
+     *
+     * @param id     账号ID
+     * @param status 状态 (idle/busy)
+     */
+    void updateStatus(String id, String status);
+
+    void clearAgentIdByStreamingId(String streamingId);
+
     List<GameAccount> findByStreamingId(String streamingId);
 }

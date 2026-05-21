@@ -27,4 +27,8 @@ public class StartAutomationRequest {
 
     @Size(max = 500, message = "描述最大500字符")
     private String description;
+
+    private List<String> selectedGameAccountIds;
+
+    private String gameActionType;
 }

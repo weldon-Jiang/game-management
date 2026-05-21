@@ -20,12 +20,12 @@ from .task_context import (
     AutomationResult,
     TaskMainStatus
 )
-from .task_window_manager import TaskWindowManager
-from .step1_stream_account_login import step1_execute_login
-from .step2_xbox_streaming import step2_execute_streaming
-from .step3_gpu_decode import step3_execute_decode
-from .step4_game_automation import step4_execute_gaming
-from .platform_api_client import PlatformApiClient
+from ..windows.task_window_manager import TaskWindowManager
+from ..automation.step1_stream_account_login import step1_execute_login
+from ..automation.step2_xbox_streaming import step2_execute_streaming
+from ..automation.step3_streaming_init import step3_streaming_init
+from ..automation.step4_game_automation import step4_execute_gaming
+from ..api.platform_api_client import PlatformApiClient
 
 
 class AgentAutomationTask:
@@ -88,6 +88,12 @@ class AgentAutomationTask:
 
             if not step1_result.success:
                 self.logger.error(f"步骤一失败: {step1_result.message}")
+                await self._report_progress(
+                    self.context.task_id,
+                    "STEP1",
+                    "FAILED",
+                    step1_result.message
+                )
                 await self._cleanup()
                 return AutomationResult(
                     success=False,
@@ -104,6 +110,12 @@ class AgentAutomationTask:
 
             if not step2_result.success:
                 self.logger.error(f"步骤二失败: {step2_result.message}")
+                await self._report_progress(
+                    self.context.task_id,
+                    "STEP2",
+                    "FAILED",
+                    step2_result.message
+                )
                 await self._cleanup()
                 return AutomationResult(
                     success=False,
@@ -112,7 +124,7 @@ class AgentAutomationTask:
                     error_code=step2_result.error_code
                 )
 
-            step3_result = await step3_execute_decode(
+            step3_result = await step3_streaming_init(
                 self.context,
                 check_cancel,
                 self._report_progress
@@ -120,6 +132,12 @@ class AgentAutomationTask:
 
             if not step3_result.success:
                 self.logger.error(f"步骤三失败: {step3_result.message}")
+                await self._report_progress(
+                    self.context.task_id,
+                    "STEP3",
+                    "FAILED",
+                    step3_result.message
+                )
                 await self._cleanup()
                 return AutomationResult(
                     success=False,
@@ -127,6 +145,8 @@ class AgentAutomationTask:
                     message=step3_result.message,
                     error_code=step3_result.error_code
                 )
+
+            self.logger.info("步骤三完成，画面捕获器已准备就绪，将传递给步骤四使用")
 
             step4_result = await step4_execute_gaming(
                 self.context,
@@ -137,6 +157,12 @@ class AgentAutomationTask:
 
             if not step4_result.success:
                 self.logger.error(f"步骤四失败: {step4_result.message}")
+                await self._report_progress(
+                    self.context.task_id,
+                    "STEP4",
+                    "FAILED",
+                    step4_result.message
+                )
                 await self._cleanup()
                 return AutomationResult(
                     success=False,
@@ -223,6 +249,7 @@ class AgentAutomationTask:
         step: str,
         status: str,
         message: str,
+        extra_data: Optional[Dict[str, Any]] = None,
         **kwargs
     ):
         """
@@ -235,6 +262,9 @@ class AgentAutomationTask:
         - message: 消息
         - **kwargs: 其他字段
         """
+        if extra_data:
+            kwargs.update(extra_data)
+
         if self.platform_client:
             await self.platform_client.report_task_progress(
                 task_id, step, status, message, **kwargs

@@ -83,21 +83,23 @@ export const TASK_STATUS_MAP = {
   cancelled: { text: '已取消', type: 'info' }
 }
 
+export const ACCOUNT_TASK_STATUS_MAP = {
+  idle: { text: '空闲', type: 'success' },
+  busy: { text: '忙碌', type: 'warning' }
+}
+
 export const TASK_TYPE_MAP = {
   template_match: '模板匹配',
   input_sequence: '输入序列',
   scene_detection: '场景检测',
   account_switch: '账号切换',
   stream_control: '串流控制',
+  automation: '自动化任务',
   custom: '自定义'
 }
 
-/**
- * 自动化任务类型配置
- * 当前仅支持串流控制
- */
 export const AUTOMATION_TASK_TYPES = [
-  { code: 'stream_control', name: '串流控制' }
+  { code: 'automation', name: '自动化任务' }
 ]
 
 export const FEATURE_CODE_MAP = {
@@ -262,6 +264,16 @@ export const getTaskStatusText = (status) => {
 export const getTaskStatusType = (status) => {
   if (!status) return 'info'
   return TASK_STATUS_MAP[status]?.type || 'info'
+}
+
+export const getAccountTaskStatusText = (status) => {
+  if (!status) return '-'
+  return ACCOUNT_TASK_STATUS_MAP[status]?.text || status
+}
+
+export const getAccountTaskStatusType = (status) => {
+  if (!status) return 'info'
+  return ACCOUNT_TASK_STATUS_MAP[status]?.type || 'info'
 }
 
 export const getTaskTypeText = (type) => {

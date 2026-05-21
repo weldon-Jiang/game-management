@@ -163,14 +163,21 @@ class DeviceCodeAuthenticator:
         - False: 启动失败
         """
         try:
+            self._logger.info("_launch_browser() 方法开始执行")
+
+            self._logger.info("正在导入 playwright...")
             from playwright.async_api import async_playwright
+            self._logger.info("playwright 导入成功")
 
             self._logger.info(f"启动浏览器（headless={self.headless}）...")
 
             # 创建 Playwright 实例
+            self._logger.info("正在创建 Playwright 实例...")
             self._playwright = await async_playwright().start()
+            self._logger.info("Playwright 实例已创建")
 
             # 启动 Chromium 浏览器
+            self._logger.info("正在启动 Chromium 浏览器（这可能需要一些时间）...")
             self._browser = await self._playwright.chromium.launch(
                 headless=self.headless,
                 args=[
@@ -181,15 +188,20 @@ class DeviceCodeAuthenticator:
                     '--start-maximized'
                 ]
             )
+            self._logger.info("Chromium 浏览器已启动")
 
             # 创建浏览器上下文（隔离环境）
+            self._logger.info("正在创建浏览器上下文...")
             self._context = await self._browser.new_context(
                 viewport={'width': 1280, 'height': 720},
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             )
+            self._logger.info("浏览器上下文已创建")
 
             # 创建新页面
+            self._logger.info("正在创建新页面...")
             self._page = await self._context.new_page()
+            self._logger.info("新页面已创建")
 
             self._state = BrowserState.READY
             self._logger.info("浏览器启动成功")
@@ -214,31 +226,42 @@ class DeviceCodeAuthenticator:
             self._logger.info(f"导航到验证URL: {config.verification_url}")
 
             # Step 1: 导航到验证URL
+            self._logger.info("执行 page.goto() ...")
             await self._page.goto(config.verification_url, wait_until='domcontentloaded')
+            self._logger.info("page.goto() 完成")
             await asyncio.sleep(2)
 
             # Step 2: 输入设备码并点击"允许访问"
+            self._logger.info("执行设备码步骤...")
             if not await self._handle_device_code_step(config.user_code):
                 self._logger.error("设备码步骤失败")
                 await self._save_screenshot("device_code_step_failed")
                 return False
+            self._logger.info("设备码步骤完成")
 
             # Step 3: 输入邮箱并点击"下一步"
+            self._logger.info("执行邮箱步骤...")
             if not await self._handle_email_step(config.email):
                 self._logger.error("邮箱输入步骤失败")
                 await self._save_screenshot("email_step_failed")
                 return False
+            self._logger.info("邮箱步骤完成")
 
             # Step 4: 输入密码并点击"登录"
+            self._logger.info("执行密码步骤...")
             if not await self._handle_password_step(config.password):
                 self._logger.error("密码输入步骤失败")
                 await self._save_screenshot("password_step_failed")
                 return False
+            self._logger.info("密码步骤完成")
 
             # Step 5: 处理保持登录状态页面
+            self._logger.info("执行保持登录状态步骤...")
             await self._handle_keep_signed_in_step()
+            self._logger.info("保持登录状态步骤完成")
 
             # Step 6: 等待成功页面
+            self._logger.info("等待成功页面...")
             if await self._wait_for_success_page(config.timeout):
                 self._logger.info("登录成功！")
                 return True
@@ -276,14 +299,18 @@ class DeviceCodeAuthenticator:
 
             input_found = False
             for selector in selectors:
+                self._logger.info(f"尝试选择器: {selector}")
                 try:
                     element = self._page.locator(selector).first
+                    self._logger.info(f"等待元素可见: {selector}")
                     await element.wait_for(timeout=15000, state='visible')
+                    self._logger.info(f"填写设备码: {user_code}")
                     await element.fill(user_code)
                     self._logger.info(f"设备码已输入: {user_code}")
                     input_found = True
                     break
-                except:
+                except Exception as e:
+                    self._logger.warning(f"选择器 {selector} 失败: {e}")
                     continue
 
             if not input_found:
@@ -291,8 +318,10 @@ class DeviceCodeAuthenticator:
                 return False
 
             # 点击"允许访问"按钮
+            self._logger.info("等待后点击'允许访问'按钮...")
             await asyncio.sleep(1)
             await self._click_allow_access_button()
+            self._logger.info("'_click_allow_access_button()' 执行完成")
 
             return True
 
@@ -302,6 +331,7 @@ class DeviceCodeAuthenticator:
 
     async def _click_allow_access_button(self):
         """点击"允许访问"按钮"""
+        self._logger.info("开始查找'允许访问'按钮...")
         selectors = [
             'input[type="submit"][value="允许访问"]',
             'input[type="submit"]#idSIButton9',
@@ -310,14 +340,18 @@ class DeviceCodeAuthenticator:
         ]
 
         for selector in selectors:
+            self._logger.info(f"尝试按钮选择器: {selector}")
             try:
                 element = self._page.locator(selector).first
-                if await element.count() > 0:
+                count = await element.count()
+                self._logger.info(f"选择器 {selector} 找到 {count} 个元素")
+                if count > 0:
                     await element.click()
                     self._logger.info("已点击'允许访问'按钮")
                     await asyncio.sleep(2)
                     return
-            except:
+            except Exception as e:
+                self._logger.warning(f"按钮选择器 {selector} 失败: {e}")
                 continue
 
         self._logger.warning("未找到'允许访问'按钮")

@@ -819,11 +819,16 @@ class MicrosoftMsalAuthenticator:
             from .browser_automation import DeviceCodeAuthenticator
 
             logger.info(f"启动浏览器自动化认证（账号: {email}）...")
+            print(f"启动浏览器自动化认证（账号: {email}）...")
 
             # 创建浏览器自动化器（隐藏模式）
+            logger.info("创建 DeviceCodeAuthenticator 实例...")
             authenticator = DeviceCodeAuthenticator(headless=True)
+            logger.info("DeviceCodeAuthenticator 实例已创建")
 
             # 执行自动化认证
+            logger.info("开始执行 authenticate() ...")
+            print("开始执行浏览器自动化...")
             auth_success = await authenticator.authenticate(
                 verification_url=verification_uri,
                 user_code=user_code,
@@ -831,6 +836,7 @@ class MicrosoftMsalAuthenticator:
                 password=password,
                 timeout=expires_in
             )
+            logger.info(f"authenticate() 执行完成，结果: {auth_success}")
 
             # 关闭浏览器
             await authenticator.close()

@@ -148,10 +148,26 @@ public interface StreamingAccountService {
     void updateAgentId(String id, String agentId);
 
     /**
+     * 更新任务状态（忙碌/空闲）
+     *
+     * @param id     账号ID
+     * @param status 任务状态 (idle/busy)
+     */
+    void updateTaskStatus(String id, String status);
+
+    /**
      * 查询账号关联的Agent是否在线
      *
      * @param id 账号ID
      * @return true if agent is online
      */
     boolean isAgentOnline(String id);
+
+    /**
+     * 根据AgentID清空该Agent关联的所有流媒体账号的绑定
+     * 用于Agent离线时清理
+     *
+     * @param agentId Agent ID
+     */
+    void clearAgentBindingByAgentId(String agentId);
 }

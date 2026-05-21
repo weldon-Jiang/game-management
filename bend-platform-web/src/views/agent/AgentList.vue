@@ -59,7 +59,7 @@
             <span v-else class="text-muted">{{ row.merchantId || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="host" label="主机地址" width="150" />
+        <el-table-column prop="host" label="主机地址" width="150" show-overflow-tooltip />
         <el-table-column prop="port" label="端口" width="80" align="center" />
         <el-table-column prop="version" label="版本" width="80" align="center" />
         <el-table-column prop="osType" label="操作系统" width="120" show-overflow-tooltip>
@@ -84,7 +84,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="lastHeartbeat" label="最后心跳" width="170">
+        <el-table-column prop="lastHeartbeat" label="最后心跳" width="170" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.lastHeartbeat ? formatDate(row.lastHeartbeat) : '-' }}
           </template>

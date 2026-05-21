@@ -219,7 +219,7 @@ async def _discover_xbox_devices(logger) -> List[XboxInfo]:
         from ..xbox.xbox_discovery import XboxDiscovery
 
         discovery = XboxDiscovery()
-        devices = await discovery.discover(timeout=5.0)
+        devices = await discovery.discover()
 
         xbox_list = []
         for device in devices:

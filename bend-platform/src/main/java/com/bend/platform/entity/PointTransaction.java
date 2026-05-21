@@ -34,6 +34,8 @@ public class PointTransaction {
 
     private String refRechargeCardId;
 
+    private String idempotentKey;
+
     private String description;
 
     @TableField(fill = FieldFill.INSERT)

@@ -14,6 +14,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.HashMap;
 import java.util.Map;
+
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,10 +28,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+@Slf4j
 @Service
 public class TaskExecutorServiceImpl implements TaskExecutorService {
 
-    private static final Logger log = LoggerFactory.getLogger(TaskExecutorServiceImpl.class);
     private static final ExecutorService taskExecutor = Executors.newCachedThreadPool();
 
     @Autowired
@@ -75,14 +77,17 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
                 }
             }
 
-            statusService.createStatusRecords(task.getId(), gameAccountIds, task.getStreamingAccountId());
-
-            for (String gameAccountId : gameAccountIds) {
-                statusService.updateStatus(task.getId(), gameAccountId, "running");
+            List<Integer> dailyLimits = new ArrayList<>();
+            for (GameAccount ga : gameAccounts) {
+                if (Boolean.TRUE.equals(ga.getIsActive())) {
+                    dailyLimits.add(ga.getDailyMatchLimit() != null ? ga.getDailyMatchLimit() : 3);
+                }
             }
+            
+            statusService.createStatusRecords(task.getId(), gameAccountIds, dailyLimits, task.getStreamingAccountId());
 
             ObjectNode taskData = buildTaskData(task, gameAccounts);
-            Map<String, Object> taskDataMap = objectMapper.convertValue(taskData, Map.class);
+            Map<String, Object> taskDataMap = objectMapper.convertValue(taskData, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
             
             log.info("准备发送任务到Agent - TaskID: {}, AgentID: {}, GameAccountCount: {}", 
                 task.getId(), task.getTargetAgentId(), gameAccountIds.size());

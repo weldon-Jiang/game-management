@@ -393,6 +393,35 @@ public class GameAccountServiceImpl implements GameAccountService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateStatus(String id, String status) {
+        GameAccount account = gameAccountMapper.selectById(id);
+        if (account == null) {
+            throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
+        }
+
+        account.setStatus(status);
+        account.setUpdatedTime(LocalDateTime.now());
+        gameAccountMapper.updateById(account);
+        log.info("更新游戏账号状态 - ID: {}, 状态: {}", id, status);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void clearAgentIdByStreamingId(String streamingId) {
+        LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(GameAccount::getStreamingId, streamingId);
+        List<GameAccount> accounts = gameAccountMapper.selectList(wrapper);
+        
+        for (GameAccount account : accounts) {
+            account.setAgentId(null);
+            account.setUpdatedTime(LocalDateTime.now());
+            gameAccountMapper.updateById(account);
+        }
+        log.info("清除游戏账号Agent绑定 - StreamingID: {}, 数量: {}", streamingId, accounts.size());
+    }
+
+    @Override
     public List<GameAccount> findByStreamingId(String streamingId) {
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(GameAccount::getStreamingId, streamingId)

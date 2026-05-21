@@ -396,11 +396,29 @@ class HighConcurrencyTaskExecutor:
         返回：
         - 任务执行结果字典
         """
+        params = task_data.get('params')
+        if not isinstance(params, dict):
+            params = {}
+
+        # Platform currently sends automation payload fields at the message top level.
+        # Keep supporting the older nested "params" shape while normalizing to one dict.
+        for key in (
+            'taskId',
+            'streamingAccount',
+            'gameAccounts',
+            'xboxHosts',
+            'xboxInfo',
+            'taskType',
+            'merchantId'
+        ):
+            if key in task_data and key not in params:
+                params[key] = task_data.get(key)
+
         task = Task(
             task_id=task_data.get('taskId'),
             name=task_data.get('name', ''),
             type=task_data.get('type', ''),
-            params=task_data.get('params', {}),
+            params=params,
             priority=task_data.get('priority', 0),
             streaming_account_id=task_data.get('streamingAccountId'),
             game_account_ids=task_data.get('gameAccountIds', [])
@@ -455,31 +473,22 @@ class HighConcurrencyTaskExecutor:
             if not handler:
                 raise Exception(f"未注册的任务类型: {task.type}")
 
-            # Xbox 相关任务需要获取专用会话
-            if task.type in ('stream_control', 'xbox_automation'):
-                streaming_account = task.params.get('streamingAccount', {})
-                xbox_ip = streaming_account.get('xboxIp', '192.168.1.100')
+            # 创建取消检查函数
+            def check_cancel():
+                return cancel_event.is_set()
 
-                xbox_session = await self._xbox_session_manager.get_session(xbox_ip)
-                if not xbox_session:
-                    raise Exception(f"无法连接到 Xbox {xbox_ip}")
+            # 注入取消检查器到参数
+            task.params['_check_cancel'] = check_cancel
+            # 注入会话管理器到参数，让处理器自行控制Xbox连接时机
+            task.params['_xbox_session_manager'] = self._xbox_session_manager
+            task.params['_task_executor'] = self
 
-                # 记录任务与会话的关联
-                self._task_xbox_ip[task.task_id] = xbox_ip
-                xbox_session.is_busy = True
-                xbox_session.current_task_id = task.task_id
-                xbox_session.current_streaming_account_id = task.streaming_account_id
-
-                # 创建取消检查函数
-                def check_cancel():
-                    return cancel_event.is_set()
-
-                # 将会话和取消检查器注入参数
-                task.params['_xbox_session'] = xbox_session
-                task.params['_check_cancel'] = check_cancel
-
-            # 执行任务
+            # 执行任务（四步骤串行流程完全由处理器内部控制）
             result = await handler(task.params, check_cancel)
+
+            handler_success = not (
+                isinstance(result, dict) and result.get('success') is False
+            )
 
             # 更新任务状态
             if cancel_event.is_set():
@@ -489,6 +498,14 @@ class HighConcurrencyTaskExecutor:
                     'taskId': task.task_id,
                     'error': '任务被取消'
                 }
+            elif not handler_success:
+                self._task_status[task.task_id] = TaskStatus.FAILED
+                self._task_results[task.task_id] = {
+                    'success': False,
+                    'taskId': task.task_id,
+                    'error': result.get('message') or result.get('error') or '任务执行失败',
+                    'result': result
+                }
             else:
                 self._task_status[task.task_id] = TaskStatus.COMPLETED
                 self._task_results[task.task_id] = {
@@ -497,7 +514,7 @@ class HighConcurrencyTaskExecutor:
                     'result': result
                 }
 
-            self.logger.info(f"任务完成: {task.task_id}")
+            self.logger.info(f"任务结束: {task.task_id}, success={self._task_results[task.task_id].get('success')}")
             return self._task_results[task.task_id]
 
         except asyncio.CancelledError:
@@ -684,26 +701,33 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
     Xbox 流控制任务处理器
 
     功能：
-    - 多线程并发处理多个流媒体账号
-    - 微软账号登录 -> Xbox 绑定
-    - 自动遍历并切换游戏账号
+    - 调用自动化调度器执行四步骤串行流程
+    - 微软账号登录 -> Xbox绑定 -> 串流环境初始化 -> 游戏自动化
 
     参数说明：
-    - streaming_account: 流媒体账号信息（包含 Xbox IP 等）
+    - streamingAccount: 流媒体账号信息（包含 Xbox IP 等）
     - gameAccounts: 游戏账号列表
+    - taskId: 任务ID
 
     流程：
-    1. 登录模块：调用微软登录接口获取 Refresh Token
-    2. 串流模块：使用 Refresh Token 获取 Access Token，绑定 Xbox 主机
-    3. 执行游戏账号自动化操作
+    【步骤一】自动登录 - 微软账号认证获取Token
+    【步骤二】自动串流 - Xbox主机连接与认证
+    【步骤三】串流环境初始化 - 准备画面捕获能力
+    【步骤四】游戏自动化操控 - 执行游戏比赛等操作
 
     注意：
+    - 四步骤串行执行，任一步骤失败则任务失败
     - 无需 Xbox App 窗口，纯协议控制
-    - 每个游戏账号会依次登录验证
     """
-    from ..task.stream_control_task import StreamControlTaskHandler
+    from ..task.automation_scheduler import AutomationScheduler
 
     streaming_account = params.get('streamingAccount', {})
+    game_accounts = params.get('gameAccounts', [])
+    task_id = params.get('taskId', '')
+    assigned_xbox = params.get('xboxInfo')
+    xbox_hosts = params.get('xboxHosts') or []
+    if not assigned_xbox and xbox_hosts:
+        assigned_xbox = xbox_hosts[0]
 
     if not streaming_account:
         raise Exception("缺少流媒体账号信息")
@@ -711,28 +735,66 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
     if check_cancel():
         raise asyncio.CancelledError()
 
-    # 获取API客户端用于令牌交换
-    api_client = None
-    try:
-        from ..task.task_executor import task_executor
-        api_client = task_executor._api_client
-    except Exception as e:
-        logger = get_logger('task_executor')
-        logger.warning(f"无法获取API客户端: {e}")
+    # 获取Agent凭证用于HTTP认证（从集中式凭证管理器获取）
+    from ..core.credentials_provider import get_credentials
+    agent_id, agent_secret = get_credentials()
 
-    # 创建流控制任务处理器（传入API客户端用于令牌交换）
-    handler = StreamControlTaskHandler(api_client=api_client)
+    # 创建自动化调度器
+    scheduler = AutomationScheduler(agent_id=agent_id, agent_secret=agent_secret)
 
     try:
-        # 执行流控制任务
-        result = handler.handle_batch_tasks(params, check_cancel)
-        return result
+        # 启动自动化任务
+        success = await scheduler.start_task(
+            task_id=task_id,
+            streaming_account_id=streaming_account.get('id', ''),
+            streaming_account_email=streaming_account.get('email', ''),
+            streaming_account_password=streaming_account.get('passwordToken', ''),
+            game_accounts=game_accounts,
+            assigned_xbox=assigned_xbox
+        )
+
+        if not success:
+            raise Exception("启动自动化任务失败")
+
+        # 等待任务完成（最多等待3600秒）
+        timeout = 3600
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if check_cancel():
+                await scheduler.stop_task(task_id)
+                raise asyncio.CancelledError()
+
+            result = scheduler.get_task_result(task_id)
+            if result is not None:
+                break
+
+            await asyncio.sleep(1)
+
+        if time.time() - start_time >= timeout:
+            await scheduler.stop_task(task_id)
+            raise Exception("任务执行超时")
+
+        result = scheduler.get_task_result(task_id)
+        if result:
+            return {
+                'success': result.success,
+                'message': result.message,
+                'totalMatches': result.total_matches if hasattr(result, 'total_matches') else 0,
+                'errorCode': result.error_code if not result.success else None
+            }
+        else:
+            raise Exception("任务执行结果为空")
 
     except asyncio.CancelledError:
+        await scheduler.stop_task(task_id)
         raise
 
     except Exception as e:
+        await scheduler.stop_task(task_id)
         raise Exception(f"流控制任务执行失败: {e}")
+
+    finally:
+        await scheduler.close()
 
 
 async def handle_template_match(params: Dict[str, Any], check_cancel: Callable) -> Dict[str, Any]:
@@ -873,6 +935,7 @@ task_executor = HighConcurrencyTaskExecutor(
 # 注册所有任务处理器
 task_executor.register_handler('stream_control', handle_stream_control)
 task_executor.register_handler('xbox_automation', handle_stream_control)  # 别名
+task_executor.register_handler('automation', handle_stream_control)       # 别名，自动化任务
 task_executor.register_handler('template_match', handle_template_match)
 task_executor.register_handler('input_sequence', handle_input_sequence)
 task_executor.register_handler('scene_detection', handle_scene_detection)

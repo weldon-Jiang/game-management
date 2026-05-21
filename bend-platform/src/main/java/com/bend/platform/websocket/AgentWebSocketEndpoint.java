@@ -5,6 +5,8 @@ import com.bend.platform.entity.AgentInstance;
 import com.bend.platform.entity.AgentVersion;
 import com.bend.platform.entity.XboxHost;
 import com.bend.platform.service.AgentInstanceService;
+import com.bend.platform.service.StreamingAccountService;
+import com.bend.platform.service.TaskService;
 import com.bend.platform.service.XboxHostService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,6 +33,8 @@ public class AgentWebSocketEndpoint {
 
     private static AgentInstanceService agentInstanceService;
     private static XboxHostService xboxHostService;
+    private static TaskService taskService;
+    private static StreamingAccountService streamingAccountService;
     private static ApplicationContext applicationContext;
 
     public static void setApplicationContext(ApplicationContext context) {
@@ -42,6 +46,8 @@ public class AgentWebSocketEndpoint {
         if (applicationContext != null) {
             agentInstanceService = applicationContext.getBean(AgentInstanceService.class);
             xboxHostService = applicationContext.getBean(XboxHostService.class);
+            taskService = applicationContext.getBean(TaskService.class);
+            streamingAccountService = applicationContext.getBean(StreamingAccountService.class);
         }
     }
 
@@ -55,6 +61,9 @@ public class AgentWebSocketEndpoint {
         }
         if (applicationContext != null && xboxHostService == null) {
             xboxHostService = applicationContext.getBean(XboxHostService.class);
+        }
+        if (applicationContext != null && taskService == null) {
+            taskService = applicationContext.getBean(TaskService.class);
         }
     }
 
@@ -90,6 +99,10 @@ public class AgentWebSocketEndpoint {
         AGENT_SESSIONS.put(agentId, session);
         AGENT_RECONNECT_COUNT.remove(agentId);
 
+        if (agentInstanceService != null) {
+            agentInstanceService.updateHeartbeat(agentId, "online", null, null, null);
+        }
+
         session.setMaxIdleTimeout(120000);
 
         Map<String, Object> connectedData = new HashMap<>();
@@ -102,6 +115,14 @@ public class AgentWebSocketEndpoint {
         adminEventData.put("agentId", agentId);
         adminEventData.put("event", "online");
         broadcastToAdmins("agent_online", adminEventData);
+
+        if (taskService != null) {
+            try {
+                taskService.cleanupIncompleteTasksAndRestoreAccounts(agentId);
+            } catch (Exception e) {
+                log.error("Agent上线时清理未完成任务失败 - AgentID: {}", agentId, e);
+            }
+        }
 
         log.info("Agent连接成功 - AgentID: {}, 当前连接数: {}", agentId, AGENT_SESSIONS.size());
     }
@@ -148,6 +169,24 @@ public class AgentWebSocketEndpoint {
     public void onClose(Session session, @PathParam("agentId") String agentId) {
         AGENT_SESSIONS.remove(agentId);
         log.info("Agent连接关闭 - AgentID: {}, 当前连接数: {}", agentId, AGENT_SESSIONS.size());
+
+        // 清理该Agent关联的流媒体账号
+        try {
+            if (streamingAccountService != null) {
+                streamingAccountService.clearAgentBindingByAgentId(agentId);
+            }
+        } catch (Exception e) {
+            log.error("清理流媒体账号Agent绑定失败 - AgentID: {}", agentId, e);
+        }
+
+        // 清理该Agent关联的未完成任务
+        try {
+            if (taskService != null) {
+                taskService.cleanupIncompleteTasksAndRestoreAccounts(agentId);
+            }
+        } catch (Exception e) {
+            log.error("清理未完成任务失败 - AgentID: {}", agentId, e);
+        }
 
         Map<String, Object> adminEventData = new HashMap<>();
         adminEventData.put("agentId", agentId);
@@ -214,10 +253,7 @@ public class AgentWebSocketEndpoint {
     }
 
     public static void sendTaskToAgent(String agentId, String taskId, Map<String, Object> taskData) {
-        Map<String, Object> data = new HashMap<>();
-        data.put("taskId", taskId);
-        data.put("task", taskData);
-        sendMessageToAgent(agentId, "task", data);
+        sendMessageToAgent(agentId, "task", taskData);
     }
 
     public static void sendCancelTaskToAgent(String agentId, String taskId) {

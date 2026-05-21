@@ -296,7 +296,7 @@ class ApiClient:
         if xbox_session_count is not None:
             data['xboxSessionCount'] = xbox_session_count
 
-        return await self.post('/agents/heartbeat', data)
+        return await self.post('/agents/heartbeat', params=data)
 
     async def report_status(self, status: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -493,7 +493,10 @@ class ApiClient:
 
         返回值：后端响应数据
         """
-        payload = {**result, 'idempotent': str(idempotent).lower()}
+        payload = {
+            'result': json.dumps(result, ensure_ascii=False),
+            'idempotent': str(idempotent).lower()
+        }
         return await self.post(f'/tasks/{task_id}/complete', payload)
 
     async def fail_task(self, task_id: str, error: str, idempotent: bool = True) -> Dict[str, Any]:
@@ -507,7 +510,7 @@ class ApiClient:
 
         返回值：后端响应数据
         """
-        payload = {'error': error, 'idempotent': str(idempotent).lower()}
+        payload = {'errorMessage': error, 'idempotent': str(idempotent).lower()}
         return await self.post(f'/tasks/{task_id}/fail', payload)
 
     async def exchange_credential_token(self, token: str) -> Optional[str]:

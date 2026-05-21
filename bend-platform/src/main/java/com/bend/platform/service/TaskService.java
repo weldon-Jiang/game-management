@@ -256,4 +256,32 @@ public interface TaskService {
      * @param agentId 离线Agent的ID
      */
     void reassignTasksFromOfflineAgent(String agentId);
+
+    /**
+     * 更新任务状态
+     *
+     * @param taskId 任务ID
+     * @param status 新状态
+     */
+    void updateStatus(String taskId, String status);
+
+    /**
+     * 清理Agent的未完成任务并还原账号状态
+     *
+     * <p>当Agent从离线变为在线时，清理该Agent所有未完成的任务（非completed状态），
+     * 并还原相关的流媒体账号和游戏账号状态。
+     *
+     * @param agentId Agent的ID
+     */
+    void cleanupIncompleteTasksAndRestoreAccounts(String agentId);
+
+    /**
+     * 根据商户ID查询所有正在运行的任务
+     *
+     * <p>用于计算扣点时统计其他正在运行的任务占用的点数。
+     *
+     * @param merchantId 商户ID
+     * @return 正在运行的任务列表
+     */
+    List<Task> findRunningTasksByMerchantId(String merchantId);
 }

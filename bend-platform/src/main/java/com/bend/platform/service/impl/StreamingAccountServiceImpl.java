@@ -347,13 +347,21 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         }
 
         account.setAgentId(agentId);
-        if (agentId != null) {
-            account.setStatus("running");
-        } else {
-            account.setStatus("idle");
-        }
         streamingAccountMapper.updateById(account);
         log.info("更新流媒体账号Agent绑定 - ID: {}, AgentID: {}", id, agentId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateTaskStatus(String id, String taskStatus) {
+        StreamingAccount account = streamingAccountMapper.selectById(id);
+        if (account == null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+        }
+
+        account.setTaskStatus(taskStatus);
+        streamingAccountMapper.updateById(account);
+        log.info("更新流媒体账号任务状态 - ID: {}, 任务状态: {}", id, taskStatus);
     }
 
     @Override
@@ -363,6 +371,34 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             return false;
         }
         return com.bend.platform.websocket.AgentWebSocketEndpoint.isAgentOnline(account.getAgentId());
+    }
+
+    @Override
+    public void clearAgentBindingByAgentId(String agentId) {
+        if (agentId == null || agentId.isEmpty()) {
+            return;
+        }
+
+        // 查找该Agent关联的所有流媒体账号
+        List<StreamingAccount> accounts = streamingAccountMapper.selectList(
+            new LambdaQueryWrapper<StreamingAccount>()
+                .eq(StreamingAccount::getAgentId, agentId)
+        );
+
+        if (accounts == null || accounts.isEmpty()) {
+            log.debug("没有找到Agent关联的流媒体账号 - AgentID: {}", agentId);
+            return;
+        }
+
+        // 清空每个账号的agentId和任务状态
+        for (StreamingAccount account : accounts) {
+            account.setAgentId(null);
+            account.setTaskStatus("idle");
+            streamingAccountMapper.updateById(account);
+            log.info("清空流媒体账号Agent绑定 - AccountID: {}, Email: {}", account.getId(), account.getEmail());
+        }
+
+        log.info("清空Agent关联的流媒体账号绑定完成 - AgentID: {}, 账号数量: {}", agentId, accounts.size());
     }
 
     private boolean isValidStatus(String status) {

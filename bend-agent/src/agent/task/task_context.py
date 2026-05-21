@@ -49,6 +49,7 @@ class GameAccountInfo:
     - password: 密码（已解密）
     - is_primary: 是否为主账号
     - target_matches: 目标比赛数（每天3场）
+    - today_match_count: 今日已完成比赛数
     """
     id: str
     gamertag: str
@@ -56,6 +57,7 @@ class GameAccountInfo:
     password: str = ""
     is_primary: bool = False
     target_matches: int = 3
+    today_match_count: int = 0
 
 
 @dataclass

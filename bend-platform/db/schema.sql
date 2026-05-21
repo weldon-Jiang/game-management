@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS `streaming_account` (
     `auth_code` VARCHAR(512) DEFAULT NULL COMMENT '认证码',
     `status` ENUM('idle','ready','running','paused','error') DEFAULT 'idle' COMMENT '状态',
     `agent_id` VARCHAR(64) DEFAULT NULL COMMENT '当前绑定的Agent ID',
+    `task_status` VARCHAR(20) DEFAULT 'idle' COMMENT '任务状态 idle-空闲 busy-忙碌',
     `last_error_code` VARCHAR(20) DEFAULT NULL COMMENT '最近错误代码',
     `last_error_message` TEXT DEFAULT NULL COMMENT '最近错误信息',
     `last_error_time` DATETIME DEFAULT NULL COMMENT '最近错误发生时间',
@@ -116,6 +117,7 @@ CREATE TABLE IF NOT EXISTS `game_account` (
     `total_match_count` INT DEFAULT 0 COMMENT '总比赛场次',
     `last_used_time` DATETIME DEFAULT NULL COMMENT '最后使用时间',
     `agent_id` VARCHAR(64) DEFAULT NULL COMMENT '绑定的Agent ID',
+    `status` VARCHAR(20) DEFAULT 'idle' COMMENT '账号状态 idle-空闲 busy-忙碌',
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `merchant_id` VARCHAR(64) NOT NULL COMMENT '商户ID',
@@ -193,6 +195,7 @@ CREATE TABLE IF NOT EXISTS `task` (
     `type` VARCHAR(32) NOT NULL COMMENT '任务类型',
     `game_platform` VARCHAR(32) DEFAULT NULL COMMENT '游戏平台: xbox, playstation, switch',
     `game_mode` VARCHAR(32) DEFAULT NULL COMMENT '游戏模式: solo, multiplayer, cooperative',
+    `game_action_type` VARCHAR(50) DEFAULT 'daily_match' COMMENT '游戏操作类型 daily_match-每日比赛 training-训练模式 mission-任务挑战 custom-自定义操作',
     `target_agent_id` VARCHAR(64) DEFAULT NULL COMMENT '目标Agent ID',
     `streaming_account_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的流媒体账号ID',
     `game_account_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的游戏账号ID',
@@ -210,6 +213,9 @@ CREATE TABLE IF NOT EXISTS `task` (
     `retry_count` INT DEFAULT 0 COMMENT '重试次数',
     `max_retries` INT DEFAULT 3 COMMENT '最大重试次数',
     `timeout_seconds` INT DEFAULT 3600 COMMENT '超时时间(秒)',
+    `current_step` VARCHAR(50) DEFAULT NULL COMMENT '当前执行步骤',
+    `step_status` VARCHAR(20) DEFAULT NULL COMMENT '步骤状态',
+    `progress_message` VARCHAR(512) DEFAULT NULL COMMENT '进度消息',
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
@@ -551,12 +557,14 @@ CREATE TABLE IF NOT EXISTS `point_transaction` (
     `ref_device_binding_id` VARCHAR(64) DEFAULT NULL COMMENT '关联设备绑定ID',
     `ref_recharge_record_id` VARCHAR(64) DEFAULT NULL COMMENT '关联充值记录ID',
     `ref_recharge_card_id` VARCHAR(64) DEFAULT NULL COMMENT '关联充值卡ID',
+    `idempotent_key` VARCHAR(128) DEFAULT NULL COMMENT '幂等键',
     `description` VARCHAR(512) DEFAULT NULL COMMENT '描述',
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (`id`),
     KEY `idx_merchant_id` (`merchant_id`),
     KEY `idx_user_id` (`user_id`),
-    KEY `idx_type` (`type`)
+    KEY `idx_type` (`type`),
+    KEY `idx_idempotent_key` (`idempotent_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='点数变动记录表';
 
 -- ---------------------------------------------

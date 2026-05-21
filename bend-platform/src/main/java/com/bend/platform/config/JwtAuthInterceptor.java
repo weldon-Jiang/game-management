@@ -32,9 +32,13 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        String path = request.getRequestURI();
+        log.info("JwtAuthInterceptor processing path: {}", path);
+
         String authHeader = request.getHeader(AUTHORIZATION_HEADER);
 
         if (!StringUtils.hasText(authHeader)) {
+            log.warn("JwtAuthInterceptor: No Authorization header for path: {}", path);
             throw new BusinessException(ResultCode.Auth.TOKEN_MISSING);
         }
 

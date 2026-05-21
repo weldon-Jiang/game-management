@@ -5,6 +5,8 @@ import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.StreamingAccount;
 import com.bend.platform.entity.Task;
 import com.bend.platform.entity.XboxHost;
+import com.bend.platform.enums.AccountStatusEnum;
+import com.bend.platform.enums.TaskTypeEnum;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.*;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -78,6 +81,24 @@ public class AutomationServiceImpl implements AutomationService {
             List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
             List<XboxHost> xboxHosts = xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
 
+            // 校验游戏账号状态（是否有忙碌中的账号）
+            List<String> busyGameAccountNames = new ArrayList<>();
+            for (GameAccount ga : gameAccounts) {
+                if (AccountStatusEnum.BUSY.getCode().equals(ga.getStatus())) {
+                    busyGameAccountNames.add(ga.getXboxGameName());
+                }
+            }
+            if (!busyGameAccountNames.isEmpty()) {
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("streamingAccountId", streamingAccountId);
+                errorResult.put("streamingAccountName", streamingAccount.getName());
+                errorResult.put("success", false);
+                errorResult.put("message", "以下游戏账号正在忙碌中: " + String.join(", ", busyGameAccountNames));
+                results.add(errorResult);
+                log.warn("自动化启动失败 - 游戏账号忙碌中: {}", busyGameAccountNames);
+                continue;
+            }
+
             Map<String, Object> validationResult = automationUsageService.validateAndCalculatePoints(
                     merchantId, streamingAccountId, gameAccounts, xboxHosts);
 
@@ -94,9 +115,28 @@ public class AutomationServiceImpl implements AutomationService {
                 continue;
             }
 
+            // 构建任务参数（支持选择特定游戏账号）
+            List<GameAccount> selectedGameAccounts = gameAccounts;
+            if (request.getSelectedGameAccountIds() != null && !request.getSelectedGameAccountIds().isEmpty()) {
+                // 根据选择的游戏账号ID过滤
+                Set<String> selectedIds = new HashSet<>(request.getSelectedGameAccountIds());
+                selectedGameAccounts = gameAccounts.stream()
+                        .filter(ga -> selectedIds.contains(ga.getId()))
+                        .collect(Collectors.toList());
+                if (selectedGameAccounts.isEmpty()) {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("streamingAccountId", streamingAccountId);
+                    errorResult.put("streamingAccountName", streamingAccount.getName());
+                    errorResult.put("success", false);
+                    errorResult.put("message", "未找到指定的游戏账号");
+                    results.add(errorResult);
+                    continue;
+                }
+            }
+
             Map<String, Object> taskParams = new HashMap<>();
             taskParams.put("streamingAccount", buildStreamingAccountInfo(streamingAccount));
-            taskParams.put("gameAccounts", buildGameAccountsInfo(gameAccounts));
+            taskParams.put("gameAccounts", buildGameAccountsInfo(selectedGameAccounts));
             taskParams.put("xboxHosts", buildXboxHostsInfo(xboxHosts));
             taskParams.put("taskType", request.getTaskType());
             taskParams.put("merchantId", merchantId);
@@ -112,6 +152,13 @@ public class AutomationServiceImpl implements AutomationService {
             task.setCreatedBy(userId);
             task.setStatus("pending");
             task.setTimeoutSeconds(3600);
+            
+            // 设置游戏操作类型，默认为每日比赛
+            String gameActionType = request.getGameActionType();
+            if (gameActionType == null || gameActionType.isEmpty()) {
+                gameActionType = TaskTypeEnum.DAILY_MATCH.getCode();
+            }
+            task.setGameActionType(gameActionType);
 
             Task created = taskService.create(task);
             createdTaskIds.add(created.getId());
@@ -119,10 +166,15 @@ public class AutomationServiceImpl implements AutomationService {
             automationUsageService.deductPointsAndRecordUsage(
                     merchantId, userId, created.getId(),
                     streamingAccountId, streamingAccount.getName(),
-                    gameAccounts.size(), xboxHosts.size(), validationResult);
+                    selectedGameAccounts.size(), xboxHosts.size(), validationResult);
 
+            // 更新流媒体账号状态为忙碌
+            streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.BUSY.getCode());
             streamingAccountService.updateAgentId(streamingAccountId, agentId);
-            for (GameAccount ga : gameAccounts) {
+            
+            // 更新游戏账号状态为忙碌
+            for (GameAccount ga : selectedGameAccounts) {
+                gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.BUSY.getCode());
                 gameAccountService.updateAgentId(ga.getId(), agentId);
             }
 
@@ -173,7 +225,17 @@ public class AutomationServiceImpl implements AutomationService {
             AgentWebSocketEndpoint.sendMessageToAgent(agentId, "automation_control", stopData);
         }
 
+        // 更新流媒体账号状态为空闲
+        streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
         streamingAccountService.updateAgentId(streamingAccountId, null);
+        
+        // 更新游戏账号状态为空闲
+        List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+        for (GameAccount ga : gameAccounts) {
+            gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
+            gameAccountService.updateAgentId(ga.getId(), null);
+        }
+        
         taskService.cancelByStreamingAccountId(streamingAccountId);
 
         log.info("停止自动化任务 - 流媒体账号: {}", streamingAccountId);

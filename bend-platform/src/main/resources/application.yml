@@ -70,9 +70,18 @@ mybatis-plus:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
-# ----------------------------------------------
+# -----------------------------------------------
+# 日志配置
+# -----------------------------------------------
+logging:
+  level:
+    root: INFO
+    com.bend.platform: DEBUG
+    com.bend.platform.config.JwtAuthInterceptor: DEBUG
+
+# -----------------------------------------------
 # JWT配置
-# ----------------------------------------------
+# -----------------------------------------------
 jwt:
   secret: ${JWT_SECRET:}
   expiration: ${JWT_EXPIRATION:86400000}

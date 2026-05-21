@@ -43,4 +43,13 @@ public interface MerchantBalanceService {
      * 用于订阅类型激活码，将点数价值计入totalRecharged以便触发VIP升级检查
      */
     void recordActivationCodeValueForVipUpgrade(String merchantId, int points);
+
+    /**
+     * 检查是否存在相同的扣款记录（幂等检查）
+     * @param merchantId 商户ID
+     * @param type 交易类型
+     * @param idempotentKey 幂等键
+     * @return 是否已存在
+     */
+    boolean hasDeductedTransaction(String merchantId, String type, String idempotentKey);
 }

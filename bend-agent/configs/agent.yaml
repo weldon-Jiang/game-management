@@ -23,7 +23,8 @@ backend:
 # Agent设置
 # ----------------------------------------------
 agent:
-  heartbeat_interval: 30
+  heartbeat_interval: 60
+  ws_heartbeat_interval: 60
   reconnect_delay: 5
   max_reconnect_attempts: 10
 

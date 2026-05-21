@@ -9,6 +9,8 @@ import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.AutomationUsageService;
 import com.bend.platform.service.MerchantBalanceService;
 import com.bend.platform.service.SubscriptionService;
+import com.bend.platform.service.TaskService;
+import com.bend.platform.service.TaskGameAccountStatusService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,12 +32,14 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
     private final MerchantGroupMapper merchantGroupMapper;
     private final AutomationUsageMapper automationUsageMapper;
     private final MerchantMapper merchantMapper;
+    private final TaskService taskService;
+    private final TaskGameAccountStatusService taskGameAccountStatusService;
 
     @Override
     public Map<String, Object> validateAndCalculatePoints(String merchantId, String streamingAccountId,
                                                 List<GameAccount> gameAccounts, List<XboxHost> hosts) {
         Map<String, Object> result = new HashMap<>();
-        int totalPoints = 0;
+        int requiredPoints = 0;
         boolean canStart = true;
         StringBuilder message = new StringBuilder();
         String chargeType = null;
@@ -81,51 +85,84 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         boolean hostMonthlyFree = Boolean.TRUE.equals(hostMonthlyUsage.get("hasMonthlyFree"));
 
         if (hasWindowSubscription) {
-            totalPoints = 0;
+            requiredPoints = 0;
             chargeType = "subscription_window";
             message.append("使用流媒体账号包月，不扣点");
         } else if (windowMonthlyFree) {
-            totalPoints = 0;
+            requiredPoints = 0;
             chargeType = "monthly_window";
             message.append("本月流媒体账号月度额度已使用，当月免费");
         } else if (hasAccountSubscription) {
-            totalPoints = 0;
+            requiredPoints = 0;
             chargeType = "subscription_account";
             message.append("使用游戏账号包月，不扣点");
         } else if (accountMonthlyFree) {
-            totalPoints = 0;
+            requiredPoints = 0;
             chargeType = "monthly_account";
             message.append("本月游戏账号月度额度已使用，当月免费");
         } else if (hasHostSubscription) {
-            totalPoints = 0;
+            requiredPoints = 0;
             chargeType = "subscription_host";
             message.append("使用Xbox主机包月，不扣点");
         } else if (hostMonthlyFree) {
-            totalPoints = 0;
+            requiredPoints = 0;
             chargeType = "monthly_host";
             message.append("本月Xbox主机月度额度已使用，当月免费");
         } else if (accountCount > 0) {
-            totalPoints = accountPrice * accountCount;
+            // 按游戏账号数量计算需要的点数（每个游戏账号完成当天最大比赛次数后扣1点）
+            requiredPoints = accountPrice * accountCount;
             chargeType = "per_use_account";
-            message.append("按次扣费：游戏账号 ").append(accountCount).append(" 个，共 ").append(totalPoints).append(" 点");
+            message.append("按次扣费：待执行游戏账号 ").append(accountCount).append(" 个，每个完成当日最大比赛次数后扣1点，共需 ").append(requiredPoints).append(" 点");
         } else if (hostCount > 0) {
-            totalPoints = hostPrice * hostCount;
+            requiredPoints = hostPrice * hostCount;
             chargeType = "per_use_host";
-            message.append("按次扣费：Xbox主机 ").append(hostCount).append(" 台，共 ").append(totalPoints).append(" 点");
+            message.append("按次扣费：Xbox主机 ").append(hostCount).append(" 台，共 ").append(requiredPoints).append(" 点");
         } else {
-            totalPoints = windowPrice;
+            requiredPoints = windowPrice;
             chargeType = "per_use_window";
-            message.append("按次扣费：流媒体账号，共 ").append(totalPoints).append(" 点");
+            message.append("按次扣费：流媒体账号，共 ").append(requiredPoints).append(" 点");
         }
 
-        if (totalPoints > 0 && !balanceService.hasEnoughBalance(merchantId, totalPoints)) {
-            canStart = false;
-            message.setLength(0);
-            message.append("余额不足，需要 ").append(totalPoints).append(" 点，当前余额不足，请先充值或使用激活码订阅。");
+        // 检查是否有生效订阅或月度额度，如果有则不检查余额
+        boolean hasSubscription = hasWindowSubscription || hasAccountSubscription || hasHostSubscription
+                || windowMonthlyFree || accountMonthlyFree || hostMonthlyFree;
+
+        // 只有在没有订阅且需要扣点时才检查余额
+        if (requiredPoints > 0 && !hasSubscription) {
+            // 获取商户当前余额
+            MerchantBalance balance = balanceService.getByMerchantId(merchantId);
+            int currentBalance = balance != null ? balance.getBalance() : 0;
+
+            // 统计其他正在运行的任务涉及的游戏账号数量（这些账号如果完成当日最大比赛次数也会扣点）
+            int otherRunningGameAccountCount = 0;
+            List<Task> otherRunningTasks = taskService.findRunningTasksByMerchantId(merchantId);
+            for (Task task : otherRunningTasks) {
+                // 排除当前流媒体账号关联的任务
+                if (streamingAccountId != null && streamingAccountId.equals(task.getStreamingAccountId())) {
+                    continue;
+                }
+                // 统计该任务关联的游戏账号数量
+                List<TaskGameAccountStatus> gameAccountStatuses = taskGameAccountStatusService.findByTaskId(task.getId());
+                otherRunningGameAccountCount += gameAccountStatuses.size();
+            }
+
+            // 总共需要的点数 = 本次启动的账号数 + 其他正在运行任务的账号数
+            int totalRequiredPoints = requiredPoints + otherRunningGameAccountCount;
+
+            if (currentBalance < totalRequiredPoints) {
+                canStart = false;
+                message.setLength(0);
+                message.append("余额不足：当前余额 ").append(currentBalance)
+                        .append(" 点不足")
+                        .append("（本次启动需要 ").append(requiredPoints)
+                        .append(" 点，其他正在运行的任务已占用 ").append(otherRunningGameAccountCount)
+                        .append(" 点，共需 ").append(totalRequiredPoints).append(" 点）")
+                        .append("，请先充值或使用激活码订阅。");
+            }
         }
 
         result.put("canStart", canStart);
-        result.put("totalPoints", totalPoints);
+        result.put("totalPoints", requiredPoints);
         result.put("message", message.toString());
         result.put("chargeType", chargeType);
 
@@ -152,8 +189,8 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         result.put("gameAccounts", gameAccounts);
         result.put("hosts", hosts);
 
-        log.info("自动化启动校验 - merchantId: {}, canStart: {}, totalPoints: {}, chargeType: {}",
-                merchantId, canStart, totalPoints, chargeType);
+        log.info("自动化启动校验 - merchantId: {}, canStart: {}, requiredPoints: {}, chargeType: {}, accountCount: {}",
+                merchantId, canStart, requiredPoints, chargeType, accountCount);
 
         return result;
     }

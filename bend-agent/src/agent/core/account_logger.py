@@ -55,15 +55,15 @@ class AccountLogger:
         )
 
     @classmethod
-    def _create_formatter(cls) -> jsonlogger.JsonFormatter:
+    def _create_formatter(cls) -> logging.Formatter:
         """
-        创建JSON格式器
-        
+        创建纯文本格式器（兼容VS Code直接显示中文）
+
         返回值：
-        - JsonFormatter实例
+        - Formatter实例
         """
-        return jsonlogger.JsonFormatter(
-            '%(asctime)s %(name)s %(levelname)s %(message)s',
+        return logging.Formatter(
+            '%(asctime)s [%(levelname)s] %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
 

@@ -96,20 +96,26 @@ class AgentRunner:
                 await asyncio.sleep(1)
 
         except asyncio.CancelledError:
-            self.logger.info("Received shutdown signal")
+            self.logger.info("Received cancellation signal")
+            raise  # Re-raise to let caller handle it
         except KeyboardInterrupt:
             self.logger.info("Keyboard interrupt received")
         finally:
-            await self.shutdown()
+            # 安全地关闭 manager
+            try:
+                if self.manager and self.manager._running:
+                    await self.stop_manager()
+            except Exception as e:
+                self.logger.error(f"Error during shutdown: {e}")
+            self.logger.info("Shutdown complete")
 
-        return True
-
-    async def shutdown(self):
-        """Graceful shutdown"""
-        self.logger.info("Shutting down...")
-        if self.manager:
-            await self.manager.stop()
-        self.logger.info("Shutdown complete")
+    async def stop_manager(self):
+        """停止 manager 的安全方法"""
+        try:
+            if self.manager:
+                await self.manager.stop()
+        except Exception as e:
+            self.logger.error(f"Error stopping manager: {e}")
 
 
 async def main():
@@ -123,14 +129,24 @@ async def main():
         config.load(args.config)
 
     runner = AgentRunner()
-    success = await runner.run(args.code)
-
-    sys.exit(0 if success else 1)
+    try:
+        success = await runner.run(args.code)
+        return 0 if success else 1
+    except KeyboardInterrupt:
+        runner.logger.info("Keyboard interrupt received, shutting down...")
+        return 0
+    finally:
+        # 确保 shutdown 被调用
+        await runner.stop_manager()
 
 
 if __name__ == '__main__':
     try:
-        asyncio.run(main())
+        exit_code = asyncio.run(main())
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        print("\nShutdown requested. Goodbye!")
+        sys.exit(0)
     except Exception as e:
         print(f"Fatal error: {e}")
         sys.exit(1)

@@ -2,7 +2,7 @@
   <el-dialog
     v-model="dialogVisible"
     title="Agent 任务监控"
-    width="1000px"
+    width="1200px"
     :close-on-click-modal="false"
   >
     <div v-if="agent" class="agent-info">
@@ -22,27 +22,27 @@
 
     <el-tabs v-model="activeTab" class="task-tabs">
       <el-tab-pane label="运行中的任务" name="running">
-        <el-table :data="runningTasks" v-loading="loading" max-height="350">
-          <el-table-column prop="id" label="任务ID" width="150" show-overflow-tooltip />
-          <el-table-column prop="name" label="任务名称" min-width="120" />
-          <el-table-column prop="type" label="类型" width="100">
+        <el-table :data="runningTasks" v-loading="loading" max-height="400">
+          <el-table-column prop="id" label="任务ID" width="180" show-overflow-tooltip />
+          <el-table-column prop="name" label="任务名称" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="type" label="类型" width="90" show-overflow-tooltip>
             <template #default="{ row }">
-              <el-tag size="small" type="info">{{ row.type }}</el-tag>
+              <el-tag size="small" type="info">{{ getTaskTypeText(row.type) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="status" label="状态" width="100">
+          <el-table-column prop="status" label="状态" width="90">
             <template #default="{ row }">
               <el-tag :type="getTaskStatusType(row.status)" size="small">
                 {{ getTaskStatusText(row.status) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="currentStep" label="当前步骤" width="100">
+          <el-table-column prop="currentStep" label="当前步骤" width="100" show-overflow-tooltip>
             <template #default="{ row }">
               <span :class="'step-' + row.currentStep">{{ row.currentStep || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="progress" label="进度" width="150">
+          <el-table-column prop="progress" label="进度" width="120">
             <template #default="{ row }">
               <el-progress
                 :percentage="row.progress || 0"
@@ -56,7 +56,13 @@
               <span class="task-message">{{ row.message || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="180" fixed="right">
+          <el-table-column prop="errorMessage" label="错误信息" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.errorMessage" class="error-message">{{ row.errorMessage }}</span>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
               <el-button
                 v-if="row.status === 'running'"
@@ -84,12 +90,12 @@
       </el-tab-pane>
 
       <el-tab-pane label="所有任务" name="all">
-        <el-table :data="allTasks" v-loading="loading" max-height="350">
-          <el-table-column prop="id" label="任务ID" width="150" show-overflow-tooltip />
-          <el-table-column prop="name" label="任务名称" min-width="120" />
-          <el-table-column prop="type" label="类型" width="100">
+        <el-table :data="allTasks" v-loading="loading" max-height="400">
+          <el-table-column prop="id" label="任务ID" width="200" show-overflow-tooltip />
+          <el-table-column prop="name" label="任务名称" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="type" label="类型" width="100" show-overflow-tooltip>
             <template #default="{ row }">
-              <el-tag size="small" type="info">{{ row.type }}</el-tag>
+              <el-tag size="small" type="info">{{ getTaskTypeText(row.type) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="status" label="状态" width="100">
@@ -99,10 +105,15 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="result" label="结果" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="result" label="结果" min-width="150" show-overflow-tooltip />
           <el-table-column prop="createdTime" label="创建时间" width="160">
             <template #default="{ row }">
               {{ formatDate(row.createdTime) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="completedTime" label="完成时间" width="160" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ formatDate(row.completedTime) }}
             </template>
           </el-table-column>
           <el-table-column label="操作" width="100">
@@ -121,50 +132,10 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="任务详情" name="detail">
-        <div v-if="selectedTask" class="task-detail">
-          <el-descriptions :column="2" size="small" border>
-            <el-descriptions-item label="任务ID">{{ selectedTask.id }}</el-descriptions-item>
-            <el-descriptions-item label="任务名称">{{ selectedTask.name }}</el-descriptions-item>
-            <el-descriptions-item label="类型">{{ selectedTask.type }}</el-descriptions-item>
-            <el-descriptions-item label="状态">
-              <el-tag :type="getTaskStatusType(selectedTask.status)" size="small">
-                {{ getTaskStatusText(selectedTask.status) }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="当前步骤">{{ selectedTask.currentStep || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="游戏账号">
-              <template v-if="selectedTask.gameAccounts && selectedTask.gameAccounts.length > 0">
-                <div v-for="ga in selectedTask.gameAccounts" :key="ga.id" class="game-account-item">
-                  <span>{{ ga.gamertag || ga.xboxGameName }}</span>
-                  <el-tag size="small" type="info">{{ ga.completedCount || 0 }}/{{ ga.targetMatches || 3 }}</el-tag>
-                </div>
-              </template>
-              <span v-else>-</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="当前账号" :span="2">
-              {{ selectedTask.currentGameAccount || '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Xbox主机" :span="2">
-              {{ selectedTask.xboxHostName || selectedTask.xboxHostIp || '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="当前状态" :span="2">
-              <span class="task-message">{{ selectedTask.message || '-' }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="错误信息" :span="2" v-if="selectedTask.errorMessage">
-              <span class="error-message">{{ selectedTask.errorMessage }}</span>
-            </el-descriptions-item>
-          </el-descriptions>
-        </div>
-        <div v-else class="empty-tip">
-          请在运行中任务选择一个任务查看详情
-        </div>
-      </el-tab-pane>
-
       <el-tab-pane label="子任务（游戏账号）" name="subtasks">
         <div v-if="selectedTask" class="subtask-container">
-          <el-table :data="gameAccountStatuses" v-loading="subtaskLoading" max-height="350">
-            <el-table-column prop="gameAccountName" label="游戏账号" min-width="150">
+          <el-table :data="gameAccountStatuses" v-loading="subtaskLoading" max-height="400">
+            <el-table-column prop="gameAccountName" label="游戏账号" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
                 <span>{{ row.gameAccountName || row.gameAccountId }}</span>
               </template>
@@ -176,32 +147,32 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="completedCount" label="完成场次" width="100" align="center">
+            <el-table-column prop="completedCount" label="完成场次" width="110" align="center" show-overflow-tooltip>
               <template #default="{ row }">
                 <span>{{ row.completedCount || 0 }} / {{ row.totalMatches || 0 }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="failedCount" label="失败场次" width="90" align="center">
+            <el-table-column prop="failedCount" label="失败场次" width="100" align="center">
               <template #default="{ row }">
                 <span :class="{ 'failed-count': row.failedCount > 0 }">{{ row.failedCount || 0 }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="lastMatchTime" label="最后比赛时间" width="160">
+            <el-table-column prop="lastMatchTime" label="最后比赛时间" width="160" show-overflow-tooltip>
               <template #default="{ row }">
                 {{ formatDate(row.lastMatchTime) }}
               </template>
             </el-table-column>
-            <el-table-column prop="startedTime" label="开始时间" width="160">
+            <el-table-column prop="startedTime" label="开始时间" width="160" show-overflow-tooltip>
               <template #default="{ row }">
                 {{ formatDate(row.startedTime) }}
               </template>
             </el-table-column>
-            <el-table-column prop="completedTime" label="完成时间" width="160">
+            <el-table-column prop="completedTime" label="完成时间" width="160" show-overflow-tooltip>
               <template #default="{ row }">
                 {{ formatDate(row.completedTime) }}
               </template>
             </el-table-column>
-            <el-table-column prop="errorMessage" label="错误信息" min-width="150" show-overflow-tooltip>
+            <el-table-column prop="errorMessage" label="错误信息" min-width="200" show-overflow-tooltip>
               <template #default="{ row }">
                 <span v-if="row.errorMessage" class="error-message">{{ row.errorMessage }}</span>
                 <span v-else>-</span>
@@ -230,7 +201,7 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { taskApi, automationApi } from '@/api'
-import { getAgentStatusText, getAgentStatusType, getTaskStatusText, getTaskStatusType } from '@/utils/constants'
+import { getAgentStatusText, getAgentStatusType, getTaskStatusText, getTaskStatusType, getTaskTypeText } from '@/utils/constants'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const props = defineProps({
@@ -301,7 +272,7 @@ const loadTasks = async () => {
     const res = await taskApi.list({ agentId: props.agent.agentId, pageSize: 100 })
     if (res.code === 0 || res.code === 200) {
       const tasks = res.data?.records || []
-      runningTasks.value = tasks.filter((t) => t.status === 'running' || t.status === 'paused')
+      runningTasks.value = tasks.filter((t) => t.status === 'running' || t.status === 'paused' || t.status === 'pending')
       allTasks.value = tasks
     }
   } catch (error) {

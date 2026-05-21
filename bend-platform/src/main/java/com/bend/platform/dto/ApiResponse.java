@@ -47,6 +47,20 @@ public class ApiResponse<T> {
     private T data;
 
     /**
+     * 成功响应（无数据）
+     *
+     * @param <T> 数据类型
+     * @return 成功响应
+     */
+    public static <T> ApiResponse<T> success() {
+        return ApiResponse.<T>builder()
+                .code(200)
+                .message("success")
+                .data(null)
+                .build();
+    }
+
+    /**
      * 成功响应（默认消息"success"）
      *
      * @param data 返回数据

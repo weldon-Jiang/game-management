@@ -2,6 +2,7 @@ package com.bend.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bend.platform.entity.TaskGameAccountStatus;
+import com.bend.platform.enums.TaskGameAccountStatusEnum;
 import com.bend.platform.repository.TaskGameAccountStatusMapper;
 import com.bend.platform.service.TaskGameAccountStatusService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusService {
@@ -20,16 +20,19 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
 
     @Override
     @Transactional
-    public void createStatusRecords(String taskId, List<String> gameAccountIds, String streamingAccountId) {
-        for (String gameAccountId : gameAccountIds) {
+    public void createStatusRecords(String taskId, List<String> gameAccountIds, List<Integer> dailyLimits, String streamingAccountId) {
+        for (int i = 0; i < gameAccountIds.size(); i++) {
+            String gameAccountId = gameAccountIds.get(i);
+            Integer dailyLimit = (i < dailyLimits.size()) ? dailyLimits.get(i) : 3;
+            
             TaskGameAccountStatus status = new TaskGameAccountStatus();
             status.setTaskId(taskId);
             status.setGameAccountId(gameAccountId);
             status.setStreamingAccountId(streamingAccountId);
-            status.setStatus("pending");
+            status.setStatus(TaskGameAccountStatusEnum.PENDING.getCode());
             status.setCompletedCount(0);
             status.setFailedCount(0);
-            status.setTotalMatches(0);
+            status.setTotalMatches(dailyLimit);
             statusMapper.insert(status);
         }
     }
@@ -53,8 +56,9 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         TaskGameAccountStatus status = findByTaskIdAndGameAccountId(taskId, gameAccountId);
         if (status != null) {
             status.setLastMatchTime(LocalDateTime.now());
-            if ("pending".equals(status.getStatus()) || "running".equals(status.getStatus())) {
-                status.setStatus("running");
+            if (TaskGameAccountStatusEnum.PENDING.getCode().equals(status.getStatus()) || 
+                TaskGameAccountStatusEnum.RUNNING.getCode().equals(status.getStatus())) {
+                status.setStatus(TaskGameAccountStatusEnum.RUNNING.getCode());
                 status.setStartedTime(status.getStartedTime() != null ? status.getStartedTime() : LocalDateTime.now());
             }
             if (success) {
@@ -74,11 +78,49 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         TaskGameAccountStatus record = findByTaskIdAndGameAccountId(taskId, gameAccountId);
         if (record != null) {
             record.setStatus(status);
-            if ("completed".equals(status)) {
+            if (TaskGameAccountStatusEnum.COMPLETED.getCode().equals(status)) {
                 record.setCompletedTime(LocalDateTime.now());
-            } else if ("running".equals(status) && record.getStartedTime() == null) {
+            } else if (TaskGameAccountStatusEnum.RUNNING.getCode().equals(status) && record.getStartedTime() == null) {
                 record.setStartedTime(LocalDateTime.now());
             }
+            statusMapper.updateById(record);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void updateToGamePreparing(String taskId, String gameAccountId) {
+        TaskGameAccountStatus record = findByTaskIdAndGameAccountId(taskId, gameAccountId);
+        if (record != null) {
+            record.setStatus(TaskGameAccountStatusEnum.GAME_PREPARING.getCode());
+            if (record.getStartedTime() == null) {
+                record.setStartedTime(LocalDateTime.now());
+            }
+            statusMapper.updateById(record);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void updateToGaming(String taskId, String gameAccountId) {
+        TaskGameAccountStatus record = findByTaskIdAndGameAccountId(taskId, gameAccountId);
+        if (record != null) {
+            record.setStatus(TaskGameAccountStatusEnum.GAMING.getCode());
+            if (record.getStartedTime() == null) {
+                record.setStartedTime(LocalDateTime.now());
+            }
+            statusMapper.updateById(record);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void updateToTimeout(String taskId, String gameAccountId) {
+        TaskGameAccountStatus record = findByTaskIdAndGameAccountId(taskId, gameAccountId);
+        if (record != null) {
+            record.setStatus(TaskGameAccountStatusEnum.TIMEOUT.getCode());
+            record.setCompletedTime(LocalDateTime.now());
+            record.setErrorMessage("任务执行超时");
             statusMapper.updateById(record);
         }
     }
@@ -89,18 +131,49 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         if (allStatus.isEmpty()) {
             return false;
         }
-        return allStatus.stream()
-            .allMatch(s -> "completed".equals(s.getStatus()) || "skipped".equals(s.getStatus()) || "failed".equals(s.getStatus()));
+        return allStatus.stream().allMatch(s -> {
+            TaskGameAccountStatusEnum statusEnum = TaskGameAccountStatusEnum.fromCode(s.getStatus());
+            return statusEnum.isFinalStatus();
+        });
     }
 
     @Override
     public int getCompletedCount(String taskId) {
-        List<TaskGameAccountStatus> completed = statusMapper.findByTaskIdAndStatus(taskId, "completed");
+        List<TaskGameAccountStatus> completed = statusMapper.findByTaskIdAndStatus(taskId, TaskGameAccountStatusEnum.COMPLETED.getCode());
         return completed.size();
     }
 
     @Override
     public int getTotalCount(String taskId) {
         return findByTaskId(taskId).size();
+    }
+
+    @Override
+    @Transactional
+    public void cancelByTaskId(String taskId) {
+        List<TaskGameAccountStatus> statuses = findByTaskId(taskId);
+        for (TaskGameAccountStatus status : statuses) {
+            TaskGameAccountStatusEnum currentStatus = TaskGameAccountStatusEnum.fromCode(status.getStatus());
+            if (currentStatus.isRunningStatus() || TaskGameAccountStatusEnum.PENDING.equals(currentStatus)) {
+                status.setStatus(TaskGameAccountStatusEnum.CANCELLED.getCode());
+                status.setCompletedTime(LocalDateTime.now());
+                statusMapper.updateById(status);
+            }
+        }
+    }
+
+    @Override
+    @Transactional
+    public void updateDailyMatchInfo(String taskId, String gameAccountId, Integer todayCompleted, Integer dailyLimit) {
+        TaskGameAccountStatus record = findByTaskIdAndGameAccountId(taskId, gameAccountId);
+        if (record != null) {
+            if (todayCompleted != null) {
+                record.setCompletedCount(todayCompleted);
+            }
+            if (dailyLimit != null) {
+                record.setTotalMatches(dailyLimit);
+            }
+            statusMapper.updateById(record);
+        }
     }
 }

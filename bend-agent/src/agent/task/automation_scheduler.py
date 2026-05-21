@@ -7,6 +7,7 @@
 - 支持并发执行多个串流账号任务
 - 提供任务控制（暂停、恢复、停止）
 - 处理任务异常和资源清理
+- 处理密码解密（支持token兑换和AES解密）
 
 核心原则：
 - 每个串流账号对应一个独立协程
@@ -22,10 +23,11 @@ import threading
 from typing import Dict, Optional, List, Any, Callable
 
 from ..core.logger import get_logger
+from ..utils.crypto_util import decrypt_password
 from .task_context import AgentTaskContext, GameAccountInfo, XboxInfo, AutomationResult
-from .task_window_manager import TaskWindowManager
+from ..windows.task_window_manager import TaskWindowManager
 from .automation_task import AgentAutomationTask
-from .platform_api_client import PlatformApiClient
+from ..api.platform_api_client import PlatformApiClient
 
 
 class AutomationScheduler:
@@ -43,12 +45,14 @@ class AutomationScheduler:
     - 每个任务独立协程，互不影响
     """
 
-    def __init__(self, max_concurrent_tasks: int = 10):
+    def __init__(self, max_concurrent_tasks: int = 10, agent_id: str = None, agent_secret: str = None):
         """
         初始化任务调度器
 
         参数：
         - max_concurrent_tasks: 最大并发任务数
+        - agent_id: Agent ID（用于HTTP认证）
+        - agent_secret: Agent Secret（用于HTTP认证）
         """
         self.logger = get_logger('automation_scheduler')
         self._max_concurrent = max_concurrent_tasks
@@ -61,11 +65,21 @@ class AutomationScheduler:
         self._task_objects: Dict[str, AgentAutomationTask] = {}
 
         self._window_manager = TaskWindowManager(max_concurrent_windows=max_concurrent_tasks)
-        self._platform_client = PlatformApiClient()
+        self._platform_client = PlatformApiClient(agent_id=agent_id, agent_secret=agent_secret)
 
         self._lock = threading.Lock()
 
         self.logger.info(f"任务调度器初始化完成，最大并发: {max_concurrent_tasks}")
+
+    def set_credentials(self, agent_id: str, agent_secret: str):
+        """
+        设置Agent凭证用于HTTP认证
+
+        参数：
+        - agent_id: Agent ID
+        - agent_secret: Agent Secret
+        """
+        self._platform_client.set_credentials(agent_id, agent_secret)
 
     async def start_task(
         self,
@@ -96,25 +110,37 @@ class AutomationScheduler:
 
         self.logger.info(f"启动任务: {task_id}, 串流账号: {streaming_account_email}")
 
+        # 解密流媒体账号密码（支持token兑换和AES解密）
+        self.logger.info("正在解密流媒体账号密码...")
+        decrypted_password = await self._decrypt_streaming_password(streaming_account_password)
+        if not decrypted_password:
+            self.logger.error(f"任务 {task_id} 流媒体账号密码解密失败")
+            return False
+        self.logger.info("流媒体账号密码解密成功")
+
         context = AgentTaskContext(
             task_id=task_id,
             streaming_account_id=streaming_account_id,
             streaming_account_email=streaming_account_email,
-            streaming_account_password=streaming_account_password,
+            streaming_account_password=decrypted_password,
             window_id=f"window_{task_id}"
         )
 
-        context.game_accounts = [
-            GameAccountInfo(
+        # 解密游戏账号密码
+        game_accounts_with_passwords = []
+        for ga in game_accounts:
+            decrypted_game_password = await self._decrypt_game_account_password(ga)
+            game_accounts_with_passwords.append(GameAccountInfo(
                 id=ga.get("id", ""),
-                gamertag=ga.get("gamertag", ""),
-                email=ga.get("email", ""),
-                password=ga.get("password", ""),
+                gamertag=ga.get("xboxGameName", ga.get("gamertag", "")),
+                email=ga.get("xboxLiveEmail", ga.get("email", "")),
+                password=decrypted_game_password or "",
                 is_primary=ga.get("isPrimary", False),
-                target_matches=ga.get("targetMatches", 3)
-            )
-            for ga in game_accounts
-        ]
+                target_matches=ga.get("dailyMatchLimit", ga.get("targetMatches", 3)),
+                today_match_count=ga.get("todayMatchCount", 0)
+            ))
+
+        context.game_accounts = game_accounts_with_passwords
 
         if assigned_xbox:
             context.assigned_xbox = XboxInfo(
@@ -126,7 +152,6 @@ class AutomationScheduler:
             )
 
         cancel_event = asyncio.Event()
-        cancel_event.set()
 
         with self._lock:
             self._cancel_events[task_id] = cancel_event
@@ -313,3 +338,104 @@ class AutomationScheduler:
         await self.stop_all_tasks()
         await self._platform_client.close()
         self.logger.info("任务调度器已关闭")
+
+    async def _decrypt_streaming_password(self, encrypted_password: str) -> Optional[str]:
+        """
+        解密流媒体账号密码
+
+        支持的密码格式：
+        - token:xxx - 凭证令牌，需要先兑换为实际密码
+        - hex:xxx - 十六进制加密密码
+        - base64编码的AES加密密码
+        - 其他格式直接返回（可能是已解密的密码）
+
+        参数：
+        - encrypted_password: 加密的密码或令牌
+
+        返回：
+        - str: 解密后的密码
+        - None: 解密失败
+        """
+        if not encrypted_password:
+            self.logger.warning("密码为空")
+            return None
+
+        try:
+            # 如果是token格式（UUID格式或以token:开头），先兑换为实际密码
+            is_uuid_format = len(encrypted_password) == 32 or (len(encrypted_password) == 36 and '-' in encrypted_password)
+            if encrypted_password.startswith('token:') or is_uuid_format:
+                token = encrypted_password[6:] if encrypted_password.startswith('token:') else encrypted_password
+                self.logger.info(f"流媒体账号正在兑换凭证令牌获取密码: {token[:8]}...")
+
+                if not self._platform_client:
+                    self.logger.error("无法进行令牌交换：没有API客户端")
+                    return None
+
+                encrypted_password = await self._platform_client.exchange_credential_token(token)
+                if not encrypted_password:
+                    self.logger.error("流媒体账号令牌兑换失败")
+                    return None
+                self.logger.info("流媒体账号令牌兑换成功")
+
+            # 如果是DISABLED格式，返回空（账号被禁用）
+            if encrypted_password.startswith('DISABLED:'):
+                self.logger.warning("流媒体账号已被禁用")
+                return None
+
+            # 执行AES解密
+            decrypted = decrypt_password(encrypted_password)
+            self.logger.debug("流媒体账号密码AES解密成功")
+            return decrypted
+
+        except Exception as e:
+            self.logger.error(f"流媒体账号密码解密异常: {e}")
+            return None
+
+    async def _decrypt_game_account_password(self, ga: Dict[str, Any]) -> Optional[str]:
+        """
+        解密游戏账号密码
+
+        参数：
+        - ga: 游戏账号字典
+
+        返回：
+        - 解密后的密码
+        - None: 解密失败
+        """
+        gamertag = ga.get("xboxGameName", ga.get("gamertag", "unknown"))
+        password_token = ga.get("passwordToken", "")
+        if not password_token:
+            self.logger.warning(f"游戏账号 {gamertag} 密码为空")
+            return None
+
+        try:
+            # 如果是token格式（UUID格式或以token:开头），先兑换为实际密码
+            is_uuid_format = len(password_token) == 32 or (len(password_token) == 36 and '-' in password_token)
+            if password_token.startswith('token:') or is_uuid_format:
+                token = password_token[6:] if password_token.startswith('token:') else password_token
+                self.logger.info(f"游戏账号 {gamertag} 正在兑换凭证令牌获取密码: {token[:8]}...")
+
+                if not self._platform_client:
+                    self.logger.error("无法进行令牌交换：没有API客户端")
+                    return None
+
+                encrypted_password = await self._platform_client.exchange_credential_token(token)
+                if not encrypted_password:
+                    self.logger.error(f"游戏账号 {gamertag} 令牌兑换失败")
+                    return None
+                password_token = encrypted_password
+                self.logger.info(f"游戏账号 {gamertag} 令牌兑换成功")
+
+            # 如果是DISABLED格式，返回空（账号被禁用）
+            if password_token.startswith('DISABLED:'):
+                self.logger.warning(f"游戏账号 {gamertag} 已被禁用")
+                return None
+
+            # 执行AES解密
+            decrypted = decrypt_password(password_token)
+            self.logger.debug(f"游戏账号 {gamertag} 密码AES解密成功")
+            return decrypted
+
+        except Exception as e:
+            self.logger.error(f"游戏账号 {gamertag} 密码解密异常: {e}")
+            return None

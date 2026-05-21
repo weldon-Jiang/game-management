@@ -75,6 +75,12 @@ public class Task {
     private String gameMode;
 
     /**
+     * 游戏操作类型
+     * daily_match-每日比赛 training-训练模式 mission-任务挑战 custom-自定义操作
+     */
+    private String gameActionType;
+
+    /**
      * 目标Agent ID
      * 指定由哪个Agent执行此任务
      */
@@ -196,6 +202,21 @@ public class Task {
      */
     @TableLogic
     private Boolean deleted;
+
+    /**
+     * 当前执行步骤
+     */
+    private String currentStep;
+
+    /**
+     * 步骤状态
+     */
+    private String stepStatus;
+
+    /**
+     * 进度消息
+     */
+    private String progressMessage;
 
     @TableField(exist = false)
     private String xboxHostName;
