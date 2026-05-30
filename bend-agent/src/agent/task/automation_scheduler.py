@@ -88,8 +88,59 @@ class AutomationScheduler:
         self._last_login_times: Dict[str, float] = {}
         self._login_lock = asyncio.Lock()
 
+        # Xbox主机串流状态跟踪（防止同一主机被多个任务同时串流）
+        self._streaming_xbox_hosts: Dict[str, str] = {}  # xbox_id -> task_id
+        self._xbox_lock = asyncio.Lock()
+
         self.logger.info(f"任务调度器初始化完成，最大并发: {max_concurrent_tasks}")
         self.logger.info(f"登录间隔控制: 同一账号{self.MIN_LOGIN_INTERVAL}秒, 不同账号{self.MIN_ACCOUNT_INTERVAL}秒")
+
+    async def acquire_xbox_host(self, xbox_id: str, task_id: str) -> bool:
+        """
+        尝试获取Xbox主机的串流权限
+
+        参数：
+        - xbox_id: Xbox主机ID
+        - task_id: 任务ID
+
+        返回：
+        - True: 获取成功
+        - False: 获取失败（主机已被其他任务占用）
+        """
+        async with self._xbox_lock:
+            if xbox_id in self._streaming_xbox_hosts:
+                occupying_task = self._streaming_xbox_hosts[xbox_id]
+                self.logger.warning(f"Xbox主机 {xbox_id} 已被任务 {occupying_task} 占用")
+                return False
+            self._streaming_xbox_hosts[xbox_id] = task_id
+            self.logger.info(f"任务 {task_id} 已获取Xbox主机 {xbox_id} 的串流权限")
+            return True
+
+    async def release_xbox_host(self, xbox_id: str, task_id: str):
+        """
+        释放Xbox主机的串流权限
+
+        参数：
+        - xbox_id: Xbox主机ID
+        - task_id: 任务ID
+        """
+        async with self._xbox_lock:
+            if xbox_id in self._streaming_xbox_hosts:
+                current_task = self._streaming_xbox_hosts[xbox_id]
+                if current_task == task_id:
+                    del self._streaming_xbox_hosts[xbox_id]
+                    self.logger.info(f"任务 {task_id} 已释放Xbox主机 {xbox_id}")
+                else:
+                    self.logger.warning(f"任务 {task_id} 尝试释放不属于自己的Xbox主机 {xbox_id}")
+
+    def get_streaming_xbox_hosts(self) -> Dict[str, str]:
+        """
+        获取当前正在被串流的Xbox主机列表
+
+        返回：
+        - Dict: xbox_id -> task_id
+        """
+        return dict(self._streaming_xbox_hosts)
 
     def set_credentials(self, agent_id: str, agent_secret: str):
         """

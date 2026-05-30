@@ -266,14 +266,19 @@ class CentralManager:
 
         处理逻辑：
         - 收到信号后，设置运行状态为False
-        - 调用stop方法执行优雅关闭
-        - 根据之前的请求决定是否卸载或清除注册表
+        - 创建停止任务（不等待，让事件循环自然处理）
+        - 停止事件循环，触发main()中的KeyboardInterrupt处理
         """
         self.logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        
+        # 创建停止任务（不等待，让事件循环自然处理）
         asyncio.create_task(self.stop(
             uninstall=self._uninstall_requested,
             clear_registry=self._clear_registry_requested
         ))
+        
+        # 停止事件循环，这会触发KeyboardInterrupt被main()捕获
+        # main()的finally块会确保stop_manager被调用
         loop = asyncio.get_event_loop()
         if not loop.is_closed():
             loop.stop()
@@ -482,13 +487,17 @@ class CentralManager:
                 # 检查后端是否返回了新的agentSecret
                 data = result.get('data', {})
                 if data.get('agentSecret'):
+                    import base64
                     new_secret = data['agentSecret']
                     self.agent_secret = new_secret
-                    # 同步更新API客户端和WSClient的secret
+                    # 同步更新API客户端（需要Base64编码）
                     self.api.agent_secret = new_secret
-                    self.api._headers['X-Agent-Secret'] = new_secret
+                    encoded_secret = base64.b64encode(new_secret.encode('utf-8')).decode('utf-8')
+                    self.api._headers['X-Agent-Secret'] = encoded_secret
                     self.ws.agent_secret = new_secret
-                    self.logger.info("Agent secret updated from server")
+                    # 保存到凭证文件
+                    await self._save_credentials()
+                    self.logger.info("Agent secret updated from server and saved")
                     
                 self._agent_info.status = 'online'
                 self.logger.info(f"Agent registered successfully: {self.agent_id}")
@@ -940,3 +949,35 @@ class CentralManager:
                 'count': 0,
                 'error': str(e)
             })
+
+    async def _save_credentials(self):
+        """
+        保存Agent凭证到文件
+        
+        功能说明：
+        - 将agent_id和agent_secret保存到credentials/agent_credentials.json
+        - 确保CredentialsProvider能读取到最新的凭证
+        """
+        try:
+            import os
+            import json
+            
+            # 获取凭证目录（与CredentialsProvider保持一致）
+            credentials_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'credentials')
+            os.makedirs(credentials_dir, exist_ok=True)
+            credentials_file = os.path.join(credentials_dir, 'agent_credentials.json')
+            
+            credentials_data = {
+                'agentId': self.agent_id,
+                'agentSecret': self.agent_secret,
+                'merchantId': '',
+                'registrationCode': self.registration_code or ''
+            }
+            
+            with open(credentials_file, 'w', encoding='utf-8') as f:
+                json.dump(credentials_data, f, indent=2)
+            
+            self.logger.info(f"Credentials saved to: {credentials_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save credentials: {e}")

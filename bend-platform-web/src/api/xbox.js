@@ -10,5 +10,6 @@ export const xboxApi = {
   bind: (id, streamingAccountId, gamertag) => request.put(`/api/xbox-hosts/${id}/bind`, null, { params: { streamingAccountId, gamertag } }),
   unbind: (id) => request.put(`/api/xbox-hosts/${id}/unbind`),
   getAvailableAccounts: (id) => request.get(`/api/xbox-hosts/${id}/available-streaming-accounts`),
-  discover: (agentId) => request.post('/api/xbox-hosts/discover', null, { params: { agentId } })
+  discover: (agentId) => request.post('/api/xbox-hosts/discover', null, { params: { agentId } }),
+  unlock: (id) => request.post(`/api/xbox-hosts/${id}/unlock`)
 }

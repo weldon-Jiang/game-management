@@ -12,6 +12,7 @@ import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.MerchantService;
+import com.bend.platform.service.XboxHostBindingService;
 import com.bend.platform.service.XboxHostService;
 import com.bend.platform.util.UserContext;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
@@ -51,6 +52,7 @@ public class XboxHostController {
     private static final Logger log = LoggerFactory.getLogger(XboxHostController.class);
 
     private final XboxHostService xboxHostService;
+    private final XboxHostBindingService xboxHostBindingService;
     private final MerchantService merchantService;
     private final AgentInstanceService agentInstanceService;
 
@@ -209,7 +211,7 @@ public class XboxHostController {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
 
-        xboxHostService.bindStreamingAccount(id, streamingAccountId, gamertag);
+        xboxHostBindingService.bind(id, streamingAccountId, gamertag);
         return ApiResponse.success("绑定成功", null);
     }
 
@@ -230,7 +232,7 @@ public class XboxHostController {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
 
-        xboxHostService.unbindStreamingAccount(id);
+        xboxHostBindingService.unbind(id);
         return ApiResponse.success("解绑成功", null);
     }
 

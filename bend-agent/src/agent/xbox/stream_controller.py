@@ -441,12 +441,15 @@ class XboxStreamController:
         try:
             self.logger.info(f"Connecting to Xbox with token: {xbox_ip}:{port}")
 
+            self.logger.debug(f"Opening TCP connection to {xbox_ip}:{port}...")
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(xbox_ip, port),
                 timeout=10
             )
+            self.logger.info(f"TCP connection established to {xbox_ip}:{port}")
 
             # 使用 token 进行握手
+            self.logger.debug(f"Starting token handshake...")
             if await self._token_handshake(xbox_token, user_hash):
                 self._state = StreamState.CONNECTED
                 self.logger.info(f"Connected to Xbox with token: {xbox_ip}")

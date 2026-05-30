@@ -302,11 +302,11 @@ class XboxDiscovery:
                 return None
 
             ip = device.get('ip', '')
-            
+
             name = self._extract_name_from_location(location)
             if name and name.startswith('Xbox-'):
                 name = None
-            
+
             console_type = self._extract_console_type(name)
 
             device_id = self._extract_xbox_id_from_usn(usn)

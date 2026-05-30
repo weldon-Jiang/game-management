@@ -74,22 +74,6 @@ public interface XboxHostService {
     void updateStatus(String id, String status);
 
     /**
-     * 绑定流媒体账号
-     *
-     * @param id                  主机ID
-     * @param streamingAccountId 流媒体账号ID
-     * @param gamertag           Gamertag
-     */
-    void bindStreamingAccount(String id, String streamingAccountId, String gamertag);
-
-    /**
-     * 解绑流媒体账号
-     *
-     * @param id 主机ID
-     */
-    void unbindStreamingAccount(String id);
-
-    /**
      * 锁定主机
      *
      * @param id         主机ID
@@ -140,11 +124,18 @@ public interface XboxHostService {
      * 创建或更新Xbox主机（用于发现功能）
      * 如果xboxId已存在则更新，否则创建新主机
      *
-     * @param merchantId 商户ID
-     * @param xboxId     Xbox主机ID
-     * @param name       主机名称
-     * @param ipAddress  IP地址
+     * @param merchantId       商户ID
+     * @param xboxId           Xbox主机ID
+     * @param name             主机名称
+     * @param ipAddress        IP地址
+     * @param port             SmartGlass端口
+     * @param liveId           Xbox Live ID
+     * @param consoleType      主机型号
+     * @param firmwareVersion  固件版本
+     * @param macAddress       MAC地址
      * @return 创建或更新的主机实体
      */
-    XboxHost createOrUpdate(String merchantId, String xboxId, String name, String ipAddress);
+    XboxHost createOrUpdate(String merchantId, String xboxId, String name, String ipAddress, 
+                            Integer port, String liveId, String consoleType, 
+                            String firmwareVersion, String macAddress);
 }

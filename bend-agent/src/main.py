@@ -135,9 +135,16 @@ async def main():
     except KeyboardInterrupt:
         runner.logger.info("Keyboard interrupt received, shutting down...")
         return 0
+    except Exception as e:
+        runner.logger.error(f"Unexpected error: {e}")
+        return 1
     finally:
-        # 确保 shutdown 被调用
-        await runner.stop_manager()
+        # 确保 shutdown 被调用（包括KeyboardInterrupt时）
+        # 使用shield保护stop_manager不被取消
+        try:
+            await asyncio.shield(runner.stop_manager())
+        except Exception as e:
+            runner.logger.error(f"Error during shutdown: {e}")
 
 
 if __name__ == '__main__':

@@ -73,16 +73,24 @@ class PlatformApiClient:
     async def _get_headers(self) -> Dict[str, str]:
         """获取HTTP请求头（包含认证信息）"""
         headers = {'Content-Type': 'application/json'}
-        # 优先使用实例变量，其次从凭证管理器获取
+        
+        # 优先使用实例变量，其次从凭证管理器获取（get_credentials直接从文件读取，不缓存）
         agent_id = self._agent_id
         agent_secret = self._agent_secret
+        
         if not agent_id or not agent_secret:
             agent_id, agent_secret = get_credentials()
+        
         if agent_id and agent_secret:
             headers['X-Agent-Id'] = agent_id
             # Base64编码 agent_secret（后端期望收到Base64编码的secret）
             encoded_secret = base64.b64encode(agent_secret.encode('utf-8')).decode('utf-8')
             headers['X-Agent-Secret'] = encoded_secret
+            # 调试日志
+            self.logger.info(f"认证信息 - agentId: {agent_id}, 原始secret长度: {len(agent_secret)}, Base64编码后: {encoded_secret}")
+        else:
+            self.logger.warning(f"Agent凭证缺失 - agent_id: {'存在' if agent_id else '缺失'}, agent_secret: {'存在' if agent_secret else '缺失'}")
+        
         return headers
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -121,6 +129,7 @@ class PlatformApiClient:
             payload["message"] = message
 
         try:
+            self.logger.info(f"上报状态请求 - URL: {url}, Headers: X-Agent-Id={headers.get('X-Agent-Id')}")
             session = await self._get_session()
             async with session.post(url, json=payload, headers=headers,
                                    timeout=aiohttp.ClientTimeout(total=10)) as response:
@@ -128,7 +137,8 @@ class PlatformApiClient:
                     result = await response.json()
                     return result
                 else:
-                    self.logger.warning(f"上报任务状态HTTP错误: {response.status}")
+                    response_body = await response.text()
+                    self.logger.warning(f"上报任务状态HTTP错误: {response.status}, 响应: {response_body}")
                     return {}
         except Exception as e:
             self.logger.error(f"上报任务状态异常: {e}")
@@ -293,13 +303,15 @@ class PlatformApiClient:
                 "timestamp": time.time(),
                 **kwargs
             }
+            self.logger.info(f"上报请求 - URL: {url}, Headers: X-Agent-Id={headers.get('X-Agent-Id')}")
             session = await self._get_session()
             async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
                     self.logger.debug(f"任务进度上报成功(HTTP): {task_id} - {step} - {status}")
                     return
                 else:
-                    self.logger.warning(f"任务进度上报HTTP错误: {response.status}")
+                    response_body = await response.text()
+                    self.logger.warning(f"任务进度上报HTTP错误: {response.status}, 响应: {response_body}")
         except Exception as e:
             self.logger.debug(f"HTTP上报失败: {e}")
 
@@ -367,6 +379,104 @@ class PlatformApiClient:
                     return None
         except Exception as e:
             self.logger.error(f"凭证兑换异常: {e}")
+            return None
+
+    async def lock_xbox_host(self, xbox_host_id: str) -> bool:
+        """
+        锁定Xbox主机，防止其他Agent占用
+
+        参数：
+        - xbox_host_id: Xbox主机ID（数据库ID）
+
+        返回：
+        - True: 锁定成功
+        - False: 锁定失败（主机已被锁定或不存在）
+        """
+        url = f"{self.base_url}/xbox-host/{xbox_host_id}/lock"
+        headers = await self._get_headers()
+
+        try:
+            session = await self._get_session()
+            async with session.post(url, headers=headers,
+                                   timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get("code") == 200:
+                        self.logger.info(f"成功锁定Xbox主机: {xbox_host_id}")
+                        return True
+                    else:
+                        self.logger.warning(f"锁定Xbox主机失败: {result.get('message')}")
+                        return False
+                else:
+                    self.logger.warning(f"锁定Xbox主机HTTP错误: {response.status}")
+                    return False
+        except Exception as e:
+            self.logger.error(f"锁定Xbox主机异常: {e}")
+            return False
+
+    async def unlock_xbox_host(self, xbox_host_id: str) -> bool:
+        """
+        解锁Xbox主机
+
+        参数：
+        - xbox_host_id: Xbox主机ID（数据库ID）
+
+        返回：
+        - True: 解锁成功
+        - False: 解锁失败
+        """
+        url = f"{self.base_url}/xbox-host/{xbox_host_id}/unlock"
+        headers = await self._get_headers()
+
+        try:
+            session = await self._get_session()
+            async with session.post(url, headers=headers,
+                                   timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get("code") == 200:
+                        self.logger.info(f"成功解锁Xbox主机: {xbox_host_id}")
+                        return True
+                    else:
+                        self.logger.warning(f"解锁Xbox主机失败: {result.get('message')}")
+                        return False
+                else:
+                    self.logger.warning(f"解锁Xbox主机HTTP错误: {response.status}")
+                    return False
+        except Exception as e:
+            self.logger.error(f"解锁Xbox主机异常: {e}")
+            return False
+
+    async def get_xbox_host_status(self, xbox_host_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取Xbox主机状态（包括锁定状态）
+
+        参数：
+        - xbox_host_id: Xbox主机ID（数据库ID）
+
+        返回：
+        - Dict: 主机状态信息，包含 locked, lockedByAgentId, lockExpiresTime 等字段
+        - None: 获取失败
+        """
+        url = f"{self.base_url}/xbox-host/{xbox_host_id}"
+        headers = await self._get_headers()
+
+        try:
+            session = await self._get_session()
+            async with session.get(url, headers=headers,
+                                  timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get("code") == 200:
+                        return result.get("data")
+                    else:
+                        self.logger.warning(f"获取主机状态失败: {result.get('message')}")
+                        return None
+                else:
+                    self.logger.warning(f"获取主机状态HTTP错误: {response.status}")
+                    return None
+        except Exception as e:
+            self.logger.error(f"获取主机状态异常: {e}")
             return None
 
 

@@ -39,6 +39,14 @@ public class XboxHost {
 
     private String ipAddress;
 
+    private Integer port;
+
+    private String liveId;
+
+    private String consoleType;
+
+    private String firmwareVersion;
+
     private String macAddress;
 
     private String status;

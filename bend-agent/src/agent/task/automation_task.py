@@ -266,9 +266,16 @@ class AgentAutomationTask:
             kwargs.update(extra_data)
 
         if self.platform_client:
+            # 上报任务进度
             await self.platform_client.report_task_progress(
                 task_id, step, status, message, **kwargs
             )
+            
+            # 当状态为最终状态时（FAILED/CANCELLED/COMPLETED），同时上报任务状态
+            if status in ("FAILED", "CANCELLED", "COMPLETED"):
+                await self.platform_client.report_task_status(
+                    task_id, status.lower(), message
+                )
 
     async def _cleanup(self):
         """清理任务资源并关闭窗口"""

@@ -124,17 +124,55 @@ class CredentialsProvider:
     
     def get_credentials(self) -> Tuple[Optional[str], Optional[str]]:
         """
-        获取 Agent 凭证
+        获取 Agent 凭证（每次都从文件读取，不使用缓存）
 
         返回：
         - Tuple[str, str]: (agent_id, agent_secret)
-        - 如果未加载则返回 (None, None)
+        - 如果文件不存在或内容无效则返回 (None, None)
         """
-        if self._credentials:
-            self.logger.debug(f"返回凭证: agentId={self._credentials.agent_id}")
-            return self._credentials.agent_id, self._credentials.agent_secret
-        self.logger.warning("凭证未加载，返回 (None, None)")
+        # 每次都重新从文件读取，不使用缓存
+        credentials = self._read_credentials_from_file()
+        if credentials:
+            self.logger.debug(f"返回凭证: agentId={credentials.agent_id}")
+            return credentials.agent_id, credentials.agent_secret
+        self.logger.warning("凭证文件不存在或内容无效，返回 (None, None)")
         return None, None
+    
+    def _read_credentials_from_file(self) -> Optional[AgentCredentials]:
+        """
+        从文件读取凭证（不缓存，每次调用都读取）
+        
+        返回：
+        - AgentCredentials: 凭证对象
+        - None: 读取失败
+        """
+        try:
+            if not os.path.exists(self._credentials_file):
+                self.logger.debug(f"凭证文件不存在: {self._credentials_file}")
+                return None
+            
+            with open(self._credentials_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            agent_id = data.get('agentId', '')
+            agent_secret = data.get('agentSecret', '')
+            merchant_id = data.get('merchantId', '')
+            registration_code = data.get('registrationCode', '')
+            
+            if agent_id and agent_secret:
+                return AgentCredentials(
+                    agent_id=agent_id,
+                    agent_secret=agent_secret,
+                    merchant_id=merchant_id,
+                    registration_code=registration_code
+                )
+            else:
+                self.logger.debug("凭证文件内容不完整，缺少agentId或agentSecret")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"读取凭证文件失败: {e}")
+            return None
     
     @property
     def agent_id(self) -> Optional[str]:

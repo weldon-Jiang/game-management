@@ -4,6 +4,7 @@ import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.Task;
 import com.bend.platform.entity.TaskGameAccountStatus;
+import com.bend.platform.entity.XboxHost;
 import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.service.AgentLoadControlService;
 import com.bend.platform.service.GameAccountService;
@@ -12,6 +13,7 @@ import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.service.SubscriptionService;
 import com.bend.platform.service.TaskService;
 import com.bend.platform.service.TaskGameAccountStatusService;
+import com.bend.platform.service.XboxHostService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -36,6 +38,7 @@ public class AgentCallbackController {
     private final SubscriptionService subscriptionService;
     private final MerchantBalanceService balanceService;
     private final StreamingAccountService streamingAccountService;
+    private final XboxHostService xboxHostService;
 
     @PostMapping("/agent-callback/task/{taskId}/status")
     public ApiResponse<Void> reportTaskStatus(

@@ -157,44 +157,6 @@ public class XboxHostServiceImpl implements XboxHostService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void bindStreamingAccount(String id, String streamingAccountId, String gamertag) {
-        XboxHost host = xboxHostMapper.selectById(id);
-        if (host == null) {
-            throw new BusinessException(ResultCode.XboxHost.NOT_FOUND);
-        }
-
-        // 校验商户是否有效
-        merchantService.validateMerchantActive(host.getMerchantId());
-
-        if (host.getBoundStreamingAccountId() != null) {
-            throw new BusinessException(ResultCode.XboxHost.ALREADY_BOUND);
-        }
-
-        host.setBoundStreamingAccountId(streamingAccountId);
-        host.setBoundGamertag(gamertag);
-        xboxHostMapper.updateById(host);
-        log.info("绑定流媒体账号 - Xbox主机ID: {}, 流媒体账号ID: {}", id, streamingAccountId);
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void unbindStreamingAccount(String id) {
-        XboxHost host = xboxHostMapper.selectById(id);
-        if (host == null) {
-            throw new BusinessException(ResultCode.XboxHost.NOT_FOUND);
-        }
-
-        // 校验商户是否有效
-        merchantService.validateMerchantActive(host.getMerchantId());
-
-        host.setBoundStreamingAccountId(null);
-        host.setBoundGamertag(null);
-        xboxHostMapper.updateById(host);
-        log.info("解绑流媒体账号 - Xbox主机ID: {}", id);
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
     public void lock(String id, String agentId, LocalDateTime expireTime) {
         XboxHost host = xboxHostMapper.selectById(id);
         if (host == null) {
@@ -275,13 +237,15 @@ public class XboxHostServiceImpl implements XboxHostService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public XboxHost createOrUpdate(String merchantId, String xboxId, String name, String ipAddress) {
+    public XboxHost createOrUpdate(String merchantId, String xboxId, String name, String ipAddress,
+                                   Integer port, String liveId, String consoleType, 
+                                   String firmwareVersion, String macAddress) {
         merchantService.validateMerchantActive(merchantId);
 
         XboxHost host = findByXboxId(xboxId);
         
         if (host != null) {
-            updateHostInfo(host, name, ipAddress);
+            updateHostInfo(host, name, ipAddress, port, liveId, consoleType, firmwareVersion, macAddress);
             xboxHostMapper.updateById(host);
             log.info("更新已发现的Xbox主机 - ID: {}, XboxID: {}", host.getId(), xboxId);
             return host;
@@ -290,8 +254,15 @@ public class XboxHostServiceImpl implements XboxHostService {
         host = new XboxHost();
         host.setMerchantId(merchantId);
         host.setXboxId(xboxId);
-        host.setName(StringUtils.trimToEmpty(name));
+        if (StringUtils.isNotBlank(name)) {
+            host.setName(name.trim());
+        }
         host.setIpAddress(ipAddress);
+        host.setPort(port);
+        host.setLiveId(liveId);
+        host.setConsoleType(consoleType);
+        host.setFirmwareVersion(firmwareVersion);
+        host.setMacAddress(macAddress);
         host.setStatus("idle");
         host.setLastSeenTime(LocalDateTime.now());
 
@@ -300,12 +271,28 @@ public class XboxHostServiceImpl implements XboxHostService {
         return host;
     }
 
-    private void updateHostInfo(XboxHost host, String name, String ipAddress) {
+    private void updateHostInfo(XboxHost host, String name, String ipAddress, Integer port,
+                                String liveId, String consoleType, String firmwareVersion, String macAddress) {
         if (StringUtils.isNotBlank(name)) {
             host.setName(name.trim());
         }
         if (ipAddress != null && !ipAddress.isEmpty()) {
             host.setIpAddress(ipAddress);
+        }
+        if (port != null) {
+            host.setPort(port);
+        }
+        if (StringUtils.isNotBlank(liveId)) {
+            host.setLiveId(liveId);
+        }
+        if (StringUtils.isNotBlank(consoleType)) {
+            host.setConsoleType(consoleType);
+        }
+        if (StringUtils.isNotBlank(firmwareVersion)) {
+            host.setFirmwareVersion(firmwareVersion);
+        }
+        if (StringUtils.isNotBlank(macAddress)) {
+            host.setMacAddress(macAddress);
         }
         host.setStatus("idle");
         host.setLastSeenTime(LocalDateTime.now());

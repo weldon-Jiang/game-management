@@ -286,6 +286,11 @@ CREATE TABLE IF NOT EXISTS `xbox_host` (
     `xbox_id` VARCHAR(64) NOT NULL COMMENT 'Xbox主机ID',
     `name` VARCHAR(100) DEFAULT NULL COMMENT '主机名称',
     `ip_address` VARCHAR(45) DEFAULT NULL COMMENT 'IP地址',
+    `port` INT DEFAULT 5050 COMMENT 'SmartGlass端口',
+    `live_id` VARCHAR(128) DEFAULT NULL COMMENT 'Xbox Live ID',
+    `console_type` VARCHAR(32) DEFAULT NULL COMMENT '主机型号: Xbox Series X/S/One',
+    `firmware_version` VARCHAR(64) DEFAULT NULL COMMENT '固件版本',
+    `mac_address` VARCHAR(17) DEFAULT NULL COMMENT 'MAC地址',
     `bound_streaming_account_id` VARCHAR(36) DEFAULT NULL COMMENT '绑定的流媒体账号ID',
     `bound_gamertag` VARCHAR(50) DEFAULT NULL COMMENT '绑定的Gamertag',
     `power_state` ENUM('On','Off','Standby') DEFAULT 'Off' COMMENT '电源状态',
@@ -297,7 +302,6 @@ CREATE TABLE IF NOT EXISTS `xbox_host` (
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
-    `mac_address` VARCHAR(17) DEFAULT NULL COMMENT 'MAC地址',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_xbox_id` (`xbox_id`),
     KEY `idx_merchant_id` (`merchant_id`),
@@ -709,12 +713,11 @@ CREATE TABLE IF NOT EXISTS `template` (
 -- =====================================================
 -- 初始化VIP分组数据
 -- =====================================================
-INSERT INTO merchant_group (id, name, vip_level, amount_threshold, discount_rate, unbind_refund_rate, max_unbind_per_week, features, host_price, window_price, account_price, status)
-VALUES
-    ('group_vip0', '普通用户', 0, 0, 1.00, 0.50, 1, '{"maxAgents": 2, "maxTasks": 5}', 10.00, 5.00, 8.00, 'active'),
-    ('group_vip1', 'VIP1', 1, 100, 0.95, 0.60, 2, '{"maxAgents": 5, "maxTasks": 20}', 9.50, 4.75, 7.60, 'active'),
-    ('group_vip2', 'VIP2', 2, 500, 0.90, 0.70, 3, '{"maxAgents": 10, "maxTasks": 50}', 9.00, 4.50, 7.20, 'active'),
-    ('group_vip3', 'VIP3', 3, 1000, 0.85, 0.80, 5, '{"maxAgents": 20, "maxTasks": 100}', 8.50, 4.25, 6.80, 'active');
+INSERT INTO bend_platform.merchant_group (id, name, vip_level, amount_threshold, window_original_price, window_discount_price, account_original_price, account_discount_price, host_original_price, host_discount_price, full_original_price, full_discount_price, points_original_price, points_discount_price, discount_rate, unbind_refund_rate, max_unbind_per_week, features, host_price, window_price, account_price, status, created_time, updated_time, package_price, package_duration_days, description) VALUES ('group_vip0', '普通用户', 0, 0, 10000, 10000, 5000, 5000, 20000, 20000, 30000, 30000, 500, 500, 1.00, 0.50, 1, '{"maxAgents": 2, "maxTasks": 5}', 10.00, 5.00, 8.00, 'active', '2026-05-30 09:10:33', '2026-05-30 09:10:33', null, 30, null);
+INSERT INTO bend_platform.merchant_group (id, name, vip_level, amount_threshold, window_original_price, window_discount_price, account_original_price, account_discount_price, host_original_price, host_discount_price, full_original_price, full_discount_price, points_original_price, points_discount_price, discount_rate, unbind_refund_rate, max_unbind_per_week, features, host_price, window_price, account_price, status, created_time, updated_time, package_price, package_duration_days, description) VALUES ('group_vip1', 'VIP1', 1, 10000, 10000, 9000, 5000, 4500, 20000, 18000, 30000, 27000, 500, 450, 0.95, 0.60, 2, '{"maxAgents": 5, "maxTasks": 20}', 9.50, 4.75, 7.60, 'active', '2026-05-30 09:10:33', '2026-05-30 12:32:21', null, 30, null);
+INSERT INTO bend_platform.merchant_group (id, name, vip_level, amount_threshold, window_original_price, window_discount_price, account_original_price, account_discount_price, host_original_price, host_discount_price, full_original_price, full_discount_price, points_original_price, points_discount_price, discount_rate, unbind_refund_rate, max_unbind_per_week, features, host_price, window_price, account_price, status, created_time, updated_time, package_price, package_duration_days, description) VALUES ('group_vip2', 'VIP2', 2, 50000, 10000, 8000, 5000, 4000, 20000, 16000, 30000, 24000, 500, 400, 0.90, 0.70, 3, '{"maxAgents": 10, "maxTasks": 50}', 9.00, 4.50, 7.20, 'active', '2026-05-30 09:10:33', '2026-05-30 12:32:21', null, 30, null);
+INSERT INTO bend_platform.merchant_group (id, name, vip_level, amount_threshold, window_original_price, window_discount_price, account_original_price, account_discount_price, host_original_price, host_discount_price, full_original_price, full_discount_price, points_original_price, points_discount_price, discount_rate, unbind_refund_rate, max_unbind_per_week, features, host_price, window_price, account_price, status, created_time, updated_time, package_price, package_duration_days, description) VALUES ('group_vip3', 'VIP3', 3, 100000, 10000, 7000, 5000, 3500, 20000, 14000, 30000, 21000, 500, 350, 0.85, 0.80, 5, '{"maxAgents": 20, "maxTasks": 100}', 8.50, 4.25, 6.80, 'active', '2026-05-30 09:10:33', '2026-05-30 12:32:21', null, 30, null);
+
 
 INSERT INTO merchant (id, phone, name, status, created_time, updated_time, deleted, is_system, total_amount, vip_level)
 VALUES ('f5d927c40f87f57ef0f4a484d8a823e9', '13800138000', '系统管理员', 'active', '2026-04-16 17:21:58', '2026-04-23 11:16:44', 0, 1, 0, 0);

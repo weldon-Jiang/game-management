@@ -35,6 +35,13 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
+        <el-table-column prop="locked" label="锁定状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.locked ? 'danger' : 'success'" size="small">
+              {{ row.locked ? '已锁定' : '未锁定' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="ipAddress" label="IP地址" width="140" />
         <el-table-column prop="macAddress" label="MAC地址" width="170" show-overflow-tooltip>
           <template #default="{ row }">
@@ -60,7 +67,17 @@
             {{ row.lastSeenTime ? formatDate(row.lastSeenTime) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
+        <el-table-column prop="lockedByAgentId" label="锁定者" width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.lockedByAgentId || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="lockExpiresTime" label="锁过期时间" width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.lockExpiresTime ? formatDate(row.lockExpiresTime) : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="350" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="showEditDialog(row)">
               编辑
@@ -76,6 +93,15 @@
               @click="handleUnbind(row)"
             >
               解绑
+            </el-button>
+            <el-button
+              v-if="row.locked"
+              type="danger"
+              link
+              size="small"
+              @click="handleForceUnlock(row)"
+            >
+              强制解锁
             </el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">
               删除
@@ -554,6 +580,28 @@ const handleUnbind = async (row) => {
   try {
     await xboxApi.unbind(row.id)
     ElMessage.success('解绑成功')
+    loadData()
+  } catch (error) {
+    // 错误已在拦截器中处理
+  }
+}
+
+/**
+ * 强制解锁主机
+ * @param {Object} row - 当前行数据
+ */
+const handleForceUnlock = async (row) => {
+  await ElMessageBox.confirm(
+    `确定要强制解锁主机「${row.name}」吗？\n\n当前锁定者: ${row.lockedByAgentId || '未知'}`, 
+    '提示', {
+    confirmButtonText: '确定解锁',
+    cancelButtonText: '取消',
+    type: 'warning'
+  })
+
+  try {
+    await xboxApi.unlock(row.id)
+    ElMessage.success('解锁成功')
     loadData()
   } catch (error) {
     // 错误已在拦截器中处理

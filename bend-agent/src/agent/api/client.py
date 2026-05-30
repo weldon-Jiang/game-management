@@ -71,18 +71,23 @@ class ApiClient:
 
         初始化内容：
         - 设置基础URL和API前缀
-        - 配置请求头（包含Agent标识和密钥）
+        - 配置请求头（包含Agent标识和密钥，密钥需要Base64编码）
         - 初始化状态变量
         """
+        import base64
+        
         self.agent_id = agent_id                      # Agent唯一标识符
-        self.agent_secret = agent_secret              # Agent密钥
+        self.agent_secret = agent_secret              # Agent密钥（原始值）
         self.base_url = config.backend_url            # 后端服务器地址
         self.api_prefix = config.get('backend.api_prefix', '/api')  # API前缀
         self._session: Optional[aiohttp.ClientSession] = None     # HTTP会话
+        
+        # Base64编码agent_secret（后端期望收到Base64编码的secret）
+        encoded_secret = base64.b64encode(agent_secret.encode('utf-8')).decode('utf-8')
         self._headers = {                              # 请求头
             'Content-Type': 'application/json',       # JSON内容类型
             'X-Agent-Id': agent_id,                   # Agent标识
-            'X-Agent-Secret': agent_secret            # Agent密钥
+            'X-Agent-Secret': encoded_secret          # Agent密钥（Base64编码）
         }
         self.logger = get_logger('api')                # 日志记录器
         self._current_status = 'online'               # 当前状态

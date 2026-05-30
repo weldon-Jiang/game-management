@@ -4,6 +4,7 @@
 
 功能说明：
 - 根据条件匹配Xbox主机
+- 校验Xbox主机是否已被其他任务串流
 - 建立与Xbox的串流连接
 - 回传主机信息到平台并标记防止抢夺
 
@@ -13,9 +14,10 @@
 - _connect_to_xbox(): 连接到Xbox主机
 - _bind_xbox_to_platform(): 绑定Xbox到平台（防止抢夺）
 - _report_progress(): 上报进度到平台
+- _check_xbox_availability(): 检查Xbox主机是否可用（未被其他任务占用）
 
 作者：技术团队
-版本：1.0
+版本：2.0
 """
 
 import asyncio
@@ -25,6 +27,16 @@ from typing import Callable, Optional, Dict, Any, List
 from ..core.logger import get_logger
 from ..core.account_logger import get_stream_logger
 from ..task.task_context import AgentTaskContext, Step2Result, XboxInfo, TaskStepStatus
+
+
+class XboxMatchResult:
+    """Xbox主机匹配结果"""
+    def __init__(self, success: bool, xbox_info: XboxInfo = None, 
+                 match_type: str = "", message: str = ""):
+        self.success = success
+        self.xbox_info = xbox_info
+        self.match_type = match_type
+        self.message = message
 
 
 async def step2_execute_streaming(
@@ -75,6 +87,19 @@ async def step2_execute_streaming(
             await report_progress(context.task_id, "STEP2", "FAILED", match_result.message)
             return Step2Result(success=False, error_code="XBOX_MATCH_FAILED",
                              message=match_result.message)
+
+        # 校验Xbox主机是否已被其他任务占用
+        xbox_id = match_result.xbox_info.id or match_result.xbox_info.live_id or match_result.xbox_info.mac_address
+        if xbox_id:
+            available = await _check_xbox_availability(context, xbox_id)
+            if not available:
+                error_msg = f"Xbox主机 {match_result.xbox_info.name} 已被其他任务占用"
+                logger.error(error_msg)
+                stream_logger.error(error_msg)
+                context.update_step_status("step2", TaskStepStatus.FAILED, error_msg)
+                await report_progress(context.task_id, "STEP2", "FAILED", error_msg)
+                return Step2Result(success=False, error_code="XBOX_OCCUPIED",
+                                 message=error_msg)
 
         context.current_xbox = match_result.xbox_info
         logger.info(f"Xbox匹配成功: {match_result.xbox_info.name} "
@@ -129,7 +154,7 @@ async def _match_xbox_host(
     logger,
     stream_logger,
     check_cancel: Callable[[], bool]
-) -> Dict[str, Any]:
+) -> XboxMatchResult:
     """
     匹配Xbox主机
 
@@ -145,7 +170,7 @@ async def _match_xbox_host(
     - check_cancel: 取消检查函数
 
     返回：
-    - Dict: {success: bool, xbox_info: XboxInfo, match_type: str, message: str}
+    - XboxMatchResult: 包含匹配结果的对象
     """
     if context.assigned_xbox:
         logger.info(f"使用指定的Xbox主机: {context.assigned_xbox.name} "
@@ -154,31 +179,31 @@ async def _match_xbox_host(
 
         online = await _test_xbox_connection(context.assigned_xbox.ip_address, logger)
         if online:
-            return {
-                "success": True,
-                "xbox_info": context.assigned_xbox,
-                "match_type": "assigned",
-                "message": "使用指定的Xbox主机"
-            }
+            return XboxMatchResult(
+                success=True,
+                xbox_info=context.assigned_xbox,
+                match_type="assigned",
+                message="使用指定的Xbox主机"
+            )
         else:
-            return {
-                "success": False,
-                "xbox_info": None,
-                "match_type": "assigned",
-                "message": f"指定的Xbox主机不在线: {context.assigned_xbox.ip_address}"
-            }
+            return XboxMatchResult(
+                success=False,
+                xbox_info=None,
+                match_type="assigned",
+                message=f"指定的Xbox主机不在线: {context.assigned_xbox.ip_address}"
+            )
 
     logger.info("未指定Xbox主机，开始自动匹配...")
     stream_logger.info("未指定Xbox主机，开始自动匹配...")
     discovered_xboxes = await _discover_xbox_devices(logger)
 
     if not discovered_xboxes:
-        return {
-            "success": False,
-            "xbox_info": None,
-            "match_type": "discover",
-            "message": "局域网未发现Xbox主机"
-        }
+        return XboxMatchResult(
+            success=False,
+            xbox_info=None,
+            match_type="discover",
+            message="局域网未发现Xbox主机"
+        )
 
     logger.info(f"发现 {len(discovered_xboxes)} 个Xbox主机")
     stream_logger.info(f"发现 {len(discovered_xboxes)} 个Xbox主机")
@@ -187,22 +212,22 @@ async def _match_xbox_host(
         selected = discovered_xboxes[0]
         logger.info(f"只有一台Xbox，直接选择: {selected.name}")
         stream_logger.info(f"只有一台Xbox，直接选择: {selected.name}")
-        return {
-            "success": True,
-            "xbox_info": selected,
-            "match_type": "discovered",
-            "message": f"发现Xbox: {selected.name}"
-        }
+        return XboxMatchResult(
+            success=True,
+            xbox_info=selected,
+            match_type="discovered",
+            message=f"发现Xbox: {selected.name}"
+        )
 
     selected = random.choice(discovered_xboxes)
     logger.info(f"多台Xbox，随机选择: {selected.name} ({selected.ip_address})")
     stream_logger.info(f"多台Xbox，随机选择: {selected.name}")
-    return {
-        "success": True,
-        "xbox_info": selected,
-        "match_type": "random_selected",
-        "message": f"随机选择Xbox: {selected.name}"
-    }
+    return XboxMatchResult(
+        success=True,
+        xbox_info=selected,
+        match_type="random_selected",
+        message=f"随机选择Xbox: {selected.name}"
+    )
 
 
 async def _discover_xbox_devices(logger) -> List[XboxInfo]:
@@ -223,13 +248,22 @@ async def _discover_xbox_devices(logger) -> List[XboxInfo]:
 
         xbox_list = []
         for device in devices:
-            xbox_info = XboxInfo(
-                id=device.get("id", ""),
-                name=device.get("name", "Xbox"),
-                ip_address=device.get("ip", ""),
-                live_id=device.get("live_id", ""),
-                mac_address=device.get("mac", "")
-            )
+            if hasattr(device, 'ip_address'):
+                xbox_info = XboxInfo(
+                    id=device.device_id or "",
+                    name=device.name or "Xbox",
+                    ip_address=device.ip_address,
+                    live_id=device.live_id or "",
+                    mac_address=""
+                )
+            else:
+                xbox_info = XboxInfo(
+                    id=device.get("id", ""),
+                    name=device.get("name", "Xbox"),
+                    ip_address=device.get("ip", ""),
+                    live_id=device.get("live_id", ""),
+                    mac_address=device.get("mac", "")
+                )
             xbox_list.append(xbox_info)
 
         logger.info(f"Xbox发现完成: {len(xbox_list)} 台")
@@ -312,3 +346,117 @@ async def _connect_to_xbox(context: AgentTaskContext, logger, stream_logger) -> 
         logger.error(f"连接Xbox异常: {e}")
         stream_logger.error(f"连接Xbox异常: {e}")
         return False
+
+
+async def _check_xbox_availability(context: AgentTaskContext, xbox_host_id: str) -> bool:
+    """
+    检查Xbox主机是否可用（未被其他任务或Agent占用）
+
+    检查逻辑（跨Agent场景）：
+    1. 通过平台API获取主机状态和锁定信息
+    2. 检查主机是否已被其他Agent锁定
+    3. 检查主机是否已被本Agent的其他任务占用
+    4. 尝试通过平台API锁定主机（原子操作）
+    5. 更新本地调度器状态
+
+    参数：
+    - context: 任务上下文
+    - xbox_host_id: Xbox主机ID（可以是数据库ID或Xbox序列号）
+
+    返回：
+    - bool: 是否可用
+    """
+    logger = get_logger(f'step2_streaming_{context.task_id}')
+
+    # 步骤1: 通过平台API检查主机状态
+    try:
+        from ..api.platform_api_client import PlatformApiClient
+
+        api_client = PlatformApiClient()
+        status = await api_client.get_xbox_host_status(xbox_host_id)
+
+        # 如果主机在数据库中不存在，说明还没注册，返回可用
+        if status is None:
+            logger.info(f"平台未找到Xbox主机 {xbox_host_id}，将直接使用发现的Xbox")
+            return True
+
+        # 检查是否已被锁定
+        locked_by_agent = status.get('lockedByAgentId')
+        lock_expires = status.get('lockExpiresTime')
+
+        if locked_by_agent:
+            # 获取当前Agent ID
+            from ..core.credentials_provider import get_credentials
+            current_agent_id, _ = get_credentials()
+
+            # 如果被其他Agent锁定，拒绝使用
+            if locked_by_agent != current_agent_id:
+                logger.warning(f"平台检测到Xbox主机 {xbox_host_id} 已被Agent {locked_by_agent} 锁定")
+                return False
+            else:
+                logger.debug(f"Xbox主机 {xbox_host_id} 已被本Agent锁定")
+    except Exception as e:
+        logger.warning(f"无法连接平台检查主机状态: {e}")
+        # 如果无法连接平台，继续尝试本地检查，但记录警告
+
+    # 步骤2: 通过平台API尝试锁定主机（跨Agent安全）
+    try:
+        from ..api.platform_api_client import PlatformApiClient
+
+        api_client = PlatformApiClient()
+        locked = await api_client.lock_xbox_host(xbox_host_id)
+
+        if not locked:
+            logger.warning(f"平台锁定Xbox主机 {xbox_host_id} 失败（主机可能不存在或已被其他Agent锁定）")
+            # 返回 False，等待平台有 Xbox 主机记录后再使用
+            return False
+        logger.info(f"成功通过平台锁定Xbox主机: {xbox_host_id}")
+    except Exception as e:
+        logger.warning(f"尝试锁定主机失败: {e}")
+        return False
+    
+    # 步骤3: 更新本地调度器状态
+    try:
+        from ..task.task_executor import task_executor
+        
+        if task_executor and hasattr(task_executor, 'scheduler'):
+            scheduler = task_executor.scheduler
+            await scheduler.acquire_xbox_host(xbox_host_id, context.task_id)
+    except Exception as e:
+        logger.debug(f"更新本地调度器状态失败: {e}")
+    
+    logger.info(f"Xbox主机 {xbox_host_id} 可用")
+    return True
+
+
+async def _release_xbox_host(context: AgentTaskContext):
+    """
+    释放Xbox主机的串流权限（跨Agent场景）
+
+    参数：
+    - context: 任务上下文
+    """
+    logger = get_logger(f'step2_streaming_{context.task_id}')
+    
+    if context.current_xbox:
+        xbox_host_id = context.current_xbox.id
+        if xbox_host_id:
+            # 步骤1: 通过平台API解锁主机
+            try:
+                from ..api.platform_api_client import PlatformApiClient
+                
+                api_client = PlatformApiClient()
+                await api_client.unlock_xbox_host(xbox_host_id)
+                logger.info(f"成功通过平台解锁Xbox主机: {xbox_host_id}")
+            except Exception as e:
+                logger.warning(f"通过平台解锁主机失败: {e}")
+            
+            # 步骤2: 更新本地调度器状态
+            try:
+                from ..task.task_executor import task_executor
+                
+                if task_executor and hasattr(task_executor, 'scheduler'):
+                    scheduler = task_executor.scheduler
+                    await scheduler.release_xbox_host(xbox_host_id, context.task_id)
+            except Exception as e:
+                logger.debug(f"更新本地调度器状态失败: {e}")

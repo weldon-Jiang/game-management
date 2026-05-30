@@ -37,11 +37,13 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/test/**",
                         "/api/tasks/*/complete",
                         "/api/tasks/*/fail",
-                        "/api/*/progress",
-                        "/api/*/match/complete",
-                        "/api/*/game-accounts/status",
-                        "/api/*/game-account/*/complete",
-                        "/api/*/game-account/*/status",
+                        "/api/tasks/**/complete",
+                        "/api/tasks/**/fail",
+                        "/api/**/progress",
+                        "/api/**/match/complete",
+                        "/api/**/game-accounts/status",
+                        "/api/**/game-account/*/complete",
+                        "/api/**/game-account/*/status",
                         "/api/daily-match-count/reset",
                         "/api/agent/credentials/**"
                 );

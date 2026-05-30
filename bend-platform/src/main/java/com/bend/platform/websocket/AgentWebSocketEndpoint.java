@@ -418,13 +418,35 @@ public class AgentWebSocketEndpoint {
                     String xboxId = xbox.has("device_id") ? xbox.get("device_id").asText() : null;
                     String name = xbox.has("name") ? xbox.get("name").asText() : null;
                     String ipAddress = xbox.has("ip_address") ? xbox.get("ip_address").asText() : null;
+                    Integer port = xbox.has("port") && !xbox.get("port").isNull() ? xbox.get("port").asInt() : null;
+                    String liveId = xbox.has("live_id") ? xbox.get("live_id").asText() : null;
+                    String consoleType = xbox.has("console_type") ? xbox.get("console_type").asText() : null;
+                    String firmwareVersion = xbox.has("firmware_version") ? xbox.get("firmware_version").asText() : null;
+                    String macAddress = xbox.has("mac_address") ? xbox.get("mac_address").asText() : null;
 
                     if (xboxId == null || xboxId.isEmpty()) {
                         log.warn("Xbox设备ID为空，跳过 - AgentID: {}", agentId);
                         continue;
                     }
 
-                    XboxHost host = xboxHostService.createOrUpdate(merchantId, xboxId, name, ipAddress);
+                    if ("null".equals(name)) {
+                        name = null;
+                    }
+                    if ("null".equals(liveId)) {
+                        liveId = null;
+                    }
+                    if ("null".equals(consoleType)) {
+                        consoleType = null;
+                    }
+                    if ("null".equals(firmwareVersion)) {
+                        firmwareVersion = null;
+                    }
+                    if ("null".equals(macAddress)) {
+                        macAddress = null;
+                    }
+
+                    XboxHost host = xboxHostService.createOrUpdate(merchantId, xboxId, name, ipAddress,
+                            port, liveId, consoleType, firmwareVersion, macAddress);
                     
                     Map<String, Object> xboxInfo = new HashMap<>();
                     xboxInfo.put("id", host.getId());
