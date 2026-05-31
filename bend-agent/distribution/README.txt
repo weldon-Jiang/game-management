@@ -19,8 +19,8 @@ BendAgent/
 配置文件，包含以下选项：
 ```yaml
 backend:
-  base_url: "http://你的服务器地址:8061"
-  ws_url: "ws://你的服务器地址:8061/ws/agents"
+  base_url: "http://你的服务器地址:8060"
+  ws_url: "ws://你的服务器地址:8060/ws/agent"
 
 agent:
   heartbeat_interval: 30  # 心跳间隔（秒）
@@ -46,8 +46,8 @@ template:
 用记事本打开 `agent.yaml`，修改 `backend.base_url` 和 `backend.ws_url` 为你的平台服务器地址：
 ```yaml
 backend:
-  base_url: "http://你的平台域名或IP:8061"
-  ws_url: "ws://你的平台域名或IP:8061/ws/agents"
+  base_url: "http://你的平台域名或IP:8060"
+  ws_url: "ws://你的平台域名或IP:8060/ws/agent"
 ```
 
 ### 步骤 3：运行程序

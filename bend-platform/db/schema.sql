@@ -294,6 +294,7 @@ CREATE TABLE IF NOT EXISTS `xbox_host` (
     `bound_streaming_account_id` VARCHAR(36) DEFAULT NULL COMMENT '绑定的流媒体账号ID',
     `bound_gamertag` VARCHAR(50) DEFAULT NULL COMMENT '绑定的Gamertag',
     `power_state` ENUM('On','Off','Standby') DEFAULT 'Off' COMMENT '电源状态',
+    `locked` TINYINT(1) DEFAULT 0 COMMENT '是否被锁定（优化字段）',
     `locked_by_agent_id` VARCHAR(36) DEFAULT NULL COMMENT '锁定Agent ID',
     `locked_time` DATETIME DEFAULT NULL COMMENT '锁定时间',
     `lock_expires_time` DATETIME DEFAULT NULL COMMENT '锁定过期时间',
@@ -307,6 +308,7 @@ CREATE TABLE IF NOT EXISTS `xbox_host` (
     KEY `idx_merchant_id` (`merchant_id`),
     KEY `idx_bound_streaming_account_id` (`bound_streaming_account_id`),
     KEY `idx_locked_by_agent_id` (`locked_by_agent_id`),
+    KEY `idx_locked` (`locked`),
     KEY `idx_status` (`status`),
     KEY `idx_deleted` (`deleted`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Xbox主机表';
@@ -485,7 +487,7 @@ CREATE TABLE IF NOT EXISTS `task_game_account_status` (
     `task_id` VARCHAR(64) NOT NULL COMMENT '任务ID',
     `game_account_id` VARCHAR(64) NOT NULL COMMENT '游戏账号ID',
     `streaming_account_id` VARCHAR(64) DEFAULT NULL COMMENT '流媒体账号ID',
-    `status` VARCHAR(16) DEFAULT 'pending' COMMENT '状态：pending-待执行,running-执行中,completed-已完成,failed-失败,skipped-跳过',
+    `status` VARCHAR(20) DEFAULT 'pending' COMMENT '状态：pending-待执行,running-执行中,completed-已完成,failed-失败,cancelled-已取消,skipped-跳过,game_preparing-游戏准备,gaming-游戏中',
     `completed_count` INT DEFAULT 0 COMMENT '已完成场次',
     `failed_count` INT DEFAULT 0 COMMENT '失败场次',
     `total_matches` INT DEFAULT 0 COMMENT '总场次',
