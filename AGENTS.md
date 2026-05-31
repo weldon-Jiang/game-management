@@ -83,20 +83,20 @@ bend-platform/
 bend-agent/
 ├── src/agent/
 │   ├── automation/     # ✅ 核心四步骤实现（必须在此目录开发）
-│   │   ├── step1_stream_account_login.py
-│   │   ├── step2_xbox_streaming.py
-│   │   ├── step3_streaming_init.py
-│   │   └── step4_game_automation.py
+│   │   ├── step1_stream_account_login.py   # 步骤一：MSAL认证(Token自动刷新)
+│   │   ├── step2_xbox_streaming.py         # 步骤二：Xbox连接+PlaySession
+│   │   ├── step3_streaming_init.py          # 步骤三：SDL窗口+GPU捕获
+│   │   └── step4_game_automation.py        # 步骤四：游戏自动化
 │   ├── task/           # 任务调度与上下文管理
 │   ├── api/            # WebSocket/HTTP 通信
 │   ├── auth/           # Microsoft MSAL 认证
-│   ├── xbox/           # Xbox 设备发现与流控制
-│   ├── vision/         # 视觉识别与画面捕获
-│   ├── windows/        # Windows 窗口管理
+│   ├── xbox/           # Xbox 设备发现、流控制、PlaySession、WebRTC
+│   ├── vision/         # 视觉识别、画面捕获、GPU解码
+│   ├── windows/        # Windows 窗口管理、SDL自绘窗口
 │   ├── core/           # 中央管理与配置
-│   ├── game/           # 游戏账号管理
-│   ├── scene/          # 场景检测
-│   ├── input/          # 输入控制
+│   ├── game/           # 游戏账号管理、账号切换
+│   ├── scene/          # 场景检测（降频+缓存优化）
+│   ├── input/          # 输入控制（pygame手柄、键盘映射）
 │   └── utils/          # 工具类
 ├── configs/            # YAML 配置文件
 ├── tokens/             # Refresh Token 存储（运行时生成）
@@ -214,10 +214,10 @@ headers['X-Agent-Secret'] = agent_secret
 
 | 步骤 | 文件名 | 核心职责 | 依赖模块 |
 |------|--------|----------|----------|
-| 步骤一 | `step1_stream_account_login.py` | MSAL设备码认证获取Xbox令牌 | `auth/`, `api/` |
-| 步骤二 | `step2_xbox_streaming.py` | 发现并连接Xbox主机 | `xbox/` |
-| 步骤三 | `step3_streaming_init.py` | 初始化画面捕获能力 | `vision/`, `windows/` |
-| 步骤四 | `step4_game_automation.py` | 执行游戏比赛并上报状态 | `vision/`, `game/` |
+| 步骤一 | `step1_stream_account_login.py` | MSAL设备码认证获取Xbox令牌(Token自动刷新) | `auth/`, `api/` |
+| 步骤二 | `step2_xbox_streaming.py` | 发现并连接Xbox主机(PlaySession+SDP) | `xbox/` |
+| 步骤三 | `step3_streaming_init.py` | 初始化画面捕获能力(SDL+GPU) | `vision/`, `windows/` |
+| 步骤四 | `step4_game_automation.py` | 执行游戏比赛并上报状态(场景优化+手柄控制) | `vision/`, `game/`, `scene/`, `input/` |
 
 **步骤文件结构模板（✅ 必须遵守）**
 
@@ -494,8 +494,8 @@ String decodedSecret = new String(Base64.getDecoder().decode(agentSecret), Stand
 
 ```yaml
 backend:
-  base_url: 'http://localhost:8061'
-  ws_url: 'ws://localhost:8061/ws/agents'
+  base_url: 'http://localhost:8060'
+  ws_url: 'ws://localhost:8060/ws/agent'
 
 agent:
   heartbeat_interval: 30      # 心跳间隔（秒）
@@ -524,6 +524,7 @@ agent:
 | 1.0 | 2026-05-13 | 初始版本 |
 | 2.0 | 2026-05-16 | 添加认证规范、资源清理规范 |
 | 2.1 | 2026-05-21 | 优化文档结构、添加检查清单、完善代码模板 |
+| 3.0 | 2026-05-30 | 添加优化模块说明：GPU解码、SDL窗口、场景检测优化、手柄信号发送 |
 
 ---
 
