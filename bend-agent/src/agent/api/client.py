@@ -22,7 +22,7 @@ import os
 from typing import Optional, Dict, Any, Callable
 from enum import Enum
 
-from ..core.config import config
+from ..core.config import get_config
 from ..core.logger import get_logger
 
 
@@ -78,8 +78,9 @@ class ApiClient:
         
         self.agent_id = agent_id                      # Agent唯一标识符
         self.agent_secret = agent_secret              # Agent密钥（原始值）
+        config = get_config()
         self.base_url = config.backend_url            # 后端服务器地址
-        self.api_prefix = config.get('backend.api_prefix', '/api')  # API前缀
+        self.api_prefix = '/api'  # API前缀
         self._session: Optional[aiohttp.ClientSession] = None     # HTTP会话
         
         # Base64编码agent_secret（后端期望收到Base64编码的secret）
@@ -93,7 +94,7 @@ class ApiClient:
         self._current_status = 'online'               # 当前状态
         self._current_task_id = None                  # 当前任务ID
         self._current_streaming_id = None             # 当前流媒体账号ID
-        self._current_version = config.get('agent.version', '1.0.0')  # 当前版本
+        self._current_version = '1.0.0'  # 当前版本
 
     async def connect(self):
         """

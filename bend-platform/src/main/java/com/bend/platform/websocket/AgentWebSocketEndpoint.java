@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Component
-@ServerEndpoint(value = "/ws/agents/{agentId}", configurator = AgentWebSocketConfigurator.class)
+@ServerEndpoint(value = "/ws/agent/{agentId}", configurator = AgentWebSocketConfigurator.class)
 public class AgentWebSocketEndpoint {
 
     private static AgentInstanceService agentInstanceService;

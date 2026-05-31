@@ -59,6 +59,8 @@ public class XboxHost {
 
     private String lockedByAgentId;
 
+    private Boolean locked;  // 是否被锁定（优化字段，前端快速判断）
+
     private LocalDateTime lockedTime;
 
     private LocalDateTime lockExpiresTime;

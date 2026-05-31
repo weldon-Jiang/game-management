@@ -16,7 +16,7 @@ aes:
 # ----------------------------------------------
 backend:
   base_url: "http://localhost:8060"
-  ws_url: "ws://localhost:8060/ws/agents"
+  ws_url: "ws://localhost:8060/ws/agent"
   api_prefix: "/api"
 
 # ----------------------------------------------

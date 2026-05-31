@@ -378,7 +378,10 @@ public class TaskServiceImpl implements TaskService {
         task.setRetryCount(task.getRetryCount() == null ? 1 : task.getRetryCount() + 1);
         task.setErrorMessage(errorMessage);
 
-        if (task.getRetryCount() < task.getMaxRetries()) {
+        boolean shouldRetry = task.getRetryCount() < task.getMaxRetries()
+                && !"automation".equals(task.getType());
+
+        if (shouldRetry) {
             task.setStatus("pending");  // 还未达到最大重试次数，设置为待执行
             log.warn("任务失败，准备重试 - TaskID: {}, 重试次数: {}/{}", taskId, task.getRetryCount(), task.getMaxRetries());
         } else {

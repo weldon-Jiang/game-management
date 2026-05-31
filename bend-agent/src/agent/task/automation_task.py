@@ -214,7 +214,7 @@ class AgentAutomationTask:
                 message=error_msg
             )
 
-    async def pause(self):
+    async def pause(self) -> None:
         """暂停任务"""
         self.context.pause()
         self.logger.info("任务已暂停")
@@ -225,7 +225,7 @@ class AgentAutomationTask:
             "任务已暂停"
         )
 
-    async def resume(self):
+    async def resume(self) -> None:
         """恢复任务"""
         self.context.resume()
         self.logger.info("任务已恢复")
@@ -236,7 +236,7 @@ class AgentAutomationTask:
             "任务已恢复"
         )
 
-    async def stop(self):
+    async def stop(self) -> None:
         """停止任务"""
         self.logger.info("请求停止任务")
         self.context.pause_event.set()
@@ -251,7 +251,7 @@ class AgentAutomationTask:
         message: str,
         extra_data: Optional[Dict[str, Any]] = None,
         **kwargs
-    ):
+    ) -> None:
         """
         上报进度到平台
 
@@ -277,9 +277,19 @@ class AgentAutomationTask:
                     task_id, status.lower(), message
                 )
 
-    async def _cleanup(self):
+    async def _cleanup(self) -> None:
         """清理任务资源并关闭窗口"""
         try:
+            if hasattr(self.context, '_play_session_manager') and self.context._play_session_manager:
+                try:
+                    play_session = self.context._play_session_manager
+                    if play_session.is_session_active:
+                        await play_session.close_session()
+                    await play_session.close()
+                    self.logger.info("PlaySession已关闭")
+                except Exception as e:
+                    self.logger.warning(f"关闭PlaySession失败: {e}")
+
             if self.context.xbox_session:
                 try:
                     await self.context.xbox_session.disconnect()

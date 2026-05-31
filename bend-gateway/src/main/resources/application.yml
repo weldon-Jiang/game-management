@@ -9,7 +9,7 @@ spring:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:D$U@GAMECeKfi}  # 本地开发和 Docker 都用这个密码
+      password: ${REDIS_PASSWORD:D$U@GAMECeKfi}
       database: 0
 
   cloud:
@@ -17,6 +17,10 @@ spring:
       discovery:
         locator:
           enabled: false
+      httpclient:
+        websocket:
+          enable-ping-pong: true
+          max-frame-length: 65536
       routes:
         - id: backend-service
           uri: http://${BACKEND_HOST:localhost}:${BACKEND_PORT:8061}

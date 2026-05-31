@@ -27,33 +27,37 @@ from ..core.logger import get_logger
 
 class WSMessageType(Enum):
     """
-    WebSocket消息类型枚举
+    WebSocket消息类型枚举 v2.0
+
+    统一消息格式：
+    {
+      "type": "消息类型",
+      "data": {
+        "taskId": "任务ID",
+        "timestamp": 1234567890,
+        ...其他字段
+      }
+    }
 
     消息类型说明：
     - TASK: 后端下发的自动化任务
     - COMMAND: 后端发送的控制命令
-    - VIDEO_STREAM: 视频流数据传输
+    - PROGRESS: 进度上报（新增，统一格式）
     - HEARTBEAT: 心跳保活消息
     - HEARTBEAT_ACK: 心跳确认响应
-    - STATUS_REPORT: 状态上报
     - XBOX_DISCOVERED: 发现新Xbox设备
     - TASK_RESULT: 任务执行结果
     - CONNECTED: 连接成功通知
-    - DISCONNECT: 断开连接通知
-    - ACK: 通用确认消息
     - ERROR: 错误消息
     """
     TASK = "task"                     # 任务消息
     COMMAND = "command"               # 命令消息
-    VIDEO_STREAM = "video_stream"     # 视频流
+    PROGRESS = "progress"             # 进度上报（新增）
     HEARTBEAT = "heartbeat"           # 心跳
     HEARTBEAT_ACK = "heartbeat_ack"   # 心跳确认
-    STATUS_REPORT = "status_report"   # 状态上报
     XBOX_DISCOVERED = "xbox_discovered"  # Xbox发现
     TASK_RESULT = "task_result"       # 任务结果
     CONNECTED = "connected"           # 已连接
-    DISCONNECT = "disconnect"         # 断开连接
-    ACK = "ack"                       # 确认
     ERROR = "error"                   # 错误
 
 
@@ -270,6 +274,58 @@ class WSClient:
             'taskId': task_id,
             **result
         })
+
+    async def send_progress(
+        self,
+        task_id: str,
+        step: str,
+        status: str,
+        message: str,
+        game_account_id: str = None,
+        **kwargs
+    ):
+        """
+        发送进度上报（v2.0统一格式）
+
+        参数说明：
+        - task_id: 任务ID
+        - step: 当前步骤 (STEP1|STEP2|STEP3|STEP4)
+        - status: 状态 (RUNNING|COMPLETED|FAILED|GAME_PREPARING|GAMING)
+        - message: 状态描述
+        - game_account_id: 游戏账号ID（可选）
+        - **kwargs: 其他字段
+
+        消息格式：
+        {
+          "type": "progress",
+          "data": {
+            "agentId": "agent-xxx",
+            "taskId": "task-xxx",
+            "timestamp": 1234567890,
+            "step": "STEP4",
+            "status": "RUNNING",
+            "message": "游戏中",
+            "gameAccountId": "game-xxx",
+            ...其他字段
+          }
+        }
+        """
+        import time
+        data = {
+            'agentId': self.agent_id,
+            'taskId': task_id,
+            'timestamp': int(time.time() * 1000),
+            'step': step,
+            'status': status,
+            'message': message
+        }
+
+        if game_account_id:
+            data['gameAccountId'] = game_account_id
+
+        data.update(kwargs)
+
+        return await self.send("progress", data)
 
     async def listen(self):
         """

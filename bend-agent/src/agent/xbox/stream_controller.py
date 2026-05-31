@@ -5,26 +5,48 @@ Xbox streaming controller for Bend Agent
 - 通过SmartGlass协议控制Xbox主机
 - 建立TCP连接与Xbox通信
 - 支持Xbox流媒体控制、按键输入、云游戏连接等
+- 支持混合模式视频流接收（RTP/win32gui）
 
 技术原理：
 - SmartGlass是微软的远程控制协议
 - 基于TCP Socket通信，使用JSON格式数据包
 - 数据包包含4字节长度头 + JSON内容
+- RTP用于接收视频流（可选）
 
 主要功能：
 - 与Xbox建立连接和握手
 - 启动/停止流媒体
 - 发送按键和摇杆输入
 - 获取Xbox状态信息
+- 混合模式视频流接收（方案3）
+
+作者：技术团队
+版本：3.0
+
+版本历史：
+- 2.0: 添加手柄状态发送
+- 3.0: 添加混合模式视频流接收
 """
 import asyncio
 import json
 import struct
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable, List
 from enum import Enum
 
 from ..core.logger import get_logger
+
+# RTP 相关导入（方案3）
+try:
+    from .rtp_session import RTPSession, H264RTPPacketAssemble
+    from .h264_parser import H264Parser, H264FrameAssembler, NALU
+    from .srtp_handler import SRTPHandler, SRTPKeys
+    from .dtls_handler import DTLSHandler, SimpleDTLSHandler
+    RTP_AVAILABLE = True
+except ImportError as e:
+    RTP_AVAILABLE = False
+    logger = get_logger('xbox_stream')
+    logger.warning(f"RTP模块不可用，视频流接收功能将使用win32gui: {e}")
 
 
 class StreamState(Enum):
@@ -99,6 +121,19 @@ class XboxStreamController:
         self._writer: Optional[asyncio.StreamWriter] = None  # TCP写入流
         self._current_xbox: Optional[str] = None  # 当前连接的Xbox IP
         self._stream_config: Optional[StreamConfig] = None  # 流媒体配置
+        
+        # 视频流接收相关（方案3：混合模式）
+        self._video_mode: str = "win32gui"  # 当前视频模式: "rtp" | "win32gui"
+        self._rtp_session: Optional[RTPSession] = None  # RTP会话
+        self._srtp_handler: Optional[SRTPHandler] = None  # SRTP处理器
+        self._h264_parser: Optional[H264Parser] = None  # H.264解析器
+        self._frame_assembler: Optional[H264FrameAssembler] = None  # 帧组装器
+        self._packet_assembler: Optional[H264RTPPacketAssemble] = None  # RTP分片组装器
+        self._video_callback: Optional[Callable[[bytes], None]] = None  # 视频帧回调
+        self._frame_callback: Optional[Callable[[Any], None]] = None  # 解码后帧回调
+        self._rtp_receive_task: Optional[asyncio.Task] = None  # RTP接收任务
+        self._rtp_port: int = 50500  # RTP接收端口
+        self._srtp_enabled: bool = False  # SRTP是否启用
 
     @property
     def state(self) -> StreamState:
@@ -182,6 +217,7 @@ class XboxStreamController:
 
         功能说明：
         - 关闭TCP连接
+        - 停止RTP接收（如果启用）
         - 重置所有状态
         - 状态变为IDLE
         """
@@ -191,11 +227,24 @@ class XboxStreamController:
         self._state = StreamState.DISCONNECTING
 
         try:
+            await self.stop_video_receiver()
+            
             if self._writer:
-                self._writer.close()
-                await asyncio.wait_for(self._writer.wait_closed(), timeout=5)
+                try:
+                    self._writer.close()
+                    await asyncio.wait_for(self._writer.wait_closed(), timeout=5)
+                except Exception as e:
+                    self.logger.warning(f"Error closing writer: {e}")
+            
+            if self._reader:
+                try:
+                    self._reader.feed_eof()
+                    self._reader.close()
+                except Exception as e:
+                    self.logger.warning(f"Error closing reader: {e}")
+                    
         except Exception as e:
-            self.logger.error(f"Error closing connection: {e}")
+            self.logger.error(f"Error disconnecting: {e}")
         finally:
             self._reader = None
             self._writer = None
@@ -358,12 +407,13 @@ class XboxStreamController:
         发送输入命令到Xbox
 
         参数说明：
-        - input_type: 输入类型（button/stick/trigger）
+        - input_type: 输入类型（button/stick/trigger/gamepad）
         - data: 输入数据
 
         示例：
         - send_input("button", {"button": "a", "press": True})
         - send_input("stick", {"stick": "left", "x": 0.5, "y": -0.5})
+        - send_input("gamepad", {"buttons": 0x0001, "left_trigger": 128, ...})
         """
         if not self.is_connected:
             raise Exception("Not connected to Xbox")
@@ -374,6 +424,96 @@ class XboxStreamController:
             **data
         }
         await self._send_command(command)
+
+    async def send_gamepad_state(self, gamepad_data: Dict[str, Any]) -> bool:
+        """
+        发送完整手柄状态到Xbox（优化三）
+
+        功能说明：
+        - 发送完整的手柄状态数据
+        - 包括所有按钮、扳机、摇杆
+        - 参考streaming项目的xsrp.WriteControllerData
+
+        参数：
+        - gamepad_data: 手柄状态字典
+            - buttons: 按钮位掩码
+            - left_trigger: 左扳机 (0-255)
+            - right_trigger: 右扳机 (0-255)
+            - left_thumb_x: 左摇杆X (-32768 到 32767)
+            - left_thumb_y: 左摇杆Y (-32768 到 32767)
+            - right_thumb_x: 右摇杆X (-32768 到 32767)
+            - right_thumb_y: 右摇杆Y (-32768 到 32767)
+
+        返回：
+        - True: 发送成功
+        - False: 发送失败
+        """
+        if not self.is_connected:
+            self.logger.error("Not connected to Xbox, cannot send gamepad state")
+            return False
+
+        try:
+            command = {
+                "type": "input",
+                "input_type": "gamepad",
+                "buttons": gamepad_data.get("buttons", 0),
+                "left_trigger": gamepad_data.get("left_trigger", 0),
+                "right_trigger": gamepad_data.get("right_trigger", 0),
+                "left_thumb_x": gamepad_data.get("left_thumb_x", 0),
+                "left_thumb_y": gamepad_data.get("left_thumb_y", 0),
+                "right_thumb_x": gamepad_data.get("right_thumb_x", 0),
+                "right_thumb_y": gamepad_data.get("right_thumb_y", 0)
+            }
+
+            await self._send_command(command)
+
+            self.logger.debug(
+                f"Gamepad state sent: buttons={command['buttons']:04x}, "
+                f"LT={command['left_trigger']}, RT={command['right_trigger']}"
+            )
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to send gamepad state: {e}")
+            return False
+
+    async def send_gamepad_analog(self, gamepad_data: Dict[str, Any]) -> bool:
+        """
+        发送手柄模拟输入（优化三）
+
+        功能说明：
+        - 发送手柄模拟输入数据
+        - 支持摇杆和扳机的连续值
+        - 用于精确控制
+
+        参数：
+        - gamepad_data: 手柄模拟输入数据
+
+        返回：
+        - True: 发送成功
+        - False: 发送失败
+        """
+        if not self.is_connected:
+            return False
+
+        try:
+            analog_input = {
+                "type": "input",
+                "input_type": "gamepad_analog",
+                "version": 2,
+                "packet_num": getattr(self, '_packet_num', 0) + 1,
+                **gamepad_data
+            }
+
+            self._packet_num = analog_input["packet_num"]
+
+            await self._send_command(analog_input)
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to send gamepad analog: {e}")
+            return False
 
     async def press_button(self, button: str, duration: float = 0.1):
         """
@@ -573,6 +713,234 @@ class XboxStreamController:
         except Exception as e:
             self.logger.error(f"Failed to get status: {e}")
             return None
+
+    # ==================== 混合模式视频流接收（方案3） ====================
+
+    async def start_video_receiver(
+        self,
+        mode: str = "rtp",
+        port: int = 50500,
+        srtp_keys: Optional[Dict[str, bytes]] = None,
+        video_callback: Optional[Callable[[bytes], None]] = None,
+        frame_callback: Optional[Callable[[Any], None]] = None
+    ) -> bool:
+        """
+        启动视频流接收器（方案3：混合模式）
+
+        功能说明：
+        - 支持两种视频流接收模式：RTP 和 win32gui
+        - RTP模式：直接接收Xbox视频流，性能更好
+        - win32gui模式：从Xbox Streaming窗口截图，兼容性更好
+        - 优先尝试RTP，失败时自动降级到win32gui
+
+        参数：
+        - mode: 视频模式 ("rtp" | "win32gui" | "auto")
+        - port: RTP接收端口
+        - srtp_keys: SRTP密钥（可选）
+        - video_callback: 视频帧回调（原始H.264数据）
+        - frame_callback: 解码后帧回调
+
+        返回：
+        - True: 启动成功
+        - False: 启动失败
+        """
+        self._video_callback = video_callback
+        self._frame_callback = frame_callback
+        self._rtp_port = port
+
+        if mode == "win32gui":
+            self._video_mode = "win32gui"
+            self.logger.info("视频流接收模式: win32gui")
+            return True
+
+        if mode == "auto" or mode == "rtp":
+            if not RTP_AVAILABLE:
+                self.logger.warning("RTP模块不可用，降级到win32gui模式")
+                self._video_mode = "win32gui"
+                return True
+
+            rtp_success = await self._start_rtp_receiver(srtp_keys)
+            if rtp_success:
+                self._video_mode = "rtp"
+                self.logger.info(f"视频流接收模式: RTP (端口 {port})")
+                return True
+            else:
+                self.logger.warning("RTP模式启动失败，降级到win32gui模式")
+                self._video_mode = "win32gui"
+                return True
+
+        return False
+
+    async def _start_rtp_receiver(self, srtp_keys: Optional[Dict[str, bytes]] = None) -> bool:
+        """
+        启动RTP接收器
+
+        参数：
+        - srtp_keys: SRTP密钥
+
+        返回：
+        - True: 启动成功
+        - False: 启动失败
+        """
+        try:
+            self._rtp_session = RTPSession()
+            self._packet_assembler = H264RTPPacketAssemble()
+            self._h264_parser = H264Parser()
+            self._frame_assembler = H264FrameAssembler()
+
+            if srtp_keys and RTP_AVAILABLE:
+                self._srtp_handler = SRTPHandler()
+                self._srtp_handler.set_keys(
+                    send_master_key=srtp_keys.get('send_key', b'\x00' * 16),
+                    send_master_salt=srtp_keys.get('send_salt', b'\x00' * 14),
+                    recv_master_key=srtp_keys.get('recv_key', b'\x00' * 16),
+                    recv_master_salt=srtp_keys.get('recv_salt', b'\x00' * 14)
+                )
+                self._srtp_enabled = True
+
+            bound = await self._rtp_session.bind('0.0.0.0', self._rtp_port)
+            if not bound:
+                self.logger.error("RTP端口绑定失败")
+                return False
+
+            self._rtp_receive_task = asyncio.create_task(self._rtp_receive_loop())
+            self.logger.info(f"RTP接收器已启动，端口: {self._rtp_port}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"RTP接收器启动失败: {e}")
+            return False
+
+    async def _rtp_receive_loop(self):
+        """
+        RTP接收循环
+
+        功能：
+        - 接收RTP数据包
+        - 解密SRTP（如果启用）
+        - 解析H.264
+        - 组装帧
+        """
+        if not self._rtp_session:
+            return
+
+        try:
+            async for packet in self._rtp_session.packets():
+                try:
+                    raw_payload = packet.payload
+                    
+                    if self._srtp_handler and self._srtp_enabled:
+                        decrypted = self._srtp_handler.decrypt_rtp(
+                            raw_payload,
+                            packet.header.sequence_number,
+                            packet.header.timestamp,
+                            packet.header.ssrc,
+                            is_incoming=True
+                        )
+                        if decrypted:
+                            raw_payload = decrypted
+                        else:
+                            continue
+
+                    nalu_list = self._packet_assembler.assemble(packet)
+                    
+                    for nalu_data in nalu_list:
+                        self._h264_parser.feed(nalu_data, packet.header.timestamp, packet.header.marker)
+
+                        if self._video_callback:
+                            self._video_callback(nalu_data)
+
+                    frame_data = self._frame_assembler.add_nalu(
+                        NALU(
+                            type=NALUType.NON_IDR,
+                            data=nalu_list[-1] if nalu_list else b'',
+                            timestamp=packet.header.timestamp,
+                            marker=packet.header.marker,
+                            size=len(nalu_list[-1]) if nalu_list else 0
+                        )
+                    )
+
+                    if frame_data and self._frame_callback:
+                        self._frame_callback(frame_data)
+
+                except Exception as e:
+                    self.logger.error(f"RTP包处理错误: {e}")
+
+        except asyncio.CancelledError:
+            self.logger.info("RTP接收循环已取消")
+        except Exception as e:
+            self.logger.error(f"RTP接收循环异常: {e}")
+
+    async def stop_video_receiver(self):
+        """
+        停止视频流接收器
+        """
+        if self._rtp_receive_task:
+            self._rtp_receive_task.cancel()
+            try:
+                await self._rtp_receive_task
+            except asyncio.CancelledError:
+                pass
+            self._rtp_receive_task = None
+
+        if self._rtp_session:
+            self._rtp_session.close()
+            self._rtp_session = None
+
+        if self._srtp_handler:
+            self._srtp_handler = None
+
+        if self._h264_parser:
+            self._h264_parser.reset()
+            self._h264_parser = None
+
+        if self._frame_assembler:
+            self._frame_assembler.reset()
+            self._frame_assembler = None
+
+        self._video_mode = "win32gui"
+        self.logger.info("视频流接收器已停止")
+
+    def get_video_stats(self) -> Dict[str, Any]:
+        """
+        获取视频流统计信息
+
+        返回：
+        - 统计信息字典
+        """
+        stats = {
+            'mode': self._video_mode,
+            'rtp_enabled': self._video_mode == "rtp"
+        }
+
+        if self._rtp_session:
+            stats['rtp'] = self._rtp_session.get_stats()
+
+        if self._h264_parser:
+            stats['h264'] = self._h264_parser.get_stats()
+
+        if self._srtp_handler:
+            stats['srtp'] = self._srtp_handler.get_stats()
+
+        return stats
+
+    @property
+    def video_mode(self) -> str:
+        """获取当前视频模式"""
+        return self._video_mode
+
+    @property
+    def is_rtp_active(self) -> bool:
+        """检查RTP是否激活"""
+        return self._video_mode == "rtp" and self._rtp_session is not None
+
+
+class NALUType(Enum):
+    """H.264 NALU类型（简化版，避免导入）"""
+    NON_IDR = 1
+    IDR = 5
+    SPS = 7
+    PPS = 8
 
 
 # 全局流媒体控制器实例

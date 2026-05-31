@@ -11,7 +11,7 @@ from pathlib import Path
 if not getattr(sys, 'frozen', False):
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agent.core.config import config
+from agent.core.config import get_config, load_config, AgentConfig
 from agent.core.logger import get_logger
 from agent.api.registration import RegistrationActivator
 from agent.core.central_manager import CentralManager
@@ -120,13 +120,34 @@ class AgentRunner:
 
 async def main():
     """Main entry point"""
+    import os
+
     parser = argparse.ArgumentParser(description='Bend Agent - Xbox Automation Controller')
     parser.add_argument('--code', help='Registration code for activation')
     parser.add_argument('--config', help='Path to config file')
     args = parser.parse_args()
 
+    # 自动加载配置文件
+    config_loaded = False
     if args.config:
-        config.load(args.config)
+        # 使用命令行指定的配置文件
+        from agent.core.config import load_config
+        load_config(args.config)
+        config_loaded = True
+    else:
+        # 自动检测配置文件
+        from agent.core.config import load_config
+        possible_paths = [
+            os.path.join(os.path.dirname(__file__), '..', 'configs', 'agent.yaml'),
+            os.path.join(os.path.dirname(__file__), '..', '..', 'configs', 'agent.yaml'),
+        ]
+        for config_path in possible_paths:
+            config_path = os.path.normpath(config_path)
+            if os.path.exists(config_path):
+                print(f"Loading config from: {config_path}")
+                load_config(config_path)
+                config_loaded = True
+                break
 
     runner = AgentRunner()
     try:

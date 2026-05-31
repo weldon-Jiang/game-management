@@ -64,7 +64,7 @@ class TemplateMatcher:
 
     def __init__(self):
         """初始化模板匹配器"""
-        self._template_dir = config.template_dir  # 模板图片目录
+        self._template_dir = config.get('template.dir', 'templates')  # 模板图片目录
         self._threshold = config.get('template.threshold', 0.8)  # 默认匹配阈值
         self._cache_enabled = config.get('template.cache_enabled', True)  # 是否启用缓存
         self._templates: Dict[str, np.ndarray] = {}  # 模板缓存字典

@@ -14,7 +14,7 @@ import org.springframework.context.annotation.Configuration;
  * - /api/agents/uninstall - 卸载（Agent调用）
  * - /api/agents/status - 状态更新（Agent调用）
  * - /api/agent-callback/** - Agent回调
- * - /ws/agents - WebSocket
+ * - /ws/agent - WebSocket
  *
  * 以下接口不经过此过滤器（使用JWT认证）：
  * - /api/agents/page - 分页查询（平台调用）
@@ -38,7 +38,8 @@ public class AgentAuthFilterConfig {
             "/api/agents/uninstall",
             "/api/agents/status",
             "/api/agent-callback/*",
-            "/ws/agents"
+            "/api/v1/agent-callback/*",
+            "/ws/agent"
         );
         registration.setName("agentAuthFilter");
         registration.setOrder(1);

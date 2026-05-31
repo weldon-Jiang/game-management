@@ -133,6 +133,30 @@ async def step1_execute_login(
         context.update_step_status("step1", TaskStepStatus.SKIPPED, "任务被取消")
         return Step1Result(success=False, error_code="CANCELLED", message="任务被取消")
 
+    except asyncio.TimeoutError as e:
+        error_msg = f"步骤一执行超时: {str(e)}"
+        logger.error(f"{error_msg}", exc_info=True)
+        stream_logger.error(f"{error_msg}", exc_info=True)
+        context.update_step_status("step1", TaskStepStatus.FAILED, error_msg, str(e))
+        await report_progress(context.task_id, "STEP1", "FAILED", error_msg)
+        return Step1Result(success=False, error_code="TIMEOUT", message=error_msg)
+
+    except ConnectionError as e:
+        error_msg = f"步骤一网络连接失败: {str(e)}"
+        logger.error(f"{error_msg}", exc_info=True)
+        stream_logger.error(f"{error_msg}", exc_info=True)
+        context.update_step_status("step1", TaskStepStatus.FAILED, error_msg, str(e))
+        await report_progress(context.task_id, "STEP1", "FAILED", error_msg)
+        return Step1Result(success=False, error_code="CONNECTION_ERROR", message=error_msg)
+
+    except ValueError as e:
+        error_msg = f"步骤一参数错误: {str(e)}"
+        logger.error(f"{error_msg}", exc_info=True)
+        stream_logger.error(f"{error_msg}", exc_info=True)
+        context.update_step_status("step1", TaskStepStatus.FAILED, error_msg, str(e))
+        await report_progress(context.task_id, "STEP1", "FAILED", error_msg)
+        return Step1Result(success=False, error_code="VALUE_ERROR", message=error_msg)
+
     except Exception as e:
         error_msg = f"步骤一执行异常: {str(e)}"
         logger.error(f"{error_msg}", exc_info=True)
@@ -228,6 +252,21 @@ async def _get_microsoft_token(
             stream_logger.error(f"微软账号MSAL认证失败: {result.message}")
             return None
 
+    except asyncio.TimeoutError as e:
+        logger.error(f"获取Microsoft Token超时: {e}", exc_info=True)
+        stream_logger.error(f"获取Microsoft Token超时: {e}", exc_info=True)
+        return None
+
+    except ConnectionError as e:
+        logger.error(f"获取Microsoft Token网络连接失败: {e}", exc_info=True)
+        stream_logger.error(f"获取Microsoft Token网络连接失败: {e}", exc_info=True)
+        return None
+
+    except ValueError as e:
+        logger.error(f"获取Microsoft Token参数错误: {e}", exc_info=True)
+        stream_logger.error(f"获取Microsoft Token参数错误: {e}", exc_info=True)
+        return None
+
     except Exception as e:
         logger.error(f"获取Microsoft Token异常: {e}", exc_info=True)
         stream_logger.error(f"获取Microsoft Token异常: {e}", exc_info=True)
@@ -270,6 +309,21 @@ async def _get_xbox_live_token(
             stream_logger.error("Xbox Live Token获取失败")
 
         return xbox_tokens
+
+    except asyncio.TimeoutError as e:
+        logger.error(f"获取Xbox Live Token超时: {e}", exc_info=True)
+        stream_logger.error(f"获取Xbox Live Token超时: {e}", exc_info=True)
+        return None
+
+    except ConnectionError as e:
+        logger.error(f"获取Xbox Live Token网络连接失败: {e}", exc_info=True)
+        stream_logger.error(f"获取Xbox Live Token网络连接失败: {e}", exc_info=True)
+        return None
+
+    except ValueError as e:
+        logger.error(f"获取Xbox Live Token参数错误: {e}", exc_info=True)
+        stream_logger.error(f"获取Xbox Live Token参数错误: {e}", exc_info=True)
+        return None
 
     except Exception as e:
         logger.error(f"获取Xbox Live Token异常: {e}", exc_info=True)

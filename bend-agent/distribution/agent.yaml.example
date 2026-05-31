@@ -8,7 +8,7 @@ aes:
 
 backend:
   base_url: "http://你的服务器地址:8060"
-  ws_url: "ws://你的服务器地址:8060/ws/agents"
+  ws_url: "ws://你的服务器地址:8060/ws/agent"
   api_prefix: "/api"
 
 agent:

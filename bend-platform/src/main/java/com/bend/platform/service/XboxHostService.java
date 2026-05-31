@@ -74,20 +74,21 @@ public interface XboxHostService {
     void updateStatus(String id, String status);
 
     /**
-     * 锁定主机
+     * 锁定主机（智能锁定逻辑，返回操作结果）
      *
-     * @param id         主机ID
-     * @param agentId    Agent实例ID
-     * @param expireTime 锁定过期时间
+     * @param xboxHostId 主机ID
+     * @param taskId     任务ID（用于关联）
+     * @return 是否锁定成功
      */
-    void lock(String id, String agentId, java.time.LocalDateTime expireTime);
+    boolean lock(String xboxHostId, String taskId);
 
     /**
-     * 解锁主机
+     * 解锁主机（返回操作结果）
      *
-     * @param id 主机ID
+     * @param xboxHostId 主机ID
+     * @return 是否解锁成功
      */
-    void unlock(String id);
+    boolean unlock(String xboxHostId);
 
     /**
      * 删除主机
@@ -138,4 +139,12 @@ public interface XboxHostService {
     XboxHost createOrUpdate(String merchantId, String xboxId, String name, String ipAddress, 
                             Integer port, String liveId, String consoleType, 
                             String firmwareVersion, String macAddress);
+
+    /**
+     * 获取并失效凭证（一次性令牌）
+     *
+     * @param token 一次性令牌
+     * @return 解密后的凭证，null表示令牌无效或已过期
+     */
+    String getAndInvalidateCredential(String token);
 }

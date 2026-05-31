@@ -8,6 +8,7 @@ import com.bend.platform.entity.XboxHost;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.XboxHostMapper;
+import com.bend.platform.service.CredentialTokenService;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountLoginRecordService;
 import com.bend.platform.service.XboxHostService;
@@ -51,6 +52,7 @@ public class XboxHostServiceImpl implements XboxHostService {
     private final StreamingAccountLoginRecordService loginRecordService;
     private final MerchantService merchantService;
     private final DataSecurityUtil dataSecurityUtil;
+    private final CredentialTokenService credentialTokenService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -157,38 +159,30 @@ public class XboxHostServiceImpl implements XboxHostService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void lock(String id, String agentId, LocalDateTime expireTime) {
-        XboxHost host = xboxHostMapper.selectById(id);
+    public boolean lock(String xboxHostId, String taskId) {
+        XboxHost host = xboxHostMapper.selectById(xboxHostId);
         if (host == null) {
-            throw new BusinessException(ResultCode.XboxHost.NOT_FOUND);
+            log.warn("锁定Xbox主机失败 - 主机不存在: {}", xboxHostId);
+            return false;
         }
 
-        // 校验商户是否有效
-        merchantService.validateMerchantActive(host.getMerchantId());
+        if (host.getLocked() != null && host.getLocked() && host.getLockExpiresTime() != null) {
+            if (host.getLockExpiresTime().isAfter(LocalDateTime.now())) {
+                log.warn("锁定Xbox主机失败 - 已被其他Agent锁定: {}, 锁定者: {}, 过期时间: {}",
+                        xboxHostId, host.getLockedByAgentId(), host.getLockExpiresTime());
+                return false;
+            }
+        }
 
-        host.setLockedByAgentId(agentId);
+        LocalDateTime expireTime = LocalDateTime.now().plusHours(1);
+        host.setLockedByAgentId(taskId);
         host.setLockExpiresTime(expireTime);
         host.setLockedTime(LocalDateTime.now());
+        host.setLocked(true);  // 更新锁定状态布尔值
+
         xboxHostMapper.updateById(host);
-        log.info("锁定Xbox主机 - ID: {}, AgentID: {}", id, agentId);
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void unlock(String id) {
-        XboxHost host = xboxHostMapper.selectById(id);
-        if (host == null) {
-            throw new BusinessException(ResultCode.XboxHost.NOT_FOUND);
-        }
-
-        // 校验商户是否有效
-        merchantService.validateMerchantActive(host.getMerchantId());
-
-        host.setLockedByAgentId(null);
-        host.setLockExpiresTime(null);
-        host.setLockedTime(null);
-        xboxHostMapper.updateById(host);
-        log.info("解锁Xbox主机 - ID: {}", id);
+        log.info("锁定Xbox主机成功 - ID: {}, TaskID: {}, 过期时间: {}", xboxHostId, taskId, expireTime);
+        return true;
     }
 
     @Override
@@ -204,6 +198,25 @@ public class XboxHostServiceImpl implements XboxHostService {
 
         xboxHostMapper.physicalDeleteById(id);
         log.info("物理删除Xbox主机 - ID: {}", id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean unlock(String xboxHostId) {
+        XboxHost host = xboxHostMapper.selectById(xboxHostId);
+        if (host == null) {
+            log.warn("解锁Xbox主机失败 - 主机不存在: {}", xboxHostId);
+            return false;
+        }
+
+        host.setLockedByAgentId(null);
+        host.setLockExpiresTime(null);
+        host.setLockedTime(null);
+        host.setLocked(false);  // 更新锁定状态布尔值
+
+        xboxHostMapper.updateById(host);
+        log.info("解锁Xbox主机成功 - ID: {}", xboxHostId);
+        return true;
     }
 
     private boolean isValidStatus(String status) {
@@ -297,4 +310,11 @@ public class XboxHostServiceImpl implements XboxHostService {
         host.setStatus("idle");
         host.setLastSeenTime(LocalDateTime.now());
     }
+
+    @Override
+    public String getAndInvalidateCredential(String token) {
+        log.info("凭证兑换 - Token: {}", token != null ? token.substring(0, Math.min(10, token.length())) + "..." : "null");
+        return credentialTokenService.getAndInvalidate(token);
+    }
+
 }

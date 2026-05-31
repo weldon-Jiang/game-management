@@ -6,18 +6,28 @@
 - 根据条件匹配Xbox主机
 - 校验Xbox主机是否已被其他任务串流
 - 建立与Xbox的串流连接
+- 创建PlaySession（参考streaming项目）
+- 可选：SDP握手建立WebRTC连接
+- 可选：启动RTP视频流接收（方案3）
 - 回传主机信息到平台并标记防止抢夺
 
 方法拆分：
 - step2_execute_streaming(): 执行串流主流程
 - _match_xbox_host(): 匹配Xbox主机
 - _connect_to_xbox(): 连接到Xbox主机
+- _create_play_session(): 创建PlaySession（新增）
+- _exchange_sdp(): SDP握手（新增，可选）
+- _start_video_receiver(): 启动视频流接收（方案3新增）
 - _bind_xbox_to_platform(): 绑定Xbox到平台（防止抢夺）
 - _report_progress(): 上报进度到平台
 - _check_xbox_availability(): 检查Xbox主机是否可用（未被其他任务占用）
 
 作者：技术团队
-版本：2.0
+版本：4.0
+
+版本历史：
+- 3.0: 集成PlaySession管理和SDP握手功能
+- 4.0: 集成混合模式视频流接收（方案3）
 """
 
 import asyncio
@@ -115,14 +125,21 @@ async def step2_execute_streaming(
                                   f"正在连接{context.current_xbox.name}...")
         stream_logger.info(f"正在连接Xbox: {context.current_xbox.name}")
 
-        connect_success = await _connect_to_xbox(context, logger, stream_logger)
+        connect_success, connect_details = await _connect_to_xbox(context, logger, stream_logger)
 
         if not connect_success:
             error_msg = f"连接Xbox失败: {context.current_xbox.ip_address}"
             logger.error(error_msg)
             stream_logger.error(error_msg)
             context.update_step_status("step2", TaskStepStatus.FAILED, error_msg)
-            await report_progress(context.task_id, "STEP2", "FAILED", error_msg)
+            await report_progress(
+                context.task_id, "STEP2", "FAILED", error_msg,
+                {
+                    "xboxIp": context.current_xbox.ip_address,
+                    "xboxName": context.current_xbox.name,
+                    "errorCode": "XBOX_CONNECT_FAILED"
+                }
+            )
             return Step2Result(success=False, error_code="XBOX_CONNECT_FAILED",
                              message=error_msg)
 
@@ -139,6 +156,30 @@ async def step2_execute_streaming(
         stream_logger.info("步骤二被取消")
         context.update_step_status("step2", TaskStepStatus.SKIPPED, "任务被取消")
         return Step2Result(success=False, error_code="CANCELLED", message="任务被取消")
+
+    except asyncio.TimeoutError as e:
+        error_msg = f"步骤二执行超时: {str(e)}"
+        logger.error(f"{error_msg}", exc_info=True)
+        stream_logger.error(f"{error_msg}", exc_info=True)
+        context.update_step_status("step2", TaskStepStatus.FAILED, error_msg, str(e))
+        await report_progress(context.task_id, "STEP2", "FAILED", error_msg)
+        return Step2Result(success=False, error_code="TIMEOUT", message=error_msg)
+
+    except ConnectionError as e:
+        error_msg = f"步骤二网络连接失败: {str(e)}"
+        logger.error(f"{error_msg}", exc_info=True)
+        stream_logger.error(f"{error_msg}", exc_info=True)
+        context.update_step_status("step2", TaskStepStatus.FAILED, error_msg, str(e))
+        await report_progress(context.task_id, "STEP2", "FAILED", error_msg)
+        return Step2Result(success=False, error_code="CONNECTION_ERROR", message=error_msg)
+
+    except ValueError as e:
+        error_msg = f"步骤二参数错误: {str(e)}"
+        logger.error(f"{error_msg}", exc_info=True)
+        stream_logger.error(f"{error_msg}", exc_info=True)
+        context.update_step_status("step2", TaskStepStatus.FAILED, error_msg, str(e))
+        await report_progress(context.task_id, "STEP2", "FAILED", error_msg)
+        return Step2Result(success=False, error_code="VALUE_ERROR", message=error_msg)
 
     except Exception as e:
         error_msg = f"步骤二执行异常: {str(e)}"
@@ -269,6 +310,12 @@ async def _discover_xbox_devices(logger) -> List[XboxInfo]:
         logger.info(f"Xbox发现完成: {len(xbox_list)} 台")
         return xbox_list
 
+    except asyncio.TimeoutError as e:
+        logger.error(f"Xbox发现超时: {e}")
+        return []
+    except ConnectionError as e:
+        logger.error(f"Xbox发现网络错误: {e}")
+        return []
     except Exception as e:
         logger.error(f"Xbox发现异常: {e}")
         return []
@@ -297,12 +344,18 @@ async def _test_xbox_connection(ip_address: str, logger) -> bool:
         logger.info(f"Xbox {ip_address} 连接测试: {'在线' if online else '离线'}")
         return online
 
+    except asyncio.TimeoutError as e:
+        logger.error(f"Xbox连接测试超时: {ip_address} - {e}")
+        return False
+    except ConnectionError as e:
+        logger.error(f"Xbox连接测试网络错误: {ip_address} - {e}")
+        return False
     except Exception as e:
-        logger.error(f"Xbox连接测试异常: {e}")
+        logger.error(f"Xbox连接测试异常: {ip_address} - {e}")
         return False
 
 
-async def _connect_to_xbox(context: AgentTaskContext, logger, stream_logger) -> bool:
+async def _connect_to_xbox(context: AgentTaskContext, logger, stream_logger) -> tuple:
     """
     连接到Xbox主机
 
@@ -312,10 +365,20 @@ async def _connect_to_xbox(context: AgentTaskContext, logger, stream_logger) -> 
     - stream_logger: 流媒体账号日志记录器
 
     返回：
-    - bool: 是否成功
+    - tuple: (success: bool, details: dict)
     """
+    connect_details = {
+        "playSessionEnabled": False,
+        "sdpEnabled": False,
+        "gpuAvailable": False,
+        "gpuType": "unknown",
+        "videoMode": "unknown"
+    }
+    
     try:
         from ..xbox.stream_controller import XboxStreamController, StreamConfig
+        from ..xbox.play_session import XboxPlaySessionManager, PlaySessionConfig
+        from ..xbox.webrtc_handler import XboxWebRTCHandler, WebRTCConfig
 
         xbox_controller = XboxStreamController()
         context.xbox_session = xbox_controller
@@ -333,19 +396,417 @@ async def _connect_to_xbox(context: AgentTaskContext, logger, stream_logger) -> 
             user_hash=user_hash
         )
 
-        if success:
-            logger.info(f"Xbox连接成功: {xbox_info.name}")
-            stream_logger.info(f"Xbox连接成功: {xbox_info.name}")
-            return True
-        else:
+        if not success:
             logger.error(f"Xbox连接失败: {xbox_info.ip_address}")
             stream_logger.error(f"Xbox连接失败: {xbox_info.ip_address}")
-            return False
+            return False, connect_details
 
+        logger.info(f"Xbox基础连接成功: {xbox_info.name}")
+        stream_logger.info(f"Xbox基础连接成功: {xbox_info.name}")
+
+        play_session_success = await _create_play_session(
+            context, logger, stream_logger
+        )
+        connect_details["playSessionEnabled"] = play_session_success
+        context._play_session_enabled = play_session_success
+
+        if play_session_success:
+            logger.info(f"PlaySession创建成功，已启用")
+            stream_logger.info(f"PlaySession已启用")
+        else:
+            logger.warning(f"PlaySession创建失败，将使用基础连接: {xbox_info.name}")
+            stream_logger.warning(f"PlaySession未启用")
+
+        logger.info(f"Xbox连接成功: {xbox_info.name}")
+        stream_logger.info(f"Xbox连接成功: {xbox_info.name}")
+
+        gpu_success = await _init_gpu_decoder(context, logger, stream_logger)
+        connect_details["gpuAvailable"] = gpu_success
+        connect_details["gpuType"] = getattr(context, '_gpu_type', 'cpu')
+        
+        video_success = await _start_video_receiver(context, logger, stream_logger)
+        connect_details["videoMode"] = getattr(context, '_video_mode', 'win32gui')
+
+        return True, connect_details
+
+    except asyncio.TimeoutError as e:
+        logger.error(f"连接Xbox超时: {e}")
+        stream_logger.error(f"连接Xbox超时: {e}")
+        return False, connect_details
+    except ConnectionError as e:
+        logger.error(f"连接Xbox网络错误: {e}")
+        stream_logger.error(f"连接Xbox网络错误: {e}")
+        return False, connect_details
+    except ValueError as e:
+        logger.error(f"连接Xbox参数错误: {e}")
+        stream_logger.error(f"连接Xbox参数错误: {e}")
+        return False, connect_details
     except Exception as e:
         logger.error(f"连接Xbox异常: {e}")
         stream_logger.error(f"连接Xbox异常: {e}")
+        return False, connect_details
+
+
+async def _create_play_session(context: AgentTaskContext, logger, stream_logger) -> bool:
+    """
+    创建PlaySession（参考streaming项目）
+
+    功能说明：
+    - 使用Xbox Live API创建流播放会话
+    - 支持WebRTC SDP握手
+    - 管理会话生命周期
+
+    参数：
+    - context: 任务上下文
+    - logger: 日志记录器
+    - stream_logger: 流媒体账号日志记录器
+
+    返回：
+    - bool: 是否成功
+    """
+    try:
+        from ..xbox.play_session import XboxPlaySessionManager, PlaySessionConfig
+        from ..xbox.webrtc_handler import XboxWebRTCHandler, WebRTCConfig
+
+        logger.info("开始创建PlaySession...")
+        stream_logger.info("开始创建PlaySession...")
+
+        play_session_mgr = XboxPlaySessionManager()
+        context._play_session_manager = play_session_mgr
+
+        ms_token = None
+        if context.microsoft_tokens and hasattr(context.microsoft_tokens, 'access_token'):
+            ms_token = context.microsoft_tokens.access_token
+        elif context.xbox_tokens and hasattr(context.xbox_tokens, 'access_token'):
+            ms_token = context.xbox_tokens.access_token
+
+        if not ms_token:
+            logger.warning("无可用的访问令牌，跳过PlaySession创建")
+            return False
+
+        play_session_mgr.set_access_token(ms_token)
+
+        servers = await play_session_mgr.discover_servers()
+        if not servers:
+            logger.warning("未发现Xbox服务器，可能不在Xbox Live网络中")
+            return False
+
+        server_id = servers[0].get('serverId', '')
+        if not server_id:
+            logger.warning("服务器响应中无serverId")
+            return False
+
+        logger.info(f"发现Xbox服务器: {server_id}")
+        stream_logger.info(f"发现Xbox服务器: {server_id}")
+
+        session = await play_session_mgr.create_session(
+            server_id=server_id,
+            config=PlaySessionConfig(
+                nano_version="V3;WebrtcTransport.dll",
+                os_name="windows",
+                sdk_type="web"
+            )
+        )
+
+        if not session:
+            logger.warning("PlaySession创建失败")
+            return False
+
+        logger.info(f"PlaySession创建成功: {session.session_id}")
+        stream_logger.info(f"PlaySession创建成功: {session.session_id}")
+        
+        context._play_session_manager = play_session_mgr
+        context._play_session_session_id = session.session_id
+        
+        sdp_success = await _exchange_sdp(
+            context, session, logger, stream_logger
+        )
+        context._sdp_enabled = sdp_success
+
+        if sdp_success:
+            logger.info("SDP握手成功")
+            stream_logger.info("SDP握手成功")
+        else:
+            logger.warning("SDP握手失败，连接可能不稳定")
+
+        return True
+
+    except asyncio.TimeoutError as e:
+        logger.error(f"PlaySession创建超时: {e}")
+        stream_logger.error(f"PlaySession创建超时: {e}")
         return False
+    except ConnectionError as e:
+        logger.error(f"PlaySession创建网络错误: {e}")
+        stream_logger.error(f"PlaySession创建网络错误: {e}")
+        return False
+    except ValueError as e:
+        logger.error(f"PlaySession创建参数错误: {e}")
+        stream_logger.error(f"PlaySession创建参数错误: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"PlaySession创建异常: {e}")
+        stream_logger.error(f"PlaySession创建异常: {e}")
+        return False
+
+
+async def _exchange_sdp(context: AgentTaskContext, session, logger, stream_logger) -> bool:
+    """
+    SDP握手建立WebRTC连接（参考streaming项目）
+
+    功能说明：
+    - 创建WebRTC Offer
+    - 与Xbox交换SDP
+    - 建立完整的WebRTC连接
+
+    参数：
+    - context: 任务上下文
+    - session: PlaySession对象
+    - logger: 日志记录器
+    - stream_logger: 流媒体账号日志记录器
+
+    返回：
+    - bool: 是否成功
+    """
+    try:
+        from ..xbox.webrtc_handler import XboxWebRTCHandler, WebRTCConfig
+
+        logger.info("开始SDP握手...")
+        stream_logger.info("开始SDP握手...")
+
+        webrtc = XboxWebRTCHandler(WebRTCConfig(
+            audio_enabled=True,
+            video_enabled=True,
+            video_width=1280,
+            video_height=720,
+            video_framerate=30
+        ))
+        context._webrtc_handler = webrtc
+
+        sdp_offer = webrtc.create_offer()
+        if not sdp_offer:
+            logger.warning("WebRTC Offer创建失败")
+            return False
+
+        logger.debug(f"WebRTC Offer SDP创建成功，长度: {len(sdp_offer)}")
+
+        play_session_mgr = context._play_session_manager
+        if not play_session_mgr or not play_session_mgr._access_token:
+            logger.warning("无有效的PlaySession管理器，跳过SDP交换")
+            return False
+
+        sdp_answer = await play_session_mgr.exchange_sdp(
+            session_id=session.session_id,
+            sdp_offer=sdp_offer
+        )
+
+        if not sdp_answer:
+            logger.warning("SDP Answer获取失败")
+            return False
+
+        webrtc.handle_answer(sdp_answer)
+        logger.info("SDP握手完成")
+        stream_logger.info("SDP握手完成")
+
+        return True
+
+    except asyncio.TimeoutError as e:
+        logger.error(f"SDP握手超时: {e}")
+        stream_logger.error(f"SDP握手超时: {e}")
+        return False
+    except ConnectionError as e:
+        logger.error(f"SDP握手网络错误: {e}")
+        stream_logger.error(f"SDP握手网络错误: {e}")
+        return False
+    except ValueError as e:
+        logger.error(f"SDP握手参数错误: {e}")
+        stream_logger.error(f"SDP握手参数错误: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"SDP握手异常: {e}")
+        stream_logger.error(f"SDP握手异常: {e}")
+        return False
+
+
+async def _init_gpu_decoder(context: AgentTaskContext, logger, stream_logger) -> bool:
+    """
+    初始化GPU解码器（优化一）
+
+    功能说明：
+    - 检测系统GPU类型
+    - 初始化GPU解码器
+    - 将GPU信息存储到context供步骤三使用
+
+    参数：
+    - context: 任务上下文
+    - logger: 日志记录器
+    - stream_logger: 流媒体账号日志记录器
+
+    返回：
+    - bool: 是否成功
+    """
+    try:
+        from ..vision.gpu_decoder import gpu_detector, GPUType
+
+        gpu_type = gpu_detector.detect()
+        gpu_info = gpu_detector.get_capabilities()
+
+        logger.info(f"GPU检测结果: {gpu_type.value}")
+        stream_logger.info(f"GPU类型: {gpu_type.value}")
+
+        if gpu_type != GPUType.CPU:
+            decoder_name = gpu_detector.get_decoder_name()
+            logger.info(f"可用GPU解码器: {decoder_name}")
+            stream_logger.info(f"将使用GPU硬件解码: {decoder_name}")
+            context._gpu_available = True
+            context._gpu_type = gpu_type.value
+            context._gpu_decoder = decoder_name
+        else:
+            logger.info("无可用GPU，将使用CPU解码")
+            stream_logger.info("将使用CPU软解码")
+            context._gpu_available = False
+            context._gpu_type = "cpu"
+            context._gpu_decoder = "libx264"
+
+        return True
+
+    except Exception as e:
+        logger.warning(f"GPU初始化失败，将使用窗口截图模式: {e}")
+        stream_logger.warning(f"GPU初始化失败: {e}")
+        context._gpu_available = False
+        context._gpu_type = "cpu"
+        context._gpu_decoder = "libx264"
+        return True
+
+
+async def _init_video_stream_controller(context: AgentTaskContext, logger, stream_logger) -> bool:
+    """
+    初始化视频流控制器（方案C优化）
+
+    功能说明：
+    - 创建高性能视频流控制器
+    - 支持RTP视频流接收
+    - 支持win32gui直接捕获
+    - 提供多线程解码加速
+
+    参数：
+    - context: 任务上下文
+    - logger: 日志记录器
+    - stream_logger: 流媒体账号日志记录器
+
+    返回：
+    - bool: 是否成功
+    """
+    try:
+        from ..vision.video_stream_controller import (
+            VideoStreamController, 
+            DirectCaptureController,
+            VideoStreamConfig
+        )
+
+        logger.info("初始化视频流控制器...")
+        stream_logger.info("初始化视频流控制器...")
+
+        if context._rtp_available and context.xbox_session:
+            rtp_session = getattr(context.xbox_session, '_rtp_session', None)
+            if rtp_session:
+                video_config = VideoStreamConfig(
+                    width=1280,
+                    height=720,
+                    framerate=30,
+                    bitrate=5000000,
+                    codec="H264",
+                    rtp_port=50500
+                )
+
+                video_controller = VideoStreamController()
+                success = await video_controller.start(video_config, rtp_session)
+
+                if success:
+                    context._video_stream_controller = video_controller
+                    context._video_capture_mode = "rtp"
+                    logger.info("视频流控制器（RTP模式）初始化成功")
+                    stream_logger.info("RTP视频流接收已启用")
+                    return True
+                else:
+                    logger.warning("视频流控制器初始化失败，尝试win32gui模式")
+
+        direct_capture = DirectCaptureController()
+        context._direct_capture = direct_capture
+        context._video_capture_mode = "direct"
+        logger.info("直接捕获控制器已初始化")
+        stream_logger.info("win32gui直接捕获模式已启用")
+
+        return True
+
+    except Exception as e:
+        logger.warning(f"视频流控制器初始化失败: {e}")
+        stream_logger.warning(f"视频流控制器初始化失败: {e}")
+        context._video_capture_mode = "fallback"
+        return True
+
+
+async def _start_video_receiver(context: AgentTaskContext, logger, stream_logger) -> bool:
+    """
+    启动视频流接收器（方案3：混合模式）
+
+    功能说明：
+    - 支持两种视频流接收模式：RTP 和 win32gui
+    - RTP模式：直接接收Xbox视频流，性能更好
+    - win32gui模式：从Xbox Streaming窗口截图，兼容性更好
+    - 优先尝试RTP，失败时自动降级到win32gui
+
+    参数：
+    - context: 任务上下文
+    - logger: 日志记录器
+    - stream_logger: 流媒体账号日志记录器
+
+    返回：
+    - bool: 是否成功
+    """
+    try:
+        if not context.xbox_session:
+            logger.warning("Xbox会话未初始化，跳过视频流接收器启动")
+            return False
+
+        logger.info("开始初始化视频流接收器...")
+        stream_logger.info("开始初始化视频流接收器...")
+
+        srtp_keys = None
+        webrtc_handler = getattr(context, '_webrtc_handler', None)
+        if webrtc_handler:
+            srtp_keys = getattr(webrtc_handler, '_srtp_keys', None)
+
+        video_success = await context.xbox_session.start_video_receiver(
+            mode="auto",
+            port=50500,
+            srtp_keys=srtp_keys
+        )
+
+        video_mode = context.xbox_session.video_mode
+        logger.info(f"视频流接收器初始化完成，模式: {video_mode}")
+        stream_logger.info(f"视频流接收器初始化完成，模式: {video_mode}")
+
+        context._video_mode = video_mode
+        context._rtp_available = video_mode == "rtp"
+
+        if video_mode == "rtp":
+            logger.info("使用RTP视频流接收，性能更优")
+            stream_logger.info("RTP视频流接收已启用")
+        else:
+            logger.info("使用win32gui截图模式，兼容性更强")
+            stream_logger.info("win32gui截图模式已启用")
+
+        await _init_video_stream_controller(context, logger, stream_logger)
+
+        return True
+
+    except Exception as e:
+        logger.warning(f"视频流接收器初始化失败: {e}")
+        stream_logger.warning(f"视频流接收器初始化失败: {e}")
+        context._video_mode = "win32gui"
+        context._rtp_available = False
+        context._video_capture_mode = "fallback"
+        return True
 
 
 async def _check_xbox_availability(context: AgentTaskContext, xbox_host_id: str) -> bool:

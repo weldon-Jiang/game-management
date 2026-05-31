@@ -138,12 +138,13 @@ public class AgentAuthFilter implements Filter {
         // 匹配 /api/{taskId}/progress, /api/{taskId}/match/complete, /api/{taskId}/game-accounts/status 等
         // 同时匹配 /api/agent-callback/task/{taskId}/...
         if (path.matches("/api/[^/]+/(progress|match/complete|game-accounts/status|game-account/[^/]+/(status|complete)).*") ||
-            path.startsWith("/api/agent-callback/")) {
+            path.startsWith("/api/agent-callback/") ||
+            path.startsWith("/api/v1/agent-callback/")) {
             return true;
         }
 
         // Agent 服务调用的接口需要凭证
-        return path.equals("/ws/agents") ||
+        return path.equals("/ws/agent") ||
                isAgentServiceEndpoint(path);
     }
     
