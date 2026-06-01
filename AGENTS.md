@@ -4,9 +4,9 @@
 
 ## 📋 文档说明
 
-**版本**: 2.1  
-**最后更新**: 2026-05-21  
-**适用范围**: Bend Platform 后端服务（Java）、前端服务（Vue3）、Agent服务（Python）
+**版本**: 2.2  
+**最后更新**: 2026-06-01  
+**适用范围**: Bend Platform 后端服务（Java）、网关（Java）、前端服务（Vue3）、Agent服务（Python）
 
 ---
 
@@ -26,13 +26,16 @@
 ### Docker Compose 验证（✅ 必须遵守）
 
 ```bash
-# 完整构建
-docker compose -f docker/docker-compose.yml up -d --build
+# 完整环境（MySQL + Redis + 后端 + 网关 + 前端）
+docker compose -f docker/docker-compose.yml --profile full up -d --build
+
+# 仅核心服务（Redis + 后端 + 网关，不含 MySQL/前端）
+docker compose -f docker/docker-compose.yml --profile core up -d --build
 
 # 单独构建服务
-docker compose -f docker/docker-compose.yml up -d --build backend
-docker compose -f docker/docker-compose.yml up -d --build gateway
-docker compose -f docker/docker-compose.yml up -d --build frontend
+docker compose -f docker/docker-compose.yml --profile full up -d --build backend
+docker compose -f docker/docker-compose.yml --profile full up -d --build gateway
+docker compose -f docker/docker-compose.yml --profile full up -d --build frontend
 
 # 检查服务状态
 docker compose -f docker/docker-compose.yml ps
@@ -49,12 +52,24 @@ docker compose -f docker/docker-compose.yml logs -f backend
 
 ### 数据库变更规范（✅ 必须遵守）
 
-- 迁移脚本位置：`bend-platform/db/`
+- 迁移脚本位置：`bend-platform/db/migration/`
+- 全量建表脚本：`bend-platform/db/schema.sql`
 - 每次创建迁移脚本后必须同步更新 `schema.sql`
 
 ---
 
 ## 📁 项目结构
+
+### 网关服务 (bend-gateway)
+
+```
+bend-gateway/
+├── src/main/java/com/bend/gateway/
+│   ├── filter/         # 限流、IP 过滤
+│   └── config/         # CORS 等配置
+└── src/main/resources/
+    └── application.yml # 路由 :8060 → backend:8061
+```
 
 ### 后端服务 (bend-platform)
 
@@ -146,19 +161,21 @@ private Integer deleted;
 
 ---
 
-### 前端服务（Vue3 + TypeScript）
+### 前端服务（Vue3 + JavaScript）
 
 #### ✅ 必须遵守
 
 | 规则 | 说明 |
 |------|------|
 | 组件命名 | PascalCase，如 `UserList.vue` |
-| 代码风格 | 使用 TypeScript 和 Composition API |
+| 代码风格 | 使用 JavaScript 和 Composition API（`<script setup>`） |
 | API 请求 | 使用封装的 `request` 实例，禁止直接使用 axios |
 | 状态管理 | 使用 Pinia |
 | 组件通信 | 父子组件使用 props/emits，跨层级使用 provide/inject 或 Pinia |
-| 样式规范 | 使用 SCSS + BEM，组件样式使用 scoped |
+| 样式规范 | 使用 CSS + scoped；组件样式保持 BEM 命名习惯 |
 | 性能优化 | 列表渲染使用 `key` 属性 |
+
+> 说明：当前代码库为 JavaScript + CSS。TypeScript/SCSS 迁移为可选后续工作，新增代码应遵循上表实际栈。
 
 ---
 

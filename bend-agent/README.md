@@ -35,7 +35,8 @@ bend-agent/
 │   ├── agent.exe             # 打包后的可执行文件
 │   └── agent.yaml.example    # 配置模板
 ├── scripts/
-│   └── build.bat             # 构建脚本
+│   ├── build.bat             # 构建脚本
+│   └── debug/                # 调试/实验脚本（非生产代码）
 ├── src/
 │   ├── main.py               # 程序入口
 │   └── agent/
@@ -47,15 +48,16 @@ bend-agent/
 │       │   ├── microsoft_auth_msal.py  # Microsoft MSAL 认证（支持Token自动刷新）
 │       │   ├── browser_automation.py   # 浏览器自动化
 │       │   └── browser_login_controller.py  # 浏览器登录控制器
-│       ├── automation/       # 自动化任务模块（四步骤实现）
-│       │   ├── automation_scheduler.py  # 并发任务调度器
-│       │   ├── automation_task.py       # 四步骤协调器
-│       │   ├── step1_stream_account_login.py  # 步骤1：串流账号登录
-│       │   ├── step2_xbox_streaming.py        # 步骤2：Xbox串流连接
-│       │   ├── step3_streaming_init.py        # 步骤3：串流环境初始化
-│       │   ├── step4_game_automation.py        # 步骤4：游戏比赛自动化
-│       │   ├── task_context.py                 # 任务上下文管理
-│       │   └── task_window_manager.py          # 窗口管理器
+│       ├── automation/       # 四步骤实现
+│       │   ├── step1_stream_account_login.py
+│       │   ├── step2_xbox_streaming.py
+│       │   ├── step3_streaming_init.py
+│       │   └── step4_game_automation.py
+│       ├── task/              # 任务调度与编排
+│       │   ├── automation_scheduler.py
+│       │   ├── automation_task.py
+│       │   ├── task_executor.py
+│       │   └── task_context.py
 │       ├── core/             # 核心模块
 │       │   ├── central_manager.py  # 中央管理器（生命周期管理）
 │       │   ├── config.py           # 配置管理
@@ -74,17 +76,9 @@ bend-agent/
 │       ├── scene/             # 场景检测模块
 │       │   ├── scene_detector.py           # 场景检测器
 │       │   ├── optimized_scene_detector.py  # 优化后的场景检测器（降频+缓存）
-│       │   ├── game_automation_engine.py    # 游戏自动化引擎
-│       │   └── game_automation_engine.py    # 状态决策引擎
-│       ├── task/              # 任务执行模块
-│       │   ├── task_executor.py    # 任务执行器（WebSocket入口）
-│       │   ├── task_factory.py     # 任务工厂
-│       │   ├── automation_scheduler.py  # 任务调度器
-│       │   ├── automation_task.py   # 自动化任务
-│       │   └── base_task.py        # 基础任务类
+│       │   └── game_automation_engine.py    # 游戏自动化引擎
 │       ├── vision/            # 视觉识别模块
 │       │   ├── template_matcher.py  # 模板匹配
-│       │   ├── template_manager.py  # 模板管理器
 │       │   ├── frame_capture.py     # 画面捕获
 │       │   ├── gpu_decoder.py       # GPU解码器（优化）
 │       │   └── gpu_frame_capture.py  # GPU加速帧捕获（优化）

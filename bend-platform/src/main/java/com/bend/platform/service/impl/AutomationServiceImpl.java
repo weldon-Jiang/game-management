@@ -6,7 +6,7 @@ import com.bend.platform.entity.StreamingAccount;
 import com.bend.platform.entity.Task;
 import com.bend.platform.entity.XboxHost;
 import com.bend.platform.enums.AccountStatusEnum;
-import com.bend.platform.enums.TaskTypeEnum;
+import com.bend.platform.enums.GameActionType;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.*;
@@ -156,7 +156,7 @@ public class AutomationServiceImpl implements AutomationService {
             // 设置游戏操作类型，默认为每日比赛
             String gameActionType = request.getGameActionType();
             if (gameActionType == null || gameActionType.isEmpty()) {
-                gameActionType = TaskTypeEnum.DAILY_MATCH.getCode();
+                gameActionType = GameActionType.DAILY_MATCH.getCode();
             }
             task.setGameActionType(gameActionType);
 

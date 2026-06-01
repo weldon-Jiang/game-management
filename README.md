@@ -2,7 +2,7 @@
 
 ## 系统概述
 
-Bend Platform 是一个企业级 Xbox 云游戏自动化管理平台，采用多租户架构，支持商户独立管理资源。系统由三大模块组成：后端管理平台、前端 Web 应用和客户端 Agent 自动化程序，通过 HTTP API 和 WebSocket 实现实时通信与任务调度。
+Bend Platform 是一个企业级 Xbox 云游戏自动化管理平台，采用多租户架构，支持商户独立管理资源。系统由四大模块组成：后端服务、API 网关、前端 Web 应用和客户端 Agent 自动化程序，通过 HTTP API 和 WebSocket 实现实时通信与任务调度。
 
 ---
 
@@ -13,7 +13,8 @@ Bend Platform 是一个企业级 Xbox 云游戏自动化管理平台，采用多
 | [开发环境搭建](docs/development.md) | 环境要求、项目结构、启动调试、代码规范 |
 | [用户操作指南](docs/user-guide.md) | 商户注册、Agent管理、任务操作 |
 | [系统流程说明](docs/flow.md) | 业务流程、数据流向 |
-| [数据库ER图](db/ER_diagram.md) | 表关系与ER图 |
+| [数据库ER图](bend-platform/db/ER_diagram.md) | 表关系与ER图 |
+| [设计文档索引](.trae/documents/) | 自动化/Xbox/订阅等过程设计文档 |
 
 ---
 
@@ -38,20 +39,25 @@ Bend Platform 是一个企业级 Xbox 云游戏自动化管理平台，采用多
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     前端 (bend-platform-web)                        │
+│                     前端 (bend-platform-web :3090)                  │
 │              Vue 3 + Element Plus + Vite + Pinia                    │
 └────────────────────────────┬────────────────────────────────────────┘
                              │ HTTP / WebSocket
 ┌────────────────────────────▼────────────────────────────────────────┐
-│                     后端 (bend-platform)                             │
+│                     网关 (bend-gateway :8060)                        │
+│              Spring Cloud Gateway + Redis 限流                       │
+└────────────────────────────┬────────────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────────────┐
+│                     后端 (bend-platform :8061)                       │
 │              Spring Boot 3.2 + MyBatis-Plus + Redis                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
 │  │  REST API    │  │  WebSocket   │  │  定时任务                │  │
 │  │  Controller  │  │  Endpoint    │  │  心跳/超时检测           │  │
 │  └──────────────┘  └──────────────┘  └──────────────────────────┘  │
-│                     MySQL 8.0 + Redis 6.0                           │
+│                     MySQL 8.0 + Redis 7.x                           │
 └────────────────────────────┬────────────────────────────────────────┘
-                             │ HTTP API / WebSocket
+                             │ HTTP API / WebSocket (经网关)
 ┌────────────────────────────▼────────────────────────────────────────┐
 │                     Agent (bend-agent)                               │
 │              Python 3.8+ + asyncio + OpenCV                          │
@@ -103,7 +109,8 @@ Bend Platform 是一个企业级 Xbox 云游戏自动化管理平台，采用多
 
 ```
 team-management/
-├── bend-platform/                  # 后端服务 (Spring Boot)
+├── bend-gateway/                   # API 网关 (Spring Cloud Gateway, :8060)
+├── bend-platform/                  # 后端服务 (Spring Boot, :8061)
 │   ├── src/main/java/com/bend/platform/
 │   │   ├── controller/             # REST API 控制器 (20+)
 │   │   ├── service/                # 业务逻辑层
@@ -157,24 +164,21 @@ team-management/
 │   ├── src/agent/
 │   │   ├── api/                    # 后端通信 (HTTP/WebSocket/注册)
 │   │   ├── auth/                   # Microsoft 认证
-│   │   ├── automation/             # 自动化核心
-│   │   │   ├── automation_scheduler.py  # 自动化调度器
-│   │   │   ├── automation_task.py       # 自动化任务
-│   │   │   ├── platform_api_client.py   # 平台API客户端
-│   │   │   ├── task_context.py          # 任务上下文
-│   │   │   ├── task_window_manager.py   # 窗口管理
+│   │   ├── automation/             # 四步骤实现（step1~step4）
 │   │   │   ├── step1_stream_account_login.py  # 步骤1: 账号登录
 │   │   │   ├── step2_xbox_streaming.py        # 步骤2: Xbox串流
-│   │   │   ├── step3_gpu_decode.py             # 步骤3: GPU解码
-│   │   │   ├── step4_game_automation.py        # 步骤4: 游戏自动化
-│   │   │   └── tests/               # 自动化测试
+│   │   │   ├── step3_streaming_init.py        # 步骤3: 串流环境初始化
+│   │   │   └── step4_game_automation.py       # 步骤4: 游戏自动化
+│   │   ├── task/                   # 任务调度与编排
+│   │   │   ├── automation_scheduler.py
+│   │   │   ├── automation_task.py
+│   │   │   └── task_context.py
 │   │   ├── core/                   # 核心组件 (配置/日志/管理器/更新)
 │   │   ├── game/                   # 游戏账号管理
 │   │   ├── input/                  # 输入控制 (鼠标/键盘/手柄)
 │   │   ├── scene/                  # 场景检测
 │   │   ├── vision/                 # 视觉处理 (帧捕获/模板匹配)
 │   │   ├── system/                 # 系统托盘
-│   │   ├── task/                   # 任务执行 (流控/执行器)
 │   │   ├── utils/                  # 工具类 (加密)
 │   │   ├── windows/                # 窗口管理 (串流窗口)
 │   │   ├── xbox/                   # Xbox控制 (串流/发现)
@@ -185,10 +189,7 @@ team-management/
 │   ├── requirements.txt
 │   └── pytest.ini
 │
-├── db/                             # 数据库脚本与文档
-│   ├── schema.sql                  # 建表脚本
-│   ├── ER_diagram.md               # ER图
-│   └── migration*.sql              # 迁移脚本
+├── docker/                         # Docker Compose 与部署配置
 │
 ├── docs/                           # 项目文档
 │   ├── development.md              # 开发手册
@@ -218,21 +219,41 @@ cd team-management
 mysql -u root -p
 CREATE DATABASE bend_platform CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE bend_platform;
-SOURCE db/schema.sql;
+SOURCE bend-platform/db/schema.sql;
 ```
 
-### 3. 启动后端
+### 3. Docker Compose 启动（推荐）
+
+```bash
+cd docker
+cp .env.example .env   # 如存在，填入数据库密码等
+docker compose -f docker-compose.yml --profile full up -d --build
+```
+
+- 前端: `http://localhost:3090`
+- 网关（API/WebSocket 入口）: `http://localhost:8060`
+- 后端（内部）: `http://localhost:8061`
+
+### 3b. 本地开发启动
+
+**网关**（需 Redis）:
+
+```bash
+cd bend-gateway
+mvn spring-boot:run
+```
+
+**后端**:
 
 ```bash
 cd bend-platform
 cp .env.example .env
-# 编辑 .env 填入数据库密码、JWT密钥等
 mvn spring-boot:run
 ```
 
-后端启动在 `http://localhost:8090`，API文档在 `http://localhost:8090/swagger-ui.html`
+后端默认 `:8061`，API 文档: `http://localhost:8061/swagger-ui.html`
 
-### 4. 启动前端
+**前端**:
 
 ```bash
 cd bend-platform-web
@@ -240,7 +261,7 @@ npm install
 npm run dev
 ```
 
-前端开发服务器启动在 `http://localhost:3090`，自动代理 API 请求到后端 `8090` 端口
+前端开发服务器 `:3090`，API 代理到网关 `8060`
 
 ### 5. 启动 Agent
 
@@ -283,8 +304,8 @@ python src/main.py --agent-id <ID> --agent-secret <SECRET> --registration-code <
 | `JWT_SECRET` | JWT签名密钥 | - |
 | `JWT_EXPIRATION` | JWT过期时间(ms) | `86400000` |
 | `AES_SECRET` | AES加密密钥 | - |
-| `SERVER_PORT` | 服务端口 | `8090` |
-| `CORS_ALLOWED_ORIGINS` | CORS允许的源 | `http://localhost:5173,http://localhost:3090` |
+| `SERVER_PORT` | 后端服务端口 | `8061` |
+| `CORS_ALLOWED_ORIGINS` | CORS允许的源 | `http://localhost:3090` |
 
 ---
 

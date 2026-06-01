@@ -23,11 +23,12 @@
 - _check_xbox_availability(): 检查Xbox主机是否可用（未被其他任务占用）
 
 作者：技术团队
-版本：4.0
+版本：5.0
 
 版本历史：
 - 3.0: 集成PlaySession管理和SDP握手功能
 - 4.0: 集成混合模式视频流接收（方案3）
+- 5.0: 优化 Xbox 发现逻辑（云端授权必须存在 + 局域网在线必须存在 + 随机选择）
 """
 
 import asyncio
@@ -37,17 +38,9 @@ from typing import Callable, Optional, Dict, Any, List
 from ..core.logger import get_logger
 from ..core.account_logger import get_stream_logger
 from ..task.task_context import AgentTaskContext, Step2Result, XboxInfo, TaskStepStatus
-from ..xbox.xbox_host_matcher import XboxHostMatcher
+from ..xbox.xbox_host_matcher import XboxHostMatcher, XboxMatchResult
 
-
-class XboxMatchResult:
-    """Xbox主机匹配结果"""
-    def __init__(self, success: bool, xbox_info: XboxInfo = None, 
-                 match_type: str = "", message: str = ""):
-        self.success = success
-        self.xbox_info = xbox_info
-        self.match_type = match_type
-        self.message = message
+# 注意: XboxMatchResult 现在从 xbox_host_matcher 导入，包含详细的错误信息
 
 
 async def step2_execute_streaming(
@@ -299,7 +292,7 @@ async def _match_xbox_host(
     logger.info("未指定Xbox主机，开始智能匹配...")
     stream_logger.info("未指定Xbox主机，开始智能匹配...")
     
-    xbox_info = await _smart_match_xbox_with_wakeup(
+    match_result = await _smart_match_xbox_with_wakeup(
         context, 
         gs_token, 
         logger, 
@@ -308,7 +301,8 @@ async def _match_xbox_host(
         wakeup_timeout=30
     )
     
-    if xbox_info:
+    if match_result and match_result.xbox_info:
+        xbox_info = match_result.xbox_info
         stream_logger.info(f"智能匹配成功: {xbox_info.name}")
         return XboxMatchResult(
             success=True,
@@ -317,13 +311,24 @@ async def _match_xbox_host(
             message=f"智能匹配 Xbox: {xbox_info.name}"
         )
     else:
-        error_msg = "没有找到可用的授权 Xbox 主机"
-        _print_no_match_help(logger)
+        # 匹配失败，使用详细的错误信息
+        error_code = match_result.error_code if match_result else "UNKNOWN"
+        error_reason = match_result.match_reason if match_result else "没有找到可用的授权 Xbox 主机"
+        error_details = match_result.error_details if match_result else {}
+        
+        # 生成详细的错误消息
+        detailed_error_msg = f"[{error_code}] {error_reason}"
+        if "suggestion" in error_details:
+            detailed_error_msg += f"; 解决方案: {error_details['suggestion']}"
+        
+        logger.error(f"Xbox 智能匹配失败: {detailed_error_msg}")
+        _print_no_match_help(logger, error_code, error_details)
+        
         return XboxMatchResult(
             success=False,
             xbox_info=None,
             match_type="no_match",
-            message=error_msg
+            message=detailed_error_msg
         )
 
 
@@ -1083,15 +1088,16 @@ async def _smart_match_xbox_with_wakeup(
     stream_logger,
     wakeup_enabled: bool = True,
     wakeup_timeout: int = 30
-) -> Optional[XboxInfo]:
+) -> XboxMatchResult:
     """
     智能匹配 Xbox 主机（包含自动唤醒功能）
     
-    流程：
-    1. 获取云端授权的 Xbox 主机列表
-    2. 发现本地在线的 Xbox 主机
-    3. 智能匹配优先级
-    4. 如果是待机状态，自动唤醒
+    优化后的匹配流程：
+    1. 获取云端授权的 Xbox 主机列表（必须至少有一个）
+    2. 发现局域网内的在线 Xbox 主机
+    3. 过滤出同时在云端授权和局域网在线的 Xbox 主机（必须至少有一个）
+    4. 如果有多个符合条件的主机，随机选择一个
+    5. 如果选中的是待机状态，自动唤醒
     
     Args:
         context: 任务上下文
@@ -1102,7 +1108,7 @@ async def _smart_match_xbox_with_wakeup(
         wakeup_timeout: 唤醒超时时间（秒）
         
     Returns:
-        XboxInfo 或 None
+        XboxMatchResult: 包含匹配结果或详细错误信息的对象
     """
     try:
         matcher = XboxHostMatcher(gs_token)
@@ -1120,9 +1126,36 @@ async def _smart_match_xbox_with_wakeup(
             wakeup_timeout=wakeup_timeout
         )
         
-        if not match_result:
-            logger.warning("\n没有找到可用的授权 Xbox 主机")
-            return None
+        # 处理匹配结果
+        if not match_result or not match_result.xbox_info:
+            # 匹配失败，记录详细错误信息
+            error_code = match_result.error_code if match_result else "UNKNOWN"
+            error_reason = match_result.match_reason if match_result else "未知错误"
+            
+            logger.error("\n" + "="*60)
+            logger.error("Xbox 主机匹配失败")
+            logger.error("="*60)
+            logger.error(f"错误码: {error_code}")
+            logger.error(f"失败原因: {error_reason}")
+            
+            # 根据错误码生成详细的解决方案
+            if match_result and match_result.error_details:
+                logger.error("\n详细信息:")
+                for key, value in match_result.error_details.items():
+                    logger.error(f"  {key}: {value}")
+                
+                if "suggestion" in match_result.error_details:
+                    logger.error(f"\n解决方案: {match_result.error_details['suggestion']}")
+            
+            logger.error("="*60)
+            
+            # 记录到流媒体账号日志
+            stream_logger.error(f"Xbox 主机匹配失败: {error_reason}")
+            if match_result and match_result.error_details:
+                if "suggestion" in match_result.error_details:
+                    stream_logger.error(f"解决方案: {match_result.error_details['suggestion']}")
+            
+            return match_result
         
         xbox = match_result.xbox_info
         
@@ -1130,7 +1163,7 @@ async def _smart_match_xbox_with_wakeup(
         logger.info("Xbox 主机匹配结果")
         logger.info("="*60)
         logger.info(f"设备名称: {xbox.name}")
-        logger.info(f"设备 ID: {xbox.device_id}")
+        logger.info(f"设备 ID: {xbox.device_id[:16]}...")
         logger.info(f"本地 IP: {xbox.ip_address or '未知'}")
         logger.info(f"主机类型: {xbox.console_type}")
         logger.info(f"电源状态: {xbox.power_state}")
@@ -1138,11 +1171,20 @@ async def _smart_match_xbox_with_wakeup(
         logger.info(f"匹配原因: {match_result.match_reason}")
         logger.info("="*60)
         
-        return xbox
+        stream_logger.info(f"Xbox 主机匹配成功: {xbox.name}")
+        return match_result
         
     except Exception as e:
         logger.error(f"智能匹配 Xbox 失败: {e}", exc_info=True)
-        return None
+        stream_logger.error(f"智能匹配 Xbox 失败: {e}")
+        
+        # 返回包含错误信息的 XboxMatchResult
+        return XboxMatchResult(
+            xbox_info=None,
+            match_reason=f"智能匹配异常: {str(e)}",
+            error_code="SMART_MATCH_EXCEPTION",
+            error_details={"exception": str(e)}
+        )
 
 
 async def _wakeup_assigned_xbox(
@@ -1178,18 +1220,83 @@ async def _wakeup_assigned_xbox(
         )
 
 
-def _print_no_match_help(logger):
-    """打印无可用 Xbox 的帮助信息"""
-    logger.warning("\n可能的原因:")
-    logger.warning("1. 流媒体账号未绑定任何 Xbox 主机")
-    logger.warning("   → 请在 Xbox 应用中添加并授权此账号")
-    logger.warning("")
-    logger.warning("2. Xbox 主机未连接到网络")
-    logger.warning("   → 检查 Xbox 网络设置")
-    logger.warning("")
-    logger.warning("3. Xbox 主机处于 Energy-Saving 模式")
-    logger.warning("   → 请改为 Instant-On 模式（设置 > 电源 > 启动模式）")
-    logger.warning("")
-    logger.warning("4. gsToken 已过期，需要重新认证")
-    logger.warning("   → 重新运行步骤一进行账号登录")
+def _print_no_match_help(logger, error_code: str = "", error_details: Dict[str, Any] = None):
+    """打印无可用 Xbox 的帮助信息
+    
+    Args:
+        logger: 日志记录器
+        error_code: 错误码
+        error_details: 错误详情字典
+    """
+    if error_details is None:
+        error_details = {}
+    
+    logger.warning("\n" + "="*60)
+    logger.warning("Xbox 主机匹配失败 - 可能的原因和解决方案")
+    logger.warning("="*60)
+    
+    if error_code == "CLOUD_NO_AUTHORIZED":
+        logger.warning("\n原因: 云端未发现已授权的 Xbox 主机")
+        logger.warning("\n解决方案:")
+        logger.warning("1. 请在 Xbox 应用中添加并授权此流媒体账号")
+        logger.warning("   - 打开 Xbox 应用")
+        logger.warning("   - 进入 '连接' 页面")
+        logger.warning("   - 添加并授权您的 Xbox 主机")
+        logger.warning("")
+        logger.warning("2. 确保 Xbox 主机已绑定到您的 Microsoft 账号")
+        logger.warning("")
+        logger.warning("3. 检查账号是否有权限访问该 Xbox 主机")
+        logger.warning("")
+        logger.warning("4. 确认流媒体账号已正确登录")
+    elif error_code == "NO_LOCAL_MATCH":
+        cloud_count = error_details.get("cloud_authorized_count", 0)
+        online_count = error_details.get("local_online_count", 0)
+        standby_count = error_details.get("local_standby_count", 0)
+        offline_count = error_details.get("local_offline_count", 0)
+        
+        logger.warning(f"\n原因: 云端授权 {cloud_count} 台，但局域网只有 {online_count} 台在线")
+        logger.warning("\n解决方案:")
+        logger.warning("1. 请确保 Xbox 主机已开机")
+        logger.warning("")
+        logger.warning("2. 检查 Xbox 网络设置:")
+        logger.warning("   - 确保 Xbox 和 PC 在同一局域网")
+        logger.warning("   - 检查 Xbox 的网络连接状态")
+        logger.warning("")
+        logger.warning("3. 如果 Xbox 处于待机模式，确保已开启远程唤醒功能")
+        logger.warning("")
+        logger.warning("4. 检查 Xbox 电源模式设置（建议使用 Instant-On）:")
+        logger.warning("   - 设置 > 电源 > 启动模式")
+        logger.warning("   - 选择 '即时开启'")
+    elif error_code == "WAKEUP_FAILED":
+        xbox_name = error_details.get("xbox_name", "未知")
+        logger.warning(f"\n原因: Xbox {xbox_name} 唤醒失败")
+        logger.warning("\n解决方案:")
+        logger.warning("1. 手动开机 Xbox 主机")
+        logger.warning("")
+        logger.warning("2. 检查 Xbox 网络设置，确保 Xbox 可被远程唤醒")
+        logger.warning("")
+        logger.warning("3. 检查 Xbox 电源模式，确保不是 '节能' 模式")
+    elif error_code == "WAKEUP_DISABLED":
+        xbox_name = error_details.get("xbox_name", "未知")
+        logger.warning(f"\n原因: Xbox {xbox_name} 处于待机模式，唤醒功能已禁用")
+        logger.warning("\n解决方案:")
+        logger.warning("1. 手动开机 Xbox 主机")
+        logger.warning("")
+        logger.warning("2. 或重新启动任务并启用唤醒功能")
+    else:
+        logger.warning("\n原因: 没有找到可用的授权 Xbox 主机")
+        logger.warning("\n可能的原因:")
+        logger.warning("1. 流媒体账号未绑定任何 Xbox 主机")
+        logger.warning("   → 请在 Xbox 应用中添加并授权此账号")
+        logger.warning("")
+        logger.warning("2. Xbox 主机未连接到网络")
+        logger.warning("   → 检查 Xbox 网络设置")
+        logger.warning("")
+        logger.warning("3. Xbox 主机处于 Energy-Saving 模式")
+        logger.warning("   → 请改为 Instant-On 模式（设置 > 电源 > 启动模式）")
+        logger.warning("")
+        logger.warning("4. gsToken 已过期，需要重新认证")
+        logger.warning("   → 重新运行步骤一进行账号登录")
+    
+    logger.warning("="*60)
 

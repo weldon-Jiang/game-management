@@ -25,7 +25,7 @@
 
 ```bash
 git clone <repository-url>
-cd bend-platform
+cd team-management
 ```
 
 ### 2. 初始化数据库
@@ -34,18 +34,37 @@ cd bend-platform
 # 登录 MySQL
 mysql -u root -p
 
-# 执行建表脚本
-source db/schema.sql
+# 创建数据库并执行建表脚本
+CREATE DATABASE bend_platform CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE bend_platform;
+SOURCE bend-platform/db/schema.sql;
 ```
 
-### 3. 启动后端
+### 3. Docker Compose 启动（推荐）
+
+```bash
+cd docker
+docker compose -f docker-compose.yml --profile full up -d --build
+```
+
+### 4. 本地开发启动
+
+**后端**（默认端口 8061）:
 
 ```bash
 cd bend-platform
+cp .env.example .env
 mvn spring-boot:run
 ```
 
-### 4. 启动前端
+**网关**（默认端口 8060，Agent 与前端 API 统一入口）:
+
+```bash
+cd bend-gateway
+mvn spring-boot:run
+```
+
+**前端**（默认端口 3090，API 代理到网关 8060）:
 
 ```bash
 cd bend-platform-web
@@ -55,9 +74,10 @@ npm run dev
 
 ### 5. 访问系统
 
-- 前端: http://localhost:5173
-- 后端: http://localhost:8090
-- API文档: http://localhost:8090/swagger-ui.html
+- 前端: http://localhost:3090
+- 网关（API/WebSocket）: http://localhost:8060
+- 后端（内部）: http://localhost:8061
+- API文档: http://localhost:8061/swagger-ui.html
 
 ---
 
@@ -141,7 +161,15 @@ bend-platform/
 │   └── mapper/         # MyBatis XML
 │
 └── db/
-    └── schema.sql      # 数据库建表脚本
+    ├── schema.sql      # 数据库建表脚本（SSOT）
+    └── migration/      # 增量迁移脚本
+```
+
+### 网关 (bend-gateway)
+
+```
+bend-gateway/
+└── src/main/resources/application.yml  # /api/**、/ws/** → backend:8061
 ```
 
 ### 前端 (bend-platform-web)
@@ -403,7 +431,7 @@ CREATE DATABASE bend_platform CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE bend_platform;
 
 # 执行建表脚本
-SOURCE db/schema.sql;
+SOURCE bend-platform/db/schema.sql;
 ```
 
 ### 主要表结构
@@ -531,16 +559,15 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # API代理
+    # API/WebSocket 代理到网关
     location /api {
-        proxy_pass http://127.0.0.1:8090;
+        proxy_pass http://127.0.0.1:8060;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
-    # WebSocket代理
     location /ws {
-        proxy_pass http://127.0.0.1:8090;
+        proxy_pass http://127.0.0.1:8060;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";

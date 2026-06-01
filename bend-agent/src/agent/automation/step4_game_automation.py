@@ -37,7 +37,7 @@ import asyncio
 from typing import Callable, Dict, Any, Optional
 
 from ..core.logger import get_logger
-from ..core.account_logger import get_game_logger
+from ..core.account_logger import get_game_logger, get_stream_logger
 from ..task.task_context import (
     AgentTaskContext,
     Step4Result,
@@ -47,6 +47,32 @@ from ..task.task_context import (
 
 automation_engine = None
 account_switcher = None
+
+VALID_TASK_TYPES = frozenset({'daily_match', 'training', 'mission', 'custom'})
+
+
+def _normalize_task_type(task_type: Optional[str]) -> str:
+    if task_type and task_type in VALID_TASK_TYPES:
+        return task_type
+    return 'daily_match'
+
+
+def _apply_task_type(context: AgentTaskContext, game_account: GameAccountInfo, logger) -> None:
+    """
+    Apply platform game action type after login is confirmed (AGENTS R006/R007).
+
+    Only adjusts per-account match plan; navigation differences can extend here.
+    """
+    task_type = _normalize_task_type(context.task_type)
+    if task_type == 'training':
+        game_account.target_matches = min(game_account.target_matches, 1)
+        logger.info("任务类型 training: 单账号执行训练模式（1场）")
+    elif task_type == 'mission':
+        logger.info("任务类型 mission: 执行任务挑战模式")
+    elif task_type == 'custom':
+        logger.info("任务类型 custom: 使用平台自定义操作配置")
+    else:
+        logger.info("任务类型 daily_match: 执行每日比赛模式")
 
 
 async def step4_execute_gaming(
@@ -85,7 +111,9 @@ async def step4_execute_gaming(
     global automation_engine, account_switcher
 
     logger = get_logger(f'step4_game_{context.task_id}')
+    stream_logger = get_stream_logger(context.streaming_account_email)
     logger.info("=== 步骤四：开始自动操作Xbox主机 ===")
+    logger.info(f"游戏操作类型 (task_type): {_normalize_task_type(context.task_type)}")
 
     if context.frame_capture is None:
         error_msg = "步骤三未初始化画面捕获器，无法执行游戏自动化"
@@ -162,6 +190,31 @@ async def step4_execute_gaming(
                 logger.warning(f"账号切换失败: {switch_result.error_message}")
                 game_logger.warning(f"账号切换失败: {switch_result.error_message}")
                 stream_logger.warning(f"游戏账号 {game_account.gamertag} 切换失败: {switch_result.error_message}")
+                continue
+
+            login_confirmed = await _detect_screen_state(
+                context, "MAIN_MENU", logger, game_logger
+            )
+            if not login_confirmed:
+                msg = f"账号 {game_account.gamertag} 登录未确认，跳过该账号"
+                logger.warning(msg)
+                game_logger.warning(msg)
+                stream_logger.warning(msg)
+                await report_progress(
+                    context.task_id, "STEP4", "RUNNING", msg,
+                    {
+                        "gameAccountId": game_account.id,
+                        "gameAccountName": game_account.gamertag,
+                        "matchStatus": "LOGIN_UNCONFIRMED",
+                    }
+                )
+                continue
+
+            _apply_task_type(context, game_account, logger)
+            stream_logger.info(
+                f"账号 {game_account.gamertag} 登录已确认，应用任务类型: "
+                f"{_normalize_task_type(context.task_type)}"
+            )
 
             await asyncio.sleep(2.0)
 
@@ -485,7 +538,6 @@ async def _enter_match(
     """
     logger.info(f"进入比赛准备: {game_account.gamertag}")
     game_logger.info("[场景: MAIN_MENU] 进入比赛准备")
-    stream_logger.info(f"游戏账号 {game_account.gamertag} 进入比赛准备")
 
     screen_detected = await _detect_screen_state(
         context, "MAIN_MENU", logger, game_logger
@@ -526,7 +578,6 @@ async def _wait_for_match_start(
     """
     logger.info(f"比赛正式开始: {game_account.gamertag}")
     game_logger.info("[场景: MATCHMAKING] 比赛正式开始")
-    stream_logger.info(f"游戏账号 {game_account.gamertag} 比赛正式开始")
 
     match_started = await _wait_for_match_started(
         context, logger, game_logger
@@ -635,7 +686,6 @@ async def _finish_match(
     """
     logger.info(f"比赛结束: {game_account.gamertag}")
     game_logger.info("[场景: MATCH_END] 比赛结束")
-    stream_logger.info(f"游戏账号 {game_account.gamertag} 比赛结束")
 
     await _skip_settlement(context, logger, game_logger)
 

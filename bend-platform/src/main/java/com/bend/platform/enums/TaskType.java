@@ -5,6 +5,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 
+/**
+ * Agent WebSocket task routing channel (which handler executes the task).
+ *
+ * @see GameActionType Step4 game automation mode (daily_match, training, etc.)
+ */
 public enum TaskType {
 
     STREAM_CONTROL("stream_control", "流媒体控制"),
