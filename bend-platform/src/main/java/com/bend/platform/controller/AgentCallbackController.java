@@ -92,7 +92,7 @@ public class AgentCallbackController {
                 return ApiResponse.error(400, "taskId和status为必需字段");
             }
 
-            Task task = taskService.findById(taskId);
+            Task task = findTaskForAgentCallback(taskId);
             if (task == null) {
                 return ApiResponse.error(404, "任务不存在");
             }
@@ -295,7 +295,16 @@ public class AgentCallbackController {
         if (task.getStreamingAccountId() != null) {
             streamingAccountService.updateAgentId(task.getStreamingAccountId(), null);
             streamingAccountService.updateTaskStatus(task.getStreamingAccountId(), "idle");
+            List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(task.getStreamingAccountId());
+            for (GameAccount gameAccount : gameAccounts) {
+                gameAccountService.updateStatus(gameAccount.getId(), "idle");
+                gameAccountService.updateAgentId(gameAccount.getId(), null);
+            }
         }
+    }
+
+    private Task findTaskForAgentCallback(String taskId) {
+        return taskMapper.selectById(taskId);
     }
 
     /**
@@ -308,7 +317,7 @@ public class AgentCallbackController {
     public ApiResponse<Map<String, Object>> getTaskInfo(@PathVariable String taskId) {
         log.info("【v2.0】获取任务信息 - TaskID: {}", taskId);
 
-        Task task = taskService.findById(taskId);
+        Task task = findTaskForAgentCallback(taskId);
         if (task == null) {
             return ApiResponse.error(404, "任务不存在");
         }
@@ -500,7 +509,7 @@ public class AgentCallbackController {
         String status = payload.get("status");
         String message = payload.get("message");
 
-        Task task = taskService.findById(taskId);
+        Task task = findTaskForAgentCallback(taskId);
         if (task == null) {
             return ApiResponse.error(404, "任务不存在");
         }
@@ -539,7 +548,7 @@ public class AgentCallbackController {
                 ? ((Number) payload.get("dailyLimit")).intValue()
                 : null;
 
-        Task task = taskService.findById(taskId);
+        Task task = findTaskForAgentCallback(taskId);
         if (task == null) {
             return ApiResponse.error(404, "任务不存在");
         }
@@ -575,7 +584,7 @@ public class AgentCallbackController {
     public ApiResponse<List<Map<String, Object>>> getGameAccountsStatus(@PathVariable String taskId) {
         log.warn("【deprecated】使用旧接口 getGameAccountsStatus，请迁移至 /api/v1/agent-callback/task/{taskId}");
 
-        Task task = taskService.findById(taskId);
+        Task task = findTaskForAgentCallback(taskId);
         if (task == null) {
             return ApiResponse.error(404, "任务不存在");
         }

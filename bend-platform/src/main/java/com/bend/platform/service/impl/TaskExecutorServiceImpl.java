@@ -133,6 +133,9 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
         taskData.put("taskId", task.getId());
         taskData.put("type", task.getType());
         taskData.put("streamingAccountId", task.getStreamingAccountId());
+        if (task.getGameActionType() != null && !task.getGameActionType().isEmpty()) {
+            taskData.put("gameActionType", task.getGameActionType());
+        }
 
         com.fasterxml.jackson.databind.node.ArrayNode gameAccountList = objectMapper.createArrayNode();
         for (GameAccount ga : gameAccounts) {

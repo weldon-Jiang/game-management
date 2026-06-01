@@ -79,10 +79,12 @@ class BaseAutomationTask(ABC):
         """上报任务状态到平台"""
         self.status = status
         try:
-            await self.platform_client.report_task_status(
+            step_name = self.current_step or 'TASK'
+            await self.platform_client.report_progress(
                 self.task_id,
-                status.value,
-                message
+                step_name,
+                status.value.upper() if isinstance(status.value, str) else status.value,
+                message or ''
             )
             self.logger.debug(f"上报任务状态: {status.value}, 消息: {message}")
         except Exception as e:
@@ -94,7 +96,7 @@ class BaseAutomationTask(ABC):
         self.step_status[step_name] = status.value
         
         try:
-            await self.platform_client.report_task_progress(
+            await self.platform_client.report_progress(
                 self.task_id,
                 step_name,
                 status.value,
@@ -109,12 +111,15 @@ class BaseAutomationTask(ABC):
                                     daily_limit: Optional[int] = None):
         """上报子任务状态到平台"""
         try:
-            await self.platform_client.update_game_account_status(
+            step_name = self.current_step or 'TASK'
+            await self.platform_client.report_progress(
                 self.task_id,
-                subtask_id,
-                status,
-                today_completed,
-                daily_limit
+                step_name,
+                status.upper(),
+                f"游戏账号状态更新",
+                game_account_id=subtask_id,
+                today_completed=today_completed,
+                daily_limit=daily_limit
             )
             self.logger.debug(f"上报子任务状态: {subtask_id} -> {status}")
         except Exception as e:

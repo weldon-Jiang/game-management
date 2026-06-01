@@ -37,6 +37,7 @@ from typing import Callable, Optional, Dict, Any, List
 from ..core.logger import get_logger
 from ..core.account_logger import get_stream_logger
 from ..task.task_context import AgentTaskContext, Step2Result, XboxInfo, TaskStepStatus
+from ..xbox.xbox_host_matcher import XboxHostMatcher
 
 
 class XboxMatchResult:
@@ -77,7 +78,24 @@ async def step2_execute_streaming(
     stream_logger = get_stream_logger(context.streaming_account_email)
     logger.info("=== 步骤二：开始Xbox串流连接 ===")
     stream_logger.info("=== 开始Xbox串流连接 ===")
-
+    
+    logger.info("=== Token 验证 ===")
+    logger.info(f"context.microsoft_tokens: {context.microsoft_tokens is not None}")
+    logger.info(f"context.xbox_tokens: {context.xbox_tokens is not None}")
+    if context.microsoft_tokens:
+        if hasattr(context.microsoft_tokens, 'access_token'):
+            logger.info(f"microsoft_tokens.access_token 存在，长度: {len(context.microsoft_tokens.access_token) if context.microsoft_tokens.access_token else 0}")
+        else:
+            logger.warning("microsoft_tokens 对象没有 access_token 属性")
+    if context.xbox_tokens:
+        if hasattr(context.xbox_tokens, 'user_token'):
+            logger.info(f"xbox_tokens.user_token 存在，长度: {len(context.xbox_tokens.user_token) if context.xbox_tokens.user_token else 0}")
+        if hasattr(context.xbox_tokens, 'xsts_token'):
+            logger.info(f"xbox_tokens.xsts_token 存在，长度: {len(context.xbox_tokens.xsts_token) if context.xbox_tokens.xsts_token else 0}")
+        if hasattr(context.xbox_tokens, 'user_hash'):
+            logger.info(f"xbox_tokens.user_hash: {context.xbox_tokens.user_hash}")
+    logger.info("=== Token 验证完成 ===")
+    
     context.update_step_status("step2", TaskStepStatus.RUNNING, "正在匹配Xbox主机...")
     await report_progress(context.task_id, "STEP2", "RUNNING", "正在匹配Xbox主机...")
 
@@ -197,29 +215,45 @@ async def _match_xbox_host(
     check_cancel: Callable[[], bool]
 ) -> XboxMatchResult:
     """
-    匹配Xbox主机
-
-    匹配逻辑：
-    1. 如果指定了Xbox主机，直接使用
-    2. 如果未指定，发现在线Xbox并匹配
-    3. 多匹配时随机选择
-
+    匹配Xbox主机（智能匹配 + 自动唤醒）
+    
+    优化逻辑：
+    1. 如果指定了Xbox主机，验证授权并检测是否需要唤醒
+    2. 如果未指定，使用智能匹配：
+       a) 先获取云端授权的 Xbox 列表
+       b) 再发现本地在线的 Xbox
+       c) 智能匹配并返回最优选择
+       d) 如果是待机状态，自动唤醒
+    
     参数：
     - context: 任务上下文
     - logger: 主日志记录器
     - stream_logger: 流媒体账号日志记录器
     - check_cancel: 取消检查函数
-
+    
     返回：
     - XboxMatchResult: 包含匹配结果的对象
     """
+    gs_token = _get_gs_token(context)
+    
+    if not gs_token:
+        error_msg = "无可用的 gsToken，无法进行 Xbox 匹配"
+        logger.error(error_msg)
+        return XboxMatchResult(
+            success=False,
+            xbox_info=None,
+            match_type="no_token",
+            message=error_msg
+        )
+    
     if context.assigned_xbox:
         logger.info(f"使用指定的Xbox主机: {context.assigned_xbox.name} "
                    f"({context.assigned_xbox.ip_address})")
         stream_logger.info(f"使用指定的Xbox主机: {context.assigned_xbox.name}")
-
+        
         online = await _test_xbox_connection(context.assigned_xbox.ip_address, logger)
         if online:
+            logger.info("指定的 Xbox 主机在线")
             return XboxMatchResult(
                 success=True,
                 xbox_info=context.assigned_xbox,
@@ -227,56 +261,80 @@ async def _match_xbox_host(
                 message="使用指定的Xbox主机"
             )
         else:
+            logger.warning(f"指定的Xbox主机不在线: {context.assigned_xbox.ip_address}")
+            
+            if context.assigned_xbox.power_state == "Standby":
+                logger.info("Xbox 处于待机模式，尝试唤醒...")
+                wakeup_result = await _wakeup_assigned_xbox(
+                    gs_token, 
+                    context.assigned_xbox, 
+                    logger
+                )
+                
+                if wakeup_result.success:
+                    logger.info(f"✓ Xbox 唤醒成功: {context.assigned_xbox.name}")
+                    return XboxMatchResult(
+                        success=True,
+                        xbox_info=context.assigned_xbox,
+                        match_type="assigned_wakeup",
+                        message=f"唤醒 Xbox 成功: {context.assigned_xbox.name}"
+                    )
+                else:
+                    error_msg = f"唤醒 Xbox 失败: {wakeup_result.error_message}"
+                    logger.error(error_msg)
+                    return XboxMatchResult(
+                        success=False,
+                        xbox_info=None,
+                        match_type="assigned_wakeup_failed",
+                        message=error_msg
+                    )
+            
             return XboxMatchResult(
                 success=False,
                 xbox_info=None,
                 match_type="assigned",
                 message=f"指定的Xbox主机不在线: {context.assigned_xbox.ip_address}"
             )
-
-    logger.info("未指定Xbox主机，开始自动匹配...")
-    stream_logger.info("未指定Xbox主机，开始自动匹配...")
-    discovered_xboxes = await _discover_xbox_devices(logger)
-
-    if not discovered_xboxes:
+    
+    logger.info("未指定Xbox主机，开始智能匹配...")
+    stream_logger.info("未指定Xbox主机，开始智能匹配...")
+    
+    xbox_info = await _smart_match_xbox_with_wakeup(
+        context, 
+        gs_token, 
+        logger, 
+        stream_logger,
+        wakeup_enabled=True,
+        wakeup_timeout=30
+    )
+    
+    if xbox_info:
+        stream_logger.info(f"智能匹配成功: {xbox_info.name}")
+        return XboxMatchResult(
+            success=True,
+            xbox_info=xbox_info,
+            match_type="smart_matched",
+            message=f"智能匹配 Xbox: {xbox_info.name}"
+        )
+    else:
+        error_msg = "没有找到可用的授权 Xbox 主机"
+        _print_no_match_help(logger)
         return XboxMatchResult(
             success=False,
             xbox_info=None,
-            match_type="discover",
-            message="局域网未发现Xbox主机"
+            match_type="no_match",
+            message=error_msg
         )
 
-    logger.info(f"发现 {len(discovered_xboxes)} 个Xbox主机")
-    stream_logger.info(f"发现 {len(discovered_xboxes)} 个Xbox主机")
 
-    if len(discovered_xboxes) == 1:
-        selected = discovered_xboxes[0]
-        logger.info(f"只有一台Xbox，直接选择: {selected.name}")
-        stream_logger.info(f"只有一台Xbox，直接选择: {selected.name}")
-        return XboxMatchResult(
-            success=True,
-            xbox_info=selected,
-            match_type="discovered",
-            message=f"发现Xbox: {selected.name}"
-        )
-
-    selected = random.choice(discovered_xboxes)
-    logger.info(f"多台Xbox，随机选择: {selected.name} ({selected.ip_address})")
-    stream_logger.info(f"多台Xbox，随机选择: {selected.name}")
-    return XboxMatchResult(
-        success=True,
-        xbox_info=selected,
-        match_type="random_selected",
-        message=f"随机选择Xbox: {selected.name}"
-    )
-
-
-async def _discover_xbox_devices(logger) -> List[XboxInfo]:
+async def _discover_xbox_devices(context: AgentTaskContext, logger, stream_logger) -> List[XboxInfo]:
     """
     发现局域网中的Xbox设备
 
     参数：
+    - context: 任务上下文（包含认证 token）
     - logger: 日志记录器
+    - stream_logger: 流媒体账号日志记录器
 
     返回：
     - List[XboxInfo]: Xbox设备列表
@@ -285,7 +343,32 @@ async def _discover_xbox_devices(logger) -> List[XboxInfo]:
         from ..xbox.xbox_discovery import XboxDiscovery
 
         discovery = XboxDiscovery()
-        devices = await discovery.discover()
+
+        gs_token = None
+        
+        if context.xbox_tokens:
+            if hasattr(context.xbox_tokens, 'gs_token') and context.xbox_tokens.gs_token:
+                gs_token = context.xbox_tokens.gs_token
+                logger.info(f"从 xbox_tokens 获取 gs_token 成功，长度: {len(gs_token)}")
+            else:
+                logger.warning("xbox_tokens 存在但无有效的 gs_token")
+        elif context.microsoft_tokens:
+            if hasattr(context.microsoft_tokens, 'access_token') and context.microsoft_tokens.access_token:
+                gs_token = context.microsoft_tokens.access_token
+                logger.warning("使用旧的 access_token（不是 gs_token），Xbox Live API 可能返回 401")
+                logger.info(f"从 microsoft_tokens 获取 access_token 成功，长度: {len(gs_token)}")
+            else:
+                logger.warning("microsoft_tokens 存在但无有效的 access_token")
+        else:
+            logger.warning("context.microsoft_tokens 和 xbox_tokens 都为空")
+            
+        if gs_token:
+            logger.info("已获取 gs_token，将使用云端发现Xbox")
+            discovery.set_access_token(gs_token)
+        else:
+            logger.warning("无可用访问令牌，云端发现将被跳过，只能使用SSDP/局域网发现")
+
+        devices = await discovery.discover(use_cloud_first=True)
 
         xbox_list = []
         for device in devices:
@@ -386,22 +469,30 @@ async def _connect_to_xbox(context: AgentTaskContext, logger, stream_logger) -> 
         xbox_info = context.current_xbox
         xbox_token = context.xbox_tokens.xsts_token
         user_hash = context.xbox_tokens.user_hash
+        
+        xbox_port = getattr(xbox_info, 'port', 5050)
+        
+        logger.info("┌─────────────────────────────────────────────────────────────┐")
+        logger.info("│ 步骤2.0: 连接 Xbox 主机                                    │")
+        logger.info("└─────────────────────────────────────────────────────────────┘")
+        logger.info(f"目标 Xbox: {xbox_info.name} ({xbox_info.ip_address}:{xbox_port})")
+        logger.info(f"用户哈希: {user_hash[:20]}...")
+        stream_logger.info(f"开始连接Xbox: {xbox_info.name} ({xbox_info.ip_address}:{xbox_port})")
 
-        logger.info(f"开始连接Xbox: {xbox_info.ip_address}")
-        stream_logger.info(f"开始连接Xbox: {xbox_info.name} ({xbox_info.ip_address})")
-
+        logger.info("执行 SmartGlass Token 握手...")
         success = await xbox_controller.connect_with_token(
             xbox_ip=xbox_info.ip_address,
             xbox_token=xbox_token,
-            user_hash=user_hash
+            user_hash=user_hash,
+            port=xbox_port
         )
 
         if not success:
-            logger.error(f"Xbox连接失败: {xbox_info.ip_address}")
+            logger.error(f"Xbox SmartGlass 连接失败: {xbox_info.ip_address}")
             stream_logger.error(f"Xbox连接失败: {xbox_info.ip_address}")
             return False, connect_details
 
-        logger.info(f"Xbox基础连接成功: {xbox_info.name}")
+        logger.info(f"✓ Xbox SmartGlass 连接成功: {xbox_info.name}")
         stream_logger.info(f"Xbox基础连接成功: {xbox_info.name}")
 
         play_session_success = await _create_play_session(
@@ -417,15 +508,31 @@ async def _connect_to_xbox(context: AgentTaskContext, logger, stream_logger) -> 
             logger.warning(f"PlaySession创建失败，将使用基础连接: {xbox_info.name}")
             stream_logger.warning(f"PlaySession未启用")
 
-        logger.info(f"Xbox连接成功: {xbox_info.name}")
+        logger.info(f"✓ Xbox 连接成功: {xbox_info.name}")
         stream_logger.info(f"Xbox连接成功: {xbox_info.name}")
 
+        logger.info("┌─────────────────────────────────────────────────────────────┐")
+        logger.info("│ 步骤2.4: 初始化 GPU 解码器                                  │")
+        logger.info("└─────────────────────────────────────────────────────────────┘")
         gpu_success = await _init_gpu_decoder(context, logger, stream_logger)
         connect_details["gpuAvailable"] = gpu_success
         connect_details["gpuType"] = getattr(context, '_gpu_type', 'cpu')
         
+        if gpu_success:
+            logger.info(f"✓ GPU 解码器初始化成功: {getattr(context, '_gpu_type', 'unknown')}")
+        else:
+            logger.warning("✗ GPU 解码器初始化失败，将使用 CPU 解码")
+        
+        logger.info("┌─────────────────────────────────────────────────────────────┐")
+        logger.info("│ 步骤2.5: 启动视频接收器                                     │")
+        logger.info("└─────────────────────────────────────────────────────────────┘")
         video_success = await _start_video_receiver(context, logger, stream_logger)
         connect_details["videoMode"] = getattr(context, '_video_mode', 'win32gui')
+        
+        if video_success:
+            logger.info(f"✓ 视频接收器启动成功: {getattr(context, '_video_mode', 'unknown')}")
+        else:
+            logger.warning("✗ 视频接收器启动失败")
 
         return True, connect_details
 
@@ -452,9 +559,15 @@ async def _create_play_session(context: AgentTaskContext, logger, stream_logger)
     创建PlaySession（参考streaming项目）
 
     功能说明：
-    - 使用Xbox Live API创建流播放会话
-    - 支持WebRTC SDP握手
-    - 管理会话生命周期
+    - 使用 Xbox Live 云端 API 发现主机
+    - 创建流播放会话并轮询 Provisioned 状态
+    - 支持 WebRTC SDP 握手
+
+    优化点：
+    1. 优先使用 Xbox Live 云端 API 发现主机
+    2. 使用 play_path 动态构建会话创建URL
+    3. 轮询等待 Provisioned 状态
+    4. SDP 响应从 exchangeResponse.sdp 提取
 
     参数：
     - context: 任务上下文
@@ -468,17 +581,21 @@ async def _create_play_session(context: AgentTaskContext, logger, stream_logger)
         from ..xbox.play_session import XboxPlaySessionManager, PlaySessionConfig
         from ..xbox.webrtc_handler import XboxWebRTCHandler, WebRTCConfig
 
-        logger.info("开始创建PlaySession...")
+        logger.info("┌─────────────────────────────────────────────────────────────┐")
+        logger.info("│ 步骤2.1: 创建 PlaySession                                    │")
+        logger.info("└─────────────────────────────────────────────────────────────┘")
         stream_logger.info("开始创建PlaySession...")
 
         play_session_mgr = XboxPlaySessionManager()
         context._play_session_manager = play_session_mgr
 
         ms_token = None
-        if context.microsoft_tokens and hasattr(context.microsoft_tokens, 'access_token'):
+        if context.xbox_tokens and hasattr(context.xbox_tokens, 'gs_token') and context.xbox_tokens.gs_token:
+            ms_token = context.xbox_tokens.gs_token
+            logger.info(f"从 xbox_tokens 获取 gs_token 用于 PlaySession，长度: {len(ms_token)}")
+        elif context.microsoft_tokens and hasattr(context.microsoft_tokens, 'access_token'):
             ms_token = context.microsoft_tokens.access_token
-        elif context.xbox_tokens and hasattr(context.xbox_tokens, 'access_token'):
-            ms_token = context.xbox_tokens.access_token
+            logger.warning("使用旧的 access_token 用于 PlaySession")
 
         if not ms_token:
             logger.warning("无可用的访问令牌，跳过PlaySession创建")
@@ -486,25 +603,45 @@ async def _create_play_session(context: AgentTaskContext, logger, stream_logger)
 
         play_session_mgr.set_access_token(ms_token)
 
+        logger.info("通过 Xbox Live API 发现服务器...")
         servers = await play_session_mgr.discover_servers()
         if not servers:
             logger.warning("未发现Xbox服务器，可能不在Xbox Live网络中")
             return False
 
-        server_id = servers[0].get('serverId', '')
+        logger.info(f"发现 {len(servers)} 个Xbox服务器")
+        logger.info("┌─────────────────────────────────────────────────────────────┐")
+        logger.info("│ 步骤2.2: 选择并连接 Xbox 服务器                              │")
+        logger.info("└─────────────────────────────────────────────────────────────┘")
+
+        server = servers[0]
+        server_id = server.get('serverId', '')
+        play_path = server.get('playPath', '')
+
         if not server_id:
             logger.warning("服务器响应中无serverId")
             return False
 
-        logger.info(f"发现Xbox服务器: {server_id}")
-        stream_logger.info(f"发现Xbox服务器: {server_id}")
+        if not play_path:
+            logger.warning("服务器响应中无playPath")
+            return False
 
+        logger.info(f"选择Xbox服务器: serverId={server_id}, playPath={play_path}, "
+                   f"consoleType={server.get('consoleType', 'Unknown')}, "
+                   f"powerState={server.get('powerState', 'Unknown')}")
+        stream_logger.info(f"Xbox服务器: {server.get('consoleType', 'Xbox')} "
+                         f"({server.get('powerState', 'Unknown')})")
+
+        logger.info("创建 PlaySession 连接...")
         session = await play_session_mgr.create_session(
             server_id=server_id,
+            play_path=play_path,
             config=PlaySessionConfig(
                 nano_version="V3;WebrtcTransport.dll",
                 os_name="windows",
-                sdk_type="web"
+                sdk_type="web",
+                use_ice_connection=False,
+                locale="en-US"
             )
         )
 
@@ -512,19 +649,24 @@ async def _create_play_session(context: AgentTaskContext, logger, stream_logger)
             logger.warning("PlaySession创建失败")
             return False
 
-        logger.info(f"PlaySession创建成功: {session.session_id}")
+        logger.info(f"PlaySession创建成功: sessionId={session.session_id}, "
+                   f"sessionPath={session.session_path}")
         stream_logger.info(f"PlaySession创建成功: {session.session_id}")
-        
+
         context._play_session_manager = play_session_mgr
         context._play_session_session_id = session.session_id
-        
+        context._play_session_session_path = session.session_path
+
+        logger.info("┌─────────────────────────────────────────────────────────────┐")
+        logger.info("│ 步骤2.3: 执行 SDP 握手                                       │")
+        logger.info("└─────────────────────────────────────────────────────────────┘")
         sdp_success = await _exchange_sdp(
             context, session, logger, stream_logger
         )
         context._sdp_enabled = sdp_success
 
         if sdp_success:
-            logger.info("SDP握手成功")
+            logger.info("SDP握手成功 ✓")
             stream_logger.info("SDP握手成功")
         else:
             logger.warning("SDP握手失败，连接可能不稳定")
@@ -557,6 +699,11 @@ async def _exchange_sdp(context: AgentTaskContext, session, logger, stream_logge
     - 创建WebRTC Offer
     - 与Xbox交换SDP
     - 建立完整的WebRTC连接
+
+    优化点：
+    1. 直接使用 session 对象（已包含 session_path）
+    2. 支持异步 202 响应自动轮询
+    3. SDP 响应自动从 exchangeResponse.sdp 提取
 
     参数：
     - context: 任务上下文
@@ -594,10 +741,7 @@ async def _exchange_sdp(context: AgentTaskContext, session, logger, stream_logge
             logger.warning("无有效的PlaySession管理器，跳过SDP交换")
             return False
 
-        sdp_answer = await play_session_mgr.exchange_sdp(
-            session_id=session.session_id,
-            sdp_offer=sdp_offer
-        )
+        sdp_answer = await play_session_mgr.exchange_sdp()
 
         if not sdp_answer:
             logger.warning("SDP Answer获取失败")
@@ -921,3 +1065,131 @@ async def _release_xbox_host(context: AgentTaskContext):
                     await scheduler.release_xbox_host(xbox_host_id, context.task_id)
             except Exception as e:
                 logger.debug(f"更新本地调度器状态失败: {e}")
+
+
+def _get_gs_token(context: AgentTaskContext) -> Optional[str]:
+    """从上下文获取 gsToken"""
+    if context.xbox_tokens and hasattr(context.xbox_tokens, 'gs_token'):
+        return context.xbox_tokens.gs_token
+    elif context.microsoft_tokens:
+        return context.microsoft_tokens.access_token
+    return None
+
+
+async def _smart_match_xbox_with_wakeup(
+    context: AgentTaskContext,
+    gs_token: str,
+    logger,
+    stream_logger,
+    wakeup_enabled: bool = True,
+    wakeup_timeout: int = 30
+) -> Optional[XboxInfo]:
+    """
+    智能匹配 Xbox 主机（包含自动唤醒功能）
+    
+    流程：
+    1. 获取云端授权的 Xbox 主机列表
+    2. 发现本地在线的 Xbox 主机
+    3. 智能匹配优先级
+    4. 如果是待机状态，自动唤醒
+    
+    Args:
+        context: 任务上下文
+        gs_token: Xbox Live gsToken
+        logger: 日志记录器
+        stream_logger: 流媒体账号日志
+        wakeup_enabled: 是否启用自动唤醒
+        wakeup_timeout: 唤醒超时时间（秒）
+        
+    Returns:
+        XboxInfo 或 None
+    """
+    try:
+        matcher = XboxHostMatcher(gs_token)
+        
+        logger.info("="*60)
+        logger.info("Xbox 主机智能匹配（自动唤醒模式）")
+        logger.info("="*60)
+        logger.info(f"唤醒功能: {'启用' if wakeup_enabled else '禁用'}")
+        if wakeup_enabled:
+            logger.info(f"唤醒超时: {wakeup_timeout} 秒")
+        logger.info("")
+        
+        match_result = await matcher.find_best_match(
+            wakeup=wakeup_enabled,
+            wakeup_timeout=wakeup_timeout
+        )
+        
+        if not match_result:
+            logger.warning("\n没有找到可用的授权 Xbox 主机")
+            return None
+        
+        xbox = match_result.xbox_info
+        
+        logger.info("\n" + "="*60)
+        logger.info("Xbox 主机匹配结果")
+        logger.info("="*60)
+        logger.info(f"设备名称: {xbox.name}")
+        logger.info(f"设备 ID: {xbox.device_id}")
+        logger.info(f"本地 IP: {xbox.ip_address or '未知'}")
+        logger.info(f"主机类型: {xbox.console_type}")
+        logger.info(f"电源状态: {xbox.power_state}")
+        logger.info(f"匹配优先级: {match_result.priority.name}")
+        logger.info(f"匹配原因: {match_result.match_reason}")
+        logger.info("="*60)
+        
+        return xbox
+        
+    except Exception as e:
+        logger.error(f"智能匹配 Xbox 失败: {e}", exc_info=True)
+        return None
+
+
+async def _wakeup_assigned_xbox(
+    gs_token: str,
+    xbox: XboxInfo,
+    logger
+):
+    """
+    唤醒指定的 Xbox 主机
+    
+    Args:
+        gs_token: Xbox Live gsToken
+        xbox: Xbox 主机信息
+        logger: 日志记录器
+        
+    Returns:
+        XboxWakeupResult
+    """
+    try:
+        matcher = XboxHostMatcher(gs_token)
+        wakeup_result = await matcher._wakeup_xbox(xbox, timeout=30)
+        return wakeup_result
+    except Exception as e:
+        logger.error(f"唤醒 Xbox 失败: {e}", exc_info=True)
+        from ..xbox.xbox_host_matcher import XboxWakeupResult
+        return XboxWakeupResult(
+            success=False,
+            xbox_info=xbox,
+            wakeup_method="none",
+            attempts=0,
+            wait_time_seconds=0,
+            error_message=str(e)
+        )
+
+
+def _print_no_match_help(logger):
+    """打印无可用 Xbox 的帮助信息"""
+    logger.warning("\n可能的原因:")
+    logger.warning("1. 流媒体账号未绑定任何 Xbox 主机")
+    logger.warning("   → 请在 Xbox 应用中添加并授权此账号")
+    logger.warning("")
+    logger.warning("2. Xbox 主机未连接到网络")
+    logger.warning("   → 检查 Xbox 网络设置")
+    logger.warning("")
+    logger.warning("3. Xbox 主机处于 Energy-Saving 模式")
+    logger.warning("   → 请改为 Instant-On 模式（设置 > 电源 > 启动模式）")
+    logger.warning("")
+    logger.warning("4. gsToken 已过期，需要重新认证")
+    logger.warning("   → 重新运行步骤一进行账号登录")
+

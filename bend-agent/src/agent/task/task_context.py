@@ -163,6 +163,7 @@ class AgentTaskContext:
     window_id: str = ""
     game_accounts: List[GameAccountInfo] = field(default_factory=list)
     assigned_xbox: Optional[XboxInfo] = None
+    task_type: str = "daily_match"
 
     current_step: str = "PENDING"
     task_status: TaskMainStatus = TaskMainStatus.PENDING

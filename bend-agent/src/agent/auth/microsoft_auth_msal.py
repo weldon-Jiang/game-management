@@ -89,10 +89,17 @@ class XboxLiveTokens:
     Xbox Live令牌
     
     包含连接Xbox主机所需的核心令牌，通过微软访问令牌转换获得
+    
+    参考 XStreamingDesktop 项目的认证流程：
+    1. Microsoft OAuth Token → Xbox User Token
+    2. Xbox User Token → XSTS Token
+    3. XSTS Token → GSSV Token (Xbox Live Gaming Service)
+    4. GSSV Token → xHomeToken (gsToken)
     """
     user_token: str   # Xbox用户令牌
     xsts_token: str   # XSTS令牌（用于主机认证）
     user_hash: str    # 用户哈希（UHS）
+    gs_token: Optional[str] = None  # GSSV Token (Xbox Live Gaming Service Token) - Xbox Live API 需要这个
 
 
 @dataclass
@@ -638,6 +645,182 @@ class XboxLiveClient:
                 
                 logger.info("获取XSTS Token成功")
                 return xsts_token, user_hash
+    
+    async def _get_gssv_token(self, xsts_token: str) -> Optional[str]:
+        """
+        获取 GSSV Token (Xbox Live Gaming Service Token)
+        
+        这是 Xbox Live API 认证的关键步骤。
+        参考 XStreamingDesktop 项目的 doXstsAuthorization 方法。
+        
+        Args:
+            xsts_token: XSTS Token
+        
+        Returns:
+            GSSV Token 字符串或 None
+        """
+        import aiohttp
+        
+        url = "https://xsts.auth.xboxlive.com/xsts/authorize"
+        body = {
+            "RelyingParty": "http://gssv.xboxlive.com/",
+            "TokenType": "JWT",
+            "Properties": {
+                "UserTokens": [xsts_token],
+                "SandboxId": "RETAIL"
+            }
+        }
+        headers = {
+            "x-xbl-contract-version": "1",
+            "Cache-Control": "no-cache",
+            "Content-Type": "application/json",
+            "Origin": "https://www.xbox.com",
+            "Referer": "https://www.xbox.com/",
+            "Accept": "*/*",
+            "ms-cv": "0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=body,
+                    headers=headers
+                ) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        logger.error(f"获取GSSV Token失败: {resp.status}, {text}")
+                        return None
+                    
+                    data = await resp.json()
+                    gssv_token = data.get("Token")
+                    
+                    if not gssv_token:
+                        logger.error("获取GSSV Token数据不完整")
+                        return None
+                    
+                    logger.info("获取GSSV Token成功")
+                    return gssv_token
+                    
+        except Exception as e:
+            logger.error(f"获取GSSV Token异常: {e}", exc_info=True)
+            return None
+    
+    async def _get_xhome_token(self, gssv_token: str) -> Optional[str]:
+        """
+        获取 xHome Token (gsToken)
+        
+        这是 Xbox Live 主机发现和串流所需的专用 Token。
+        参考 XStreamingDesktop 项目的 getStreamToken('xhome') 方法。
+        
+        Args:
+            gssv_token: GSSV Token
+        
+        Returns:
+            xHome Token (gsToken) 字符串或 None
+        """
+        import aiohttp
+        
+        url = "https://xhome.gssv-play-prod.xboxlive.com/v2/login/user"
+        body = {
+            "token": gssv_token,
+            "offeringId": "xhome"
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store, must-revalidate, no-cache",
+            "x-gssv-client": "XboxComBrowser",
+            "Origin": "https://www.xbox.com",
+            "Referer": "https://www.xbox.com/",
+            "Accept": "*/*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=body,
+                    headers=headers
+                ) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        logger.error(f"获取xHome Token失败: {resp.status}, {text}")
+                        return None
+                    
+                    data = await resp.json()
+                    
+                    # xHomeToken 返回格式包含 gsToken
+                    gs_token = data.get("gsToken") or data.get("Token")
+                    
+                    if not gs_token:
+                        logger.error(f"获取xHome Token数据不完整，响应: {data}")
+                        return None
+                    
+                    logger.info("获取xHome Token成功")
+                    return gs_token
+                    
+        except Exception as e:
+            logger.error(f"获取xHome Token异常: {e}", exc_info=True)
+            return None
+
+    async def get_xbox_tokens_with_gssv(self, access_token: str) -> Optional[XboxLiveTokens]:
+        """
+        获取完整的 Xbox Live 令牌（包含 GSSV Token）
+        
+        这是正确的认证流程，对比 XStreamingDesktop 项目。
+        
+        流程：
+        1. 使用微软访问令牌获取 Xbox User Token
+        2. 使用 Xbox User Token 获取 XSTS Token
+        3. 使用 XSTS Token 获取 GSSV Token ← 关键：使用 XSTS Token，不是 User Token
+        4. 使用 GSSV Token 获取 xHome Token (gsToken) ← 新增
+        5. 返回包含完整令牌的 XboxLiveTokens
+        
+        Args:
+            access_token: 微软 OAuth 访问令牌
+        
+        Returns:
+            XboxLiveTokens 对象或 None（包含 gs_token）
+        """
+        try:
+            # Step 1: 获取 Xbox User Token
+            user_token = await self._get_xbox_user_token(access_token)
+            if not user_token:
+                logger.error("Step 1 失败：无法获取 Xbox User Token")
+                return None
+            
+            # Step 2: 获取 XSTS Token
+            xsts_token, user_hash = await self._get_xsts_token(user_token)
+            if not xsts_token or not user_hash:
+                logger.error("Step 2 失败：无法获取 XSTS Token")
+                return None
+            
+            # Step 3: 获取 GSSV Token（直接使用 Xbox User Token，不是 XSTS Token）
+            gssv_token = await self._get_gssv_token(user_token)
+            if not gssv_token:
+                logger.error("Step 3 失败：无法获取 GSSV Token")
+                return None
+            
+            # Step 4: 获取 xHome Token (gsToken)
+            gs_token = await self._get_xhome_token(gssv_token)
+            if not gs_token:
+                logger.error("Step 4 失败：无法获取 xHome Token")
+                return None
+            
+            logger.info(f"获取完整的 Xbox Live Tokens 成功，用户哈希: {user_hash}")
+            
+            return XboxLiveTokens(
+                user_token=user_token,
+                xsts_token=xsts_token,
+                user_hash=user_hash,
+                gs_token=gs_token
+            )
+            
+        except Exception as e:
+            logger.error(f"获取 Xbox Live Tokens 异常: {e}", exc_info=True)
+            return None
 
 
 # ============================================
@@ -879,7 +1062,7 @@ class MicrosoftMsalAuthenticator:
             return None
         
         xbox_client = XboxLiveClient()
-        return await xbox_client.get_xbox_tokens(self._microsoft_tokens.access_token)
+        return await xbox_client.get_xbox_tokens_with_gssv(self._microsoft_tokens.access_token)
     
     @classmethod
     def get_stored_accounts(cls) -> list:

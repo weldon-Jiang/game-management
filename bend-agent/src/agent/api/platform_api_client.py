@@ -14,7 +14,6 @@ Platform API客户端 v2.0
 
 import asyncio
 import time
-import base64
 from typing import Dict, Any, Optional, List
 
 import aiohttp
@@ -22,6 +21,7 @@ import aiohttp
 from ..core.logger import get_logger
 from ..core.config import config
 from ..core.credentials_provider import get_credentials
+from .auth_headers import build_agent_auth_headers
 
 
 class PlatformApiClient:
@@ -56,23 +56,24 @@ class PlatformApiClient:
         self._agent_secret = agent_secret
 
     async def _get_headers(self) -> Dict[str, str]:
-        headers = {
-            'Content-Type': 'application/json',
-            'X-API-Version': self._api_version
-        }
-
         agent_id = self._agent_id
         agent_secret = self._agent_secret
 
         if not agent_id or not agent_secret:
             agent_id, agent_secret = get_credentials()
 
-        if agent_id and agent_secret:
-            headers['X-Agent-Id'] = agent_id
-            encoded_secret = base64.b64encode(agent_secret.encode('utf-8')).decode('utf-8')
-            headers['X-Agent-Secret'] = encoded_secret
-        else:
-            self.logger.warning(f"Agent凭证缺失 - agent_id: {'存在' if agent_id else '缺失'}, agent_secret: {'存在' if agent_secret else '缺失'}")
+        headers = build_agent_auth_headers(
+            agent_id,
+            agent_secret,
+            extra={'X-API-Version': self._api_version},
+        )
+
+        if not agent_id or not agent_secret:
+            self.logger.warning(
+                "Agent凭证缺失 - agent_id: %s, agent_secret: %s",
+                '存在' if agent_id else '缺失',
+                '存在' if agent_secret else '缺失',
+            )
 
         return headers
 

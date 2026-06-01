@@ -409,6 +409,7 @@ class HighConcurrencyTaskExecutor:
             'xboxHosts',
             'xboxInfo',
             'taskType',
+            'gameActionType',
             'merchantId'
         ):
             if key in task_data and key not in params:
@@ -729,6 +730,12 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
     if not assigned_xbox and xbox_hosts:
         assigned_xbox = xbox_hosts[0]
 
+    task_type = (
+        params.get('gameActionType')
+        or params.get('task_type')
+        or 'daily_match'
+    )
+
     if not streaming_account:
         raise Exception("缺少流媒体账号信息")
 
@@ -750,7 +757,8 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
             streaming_account_email=streaming_account.get('email', ''),
             streaming_account_password=streaming_account.get('passwordToken', ''),
             game_accounts=game_accounts,
-            assigned_xbox=assigned_xbox
+            assigned_xbox=assigned_xbox,
+            task_type=task_type,
         )
 
         if not success:

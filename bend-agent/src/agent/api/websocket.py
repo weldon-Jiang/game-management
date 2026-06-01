@@ -8,6 +8,11 @@ WebSocket client for real-time communication with backend
 - 心跳保活机制
 - 消息分发到注册的处理器
 
+修复说明（v2.1）：
+- 添加连接锁解决竞态条件
+- 添加连接状态管理避免并发重连
+- 优化关闭流程确保资源释放
+
 消息类型：
 - task: 后端下发的任务
 - command: 后端发送的命令
@@ -61,6 +66,15 @@ class WSMessageType(Enum):
     ERROR = "error"                   # 错误
 
 
+class ConnectionState(Enum):
+    """连接状态枚举"""
+    DISCONNECTED = "disconnected"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    RECONNECTING = "reconnecting"
+    CLOSING = "closing"
+
+
 class WSClient:
     """
     WebSocket客户端
@@ -96,6 +110,12 @@ class WSClient:
         self._message_handlers: Dict[str, Callable] = {}   # 消息处理器字典
         self._heartbeat_task: Optional[asyncio.Task] = None  # 心跳任务
         self.logger = get_logger('ws')                      # 日志记录器
+
+        # 连接管理（v2.1新增，解决竞态条件）
+        self._connection_lock = asyncio.Lock()             # 连接操作锁
+        self._connection_state = ConnectionState.DISCONNECTED  # 连接状态
+        self._reconnect_task: Optional[asyncio.Task] = None  # 重连任务引用
+        self._ws_id = 0                                    # 连接ID，用于识别过期连接
 
     def on(self, message_type: str, handler: Callable):
         """
@@ -133,15 +153,36 @@ class WSClient:
         """
         import websockets
 
-        url = f"{self.ws_url}/{self.agent_id}?agentSecret={self.agent_secret}"
-        try:
-            self._ws = await websockets.connect(url, ping_interval=None)
-            self._running = True
-            self.logger.info(f"WebSocket connecting to {url}")
-            return True
-        except Exception as e:
-            self.logger.error(f"WebSocket connection failed: {e}")
-            return False
+        async with self._connection_lock:
+            # 检查是否已在连接中
+            if self._connection_state == ConnectionState.CONNECTED:
+                self.logger.debug("Already connected")
+                return True
+
+            if self._connection_state == ConnectionState.CONNECTING:
+                self.logger.debug("Connection in progress, waiting...")
+                await asyncio.sleep(0.5)
+                return self._connection_state == ConnectionState.CONNECTED
+
+            self._connection_state = ConnectionState.CONNECTING
+            self._ws_id += 1
+            current_ws_id = self._ws_id
+
+            url = f"{self.ws_url}/{self.agent_id}?agentSecret={self.agent_secret}"
+            try:
+                self._ws = await websockets.connect(url, ping_interval=None)
+                # 检查连接是否被替换（可能被其他重连任务覆盖）
+                if current_ws_id != self._ws_id or not self._running:
+                    self.logger.debug(f"Connection {current_ws_id} superseded, closing")
+                    await self._ws.close()
+                    return False
+                self._connection_state = ConnectionState.CONNECTED
+                self.logger.info(f"WebSocket connected (id={current_ws_id})")
+                return True
+            except Exception as e:
+                self._connection_state = ConnectionState.DISCONNECTED
+                self.logger.error(f"WebSocket connection failed: {e}")
+                return False
 
     async def disconnect(self):
         """
@@ -153,7 +194,16 @@ class WSClient:
         - 重置状态
         """
         self._running = False
-        
+
+        # 取消重连任务
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
+
+        # 取消心跳任务
         if self._heartbeat_task and not self._heartbeat_task.done():
             self._heartbeat_task.cancel()
             try:
@@ -162,36 +212,94 @@ class WSClient:
                 pass
             except asyncio.TimeoutError:
                 self.logger.warning("心跳任务取消超时")
-        
-        if self._ws:
-            try:
-                await asyncio.wait_for(self._ws.close(), timeout=3.0)
-            except asyncio.TimeoutError:
-                self.logger.warning("WebSocket关闭超时")
-            except Exception as e:
-                self.logger.debug(f"WebSocket关闭异常: {e}")
-            self._ws = None
+
+        # 关闭连接（使用锁保护）
+        async with self._connection_lock:
+            self._connection_state = ConnectionState.CLOSING
+            if self._ws:
+                try:
+                    await asyncio.wait_for(self._ws.close(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    self.logger.warning("WebSocket关闭超时")
+                except Exception as e:
+                    self.logger.debug(f"WebSocket关闭异常: {e}")
+                self._ws = None
+            self._connection_state = ConnectionState.DISCONNECTED
         self.logger.info("WebSocket disconnected")
 
     async def reconnect(self):
         """
         重新连接（指数退避策略）
 
-        重连策略：
+        重连策略（v2.1优化）：
+        - 使用连接锁避免并发重连
         - 最多重连_max_attempts次
         - 每次失败后延迟 = 重连延迟 * min(尝试次数, 5)
         - 连接成功后启动心跳任务
         """
         import websockets
 
+        async with self._connection_lock:
+            # 检查是否正在重连
+            if self._connection_state == ConnectionState.RECONNECTING:
+                self.logger.debug("Reconnection already in progress")
+                return False
+
+            # 检查是否应该重连
+            if not self._running:
+                self.logger.debug("Not running, skipping reconnection")
+                return False
+
+            self._connection_state = ConnectionState.RECONNECTING
+
         attempt = 0
         while self._running and attempt < self._max_attempts:
             attempt += 1
             self.logger.info(f"WebSocket reconnecting... attempt {attempt}/{self._max_attempts}")
-            if await self.connect():
+
+            async with self._connection_lock:
+                # 关闭旧连接
+                if self._ws:
+                    try:
+                        old_ws = self._ws
+                        self._ws = None
+                        await asyncio.wait_for(old_ws.close(), timeout=1.0)
+                    except Exception:
+                        pass
+
+                if not self._running:
+                    break
+
+                # 尝试连接
+                self._connection_state = ConnectionState.CONNECTING
+                self._ws_id += 1
+                current_ws_id = self._ws_id
+
+            import websockets
+            url = f"{self.ws_url}/{self.agent_id}?agentSecret={self.agent_secret}"
+            try:
+                ws = await websockets.connect(url, ping_interval=None)
+
+                async with self._connection_lock:
+                    # 检查连接是否被替换
+                    if current_ws_id != self._ws_id or not self._running:
+                        await ws.close()
+                        continue
+                    self._ws = ws
+                    self._connection_state = ConnectionState.CONNECTED
+
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
                 return True
+
+            except Exception as e:
+                self.logger.warning(f"Reconnection attempt {attempt} failed: {e}")
+                async with self._connection_lock:
+                    self._connection_state = ConnectionState.RECONNECTING
+
             await asyncio.sleep(self._reconnect_delay * min(attempt, 5))
+
+        async with self._connection_lock:
+            self._connection_state = ConnectionState.DISCONNECTED
         self.logger.error("WebSocket reconnection failed after max attempts")
         return False
 
@@ -207,9 +315,13 @@ class WSClient:
         - True: 发送成功
         - False: 发送失败（未连接等）
         """
-        if not self._ws or not self._running:
-            self.logger.warning("WebSocket not connected")
-            return False
+        async with self._connection_lock:
+            if self._connection_state != ConnectionState.CONNECTED or not self._ws:
+                self.logger.debug("WebSocket not connected, skipping send")
+                return False
+
+            ws = self._ws
+            ws_id = self._ws_id
 
         try:
             message = json.dumps({
@@ -217,12 +329,22 @@ class WSClient:
                 'data': data
             }, ensure_ascii=False)
             self.logger.info(f"Sending message to backend - Type: {message_type}, Data: {message[:500]}")
-            await self._ws.send(message)
+            await ws.send(message)
             self.logger.info(f"Message sent successfully - Type: {message_type}")
             return True
         except Exception as e:
-            self.logger.error(f"Failed to send message: {e}")
+            self.logger.warning(f"Failed to send message: {e}")
+            # 触发重连
+            if self._running:
+                asyncio.create_task(self._trigger_reconnect())
             return False
+
+    async def _trigger_reconnect(self):
+        """触发异步重连（用于send失败时）"""
+        try:
+            await self.reconnect()
+        except Exception as e:
+            self.logger.error(f"Background reconnection failed: {e}")
 
     async def send_heartbeat(self):
         """
@@ -331,7 +453,7 @@ class WSClient:
         """
         开始监听WebSocket消息
 
-        监听流程：
+        监听流程（v2.1优化）：
         1. 连接到WebSocket服务器
         2. 启动心跳任务
         3. 循环接收并处理消息
@@ -342,6 +464,8 @@ class WSClient:
         """
         import websockets
 
+        self._running = True
+
         if not await self.connect():
             self.logger.error("Failed to connect to WebSocket server")
             return
@@ -349,8 +473,17 @@ class WSClient:
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
         while self._running:
+            async with self._connection_lock:
+                if self._connection_state != ConnectionState.CONNECTED:
+                    self.logger.debug("Not connected, stopping listen loop")
+                    break
+                ws = self._ws
+
+            if not ws:
+                break
+
             try:
-                message = await self._ws.recv()
+                message = await ws.recv()
                 await self._handle_message(message)
 
             except websockets.exceptions.ConnectionClosed:
@@ -374,9 +507,16 @@ class WSClient:
         while self._running:
             try:
                 await asyncio.sleep(self._ws_heartbeat_interval)
-                if self._running and self._ws:
+
+                async with self._connection_lock:
+                    if self._connection_state != ConnectionState.CONNECTED:
+                        break
+                    ws = self._ws
+
+                if ws:
                     await self.send_heartbeat()
                     self.logger.debug("WebSocket heartbeat sent")
+
             except asyncio.CancelledError:
                 break
             except Exception as e:

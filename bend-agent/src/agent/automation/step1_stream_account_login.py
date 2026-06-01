@@ -296,17 +296,27 @@ async def _get_xbox_live_token(
 
         xbox_client = XboxLiveClient()
 
-        logger.info("开始获取Xbox Live Token")
-        stream_logger.info("开始获取Xbox Live Token")
-
-        xbox_tokens = await xbox_client.get_xbox_tokens(microsoft_tokens.access_token)
-
-        if xbox_tokens:
-            logger.info(f"Xbox Live Token获取成功, uhs: {xbox_tokens.user_hash}")
-            stream_logger.info(f"Xbox Live Token获取成功, uhs: {xbox_tokens.user_hash}")
+        logger.info("开始获取Xbox Live Token（包括GSSV Token）")
+        stream_logger.info("开始获取Xbox Live Token（包括GSSV Token）")
+        
+        xbox_tokens = await xbox_client.get_xbox_tokens_with_gssv(microsoft_tokens.access_token)
+        
+        if xbox_tokens and xbox_tokens.gs_token:
+            logger.info(f"Xbox Live Token获取成功（含GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: True")
+            stream_logger.info(f"Xbox Live Token获取成功（含GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: True")
+        elif xbox_tokens:
+            logger.warning(f"Xbox Live Token获取成功（无GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
+            stream_logger.warning(f"Xbox Live Token获取成功（无GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
         else:
-            logger.error("Xbox Live Token获取失败")
-            stream_logger.error("Xbox Live Token获取失败")
+            xbox_tokens = await xbox_client.get_xbox_tokens(microsoft_tokens.access_token)
+            if xbox_tokens:
+                logger.warning("GSSV Token获取失败，使用旧的Xbox Live Token")
+                stream_logger.warning("GSSV Token获取失败，使用旧的Xbox Live Token")
+                logger.info(f"Xbox Live Token获取成功（旧流程）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
+                stream_logger.info(f"Xbox Live Token获取成功（旧流程）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
+            else:
+                logger.error("Xbox Live Token获取失败（包含GSSV Token）")
+                stream_logger.error("Xbox Live Token获取失败（包含GSSV Token）")
 
         return xbox_tokens
 
