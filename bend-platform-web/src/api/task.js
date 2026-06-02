@@ -18,5 +18,7 @@ export const taskApi = {
   pause: (taskId) => request.post(`/api/tasks/${taskId}/pause`),
   resume: (taskId) => request.post(`/api/tasks/${taskId}/resume`),
   stop: (taskId) => request.post(`/api/tasks/${taskId}/stop`),
-  getGameAccountStatus: (taskId) => request.get(`/api/tasks/${taskId}/game-account-status`)
+  getGameAccountStatus: (taskId) => request.get(`/api/tasks/${taskId}/game-account-status`),
+  showWindow: (taskId) => request.post(`/api/tasks/${taskId}/window/show`),
+  hideWindow: (taskId) => request.post(`/api/tasks/${taskId}/window/hide`)
 }

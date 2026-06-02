@@ -80,7 +80,8 @@ async def step4_execute_gaming(
     context: AgentTaskContext,
     check_cancel: Callable[[], bool],
     report_progress: Callable[[str, str, str, Optional[Dict]], None],
-    platform_client: Optional[Any] = None
+    platform_client: Optional[Any] = None,
+    window_manager: Optional[Any] = None
 ) -> Step4Result:
     """
     步骤四执行：自动操作Xbox主机
@@ -89,6 +90,7 @@ async def step4_execute_gaming(
     - 使用步骤三初始化的画面捕获器 (context.frame_capture)
     - 使用步骤三初始化的Xbox会话 (context.xbox_session)
     - 使用步骤三初始化的控制器协议 (context._controller_protocol)
+    - 使用窗口管理器关闭窗口 (window_manager)
 
     流程：
     1. 初始化游戏自动化引擎
@@ -98,13 +100,14 @@ async def step4_execute_gaming(
        b. 切换到该账号
        c. 执行比赛
        d. 记录比赛次数
-    4. 所有账号完成后，任务结束
+    4. 所有账号完成后，自动关闭窗口
 
     参数：
     - context: 任务上下文
     - check_cancel: 取消检查函数
     - report_progress: 进度上报函数
     - platform_client: 平台API客户端（可选）
+    - window_manager: 窗口管理器（可选）
 
     返回：
     - Step4Result: 包含游戏自动化结果的Step4Result
@@ -313,11 +316,14 @@ async def step4_execute_gaming(
         context.update_step_status("step4", TaskStepStatus.COMPLETED, success_msg)
         await report_progress(context.task_id, "STEP4", "COMPLETED", success_msg)
 
+        await _close_task_window(window_manager, context.task_id, "task_completed", logger)
+
         return Step4Result(success=True, message=success_msg, total_matches=completed_matches)
 
     except asyncio.CancelledError:
         logger.info("步骤四被取消")
         context.update_step_status("step4", TaskStepStatus.SKIPPED, "任务被取消")
+        await _close_task_window(window_manager, context.task_id, "task_cancelled", logger)
         return Step4Result(success=False, error_code="CANCELLED", message="任务被取消")
 
     except asyncio.TimeoutError as e:
@@ -325,6 +331,7 @@ async def step4_execute_gaming(
         logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step4", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
+        await _close_task_window(window_manager, context.task_id, "timeout", logger)
         return Step4Result(success=False, error_code="TIMEOUT", message=error_msg)
 
     except ConnectionError as e:
@@ -332,6 +339,7 @@ async def step4_execute_gaming(
         logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step4", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
+        await _close_task_window(window_manager, context.task_id, "connection_error", logger)
         return Step4Result(success=False, error_code="CONNECTION_ERROR", message=error_msg)
 
     except ValueError as e:
@@ -339,6 +347,7 @@ async def step4_execute_gaming(
         logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step4", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
+        await _close_task_window(window_manager, context.task_id, "value_error", logger)
         return Step4Result(success=False, error_code="VALUE_ERROR", message=error_msg)
 
     except Exception as e:
@@ -346,7 +355,30 @@ async def step4_execute_gaming(
         logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step4", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
+        await _close_task_window(window_manager, context.task_id, "error", logger)
         return Step4Result(success=False, error_code="EXCEPTION", message=error_msg)
+
+
+async def _close_task_window(window_manager, task_id: str, reason: str, logger):
+    """
+    关闭任务关联的窗口
+
+    参数：
+    - window_manager: 窗口管理器
+    - task_id: 任务ID
+    - reason: 关闭窗口的原因
+    - logger: 日志记录器
+    """
+    if window_manager is None:
+        logger.warning("窗口管理器未提供，无法关闭窗口")
+        return
+
+    try:
+        logger.info(f"开始关闭窗口 (任务: {task_id}, 原因: {reason})")
+        await window_manager.close_window_by_task(task_id)
+        logger.info(f"窗口已关闭 (任务: {task_id})")
+    except Exception as e:
+        logger.error(f"关闭窗口失败 (任务: {task_id}): {e}")
 
 
 async def _init_game_automation(context: AgentTaskContext, logger):

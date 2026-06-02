@@ -104,9 +104,24 @@ public class TaskServiceImpl implements TaskService {
         if (task.getMaxRetries() == null) {
             task.setMaxRetries(3);
         }
+
+        if (task.getEnableWindowDisplay() != null) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                Map<String, Object> paramsMap = new HashMap<>();
+                if (StringUtils.hasText(task.getParams())) {
+                    paramsMap = mapper.readValue(task.getParams(), Map.class);
+                }
+                paramsMap.put("enable_window_display", task.getEnableWindowDisplay());
+                task.setParams(mapper.writeValueAsString(paramsMap));
+            } catch (Exception e) {
+                log.error("设置窗口显示参数失败: {}", e.getMessage());
+            }
+        }
+
         taskMapper.insert(task);
-        log.info("创建任务 - ID: {}, 名称: {}, 类型: {}, 商户: {}",
-                 task.getId(), task.getName(), task.getType(), merchantId);
+        log.info("创建任务 - ID: {}, 名称: {}, 类型: {}, 商户: {}, 窗口显示: {}",
+                 task.getId(), task.getName(), task.getType(), merchantId, task.getEnableWindowDisplay());
         return task;
     }
 

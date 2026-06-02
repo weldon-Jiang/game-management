@@ -4,8 +4,8 @@
 
 ## 📋 文档说明
 
-**版本**: 2.2  
-**最后更新**: 2026-06-01  
+**版本**: 3.0  
+**最后更新**: 2026-06-02  
 **适用范围**: Bend Platform 后端服务（Java）、网关（Java）、前端服务（Vue3）、Agent服务（Python）
 
 ---
@@ -107,16 +107,113 @@ bend-agent/
 │   ├── auth/           # Microsoft MSAL 认证
 │   ├── xbox/           # Xbox 设备发现、流控制、PlaySession、WebRTC
 │   ├── vision/         # 视觉识别、画面捕获、GPU解码
+│   │   ├── template_matcher.py      # 基础模板匹配
+│   │   └── template_manager.py       # ✅ Streaming模板管理器（新增）
 │   ├── windows/        # Windows 窗口管理、SDL自绘窗口
 │   ├── core/           # 中央管理与配置
 │   ├── game/           # 游戏账号管理、账号切换
 │   ├── scene/          # 场景检测（降频+缓存优化）
+│   │   ├── scene_detector.py              # 基础场景检测
+│   │   └── streaming_scene_detector.py    # ✅ Streaming场景检测器（新增）
 │   ├── input/          # 输入控制（pygame手柄、键盘映射）
 │   └── utils/          # 工具类
-├── configs/            # YAML 配置文件
-├── tokens/             # Refresh Token 存储（运行时生成）
-└── logs/               # 日志目录
+├── configs/            # 配置文件
+│   └── scene_schemas.py   # ✅ Streaming场景模板配置（新增）
+├── templates/          # ✅ 模板图片目录（需创建）
+└── logs/              # 日志目录
 ```
+
+---
+
+## 🎯 Streaming场景模板匹配规范（✅ 必须遵守）
+
+参考项目：[D:\auto-xbox\streaming\xsrpst.py](file:///D:/auto-xbox/streaming/xsrpst.py)
+
+### 核心组件
+
+| 组件 | 文件路径 | 说明 |
+|------|---------|------|
+| 场景配置 | [configs/scene_schemas.py](file:///d:/auto-xbox/team-management/bend-agent/configs/scene_schemas.py) | 场景模板配置定义 |
+| 场景检测器 | [scene/streaming_scene_detector.py](file:///d:/auto-xbox/team-management/bend-agent/src/agent/scene/streaming_scene_detector.py) | Streaming风格场景识别 |
+| 模板管理器 | [vision/template_manager.py](file:///d:/auto-xbox/team-management/bend-agent/src/agent/vision/template_manager.py) | 模板文件加载和缓存 |
+
+### 模板配置规范（✅ 必须遵守）
+
+**配置位置**：`configs/scene_schemas.py`
+
+**模板命名规则**：`{场景ID}.{模板ID}.png`
+
+**示例**：
+```
+templates/
+├── 1.1.png    # 场景1的模板1
+├── 2.1.png    # 场景2的模板1
+├── 2.2.png    # 场景2的模板2
+└── ...
+```
+
+### 场景配置格式
+
+```python
+[
+    场景ID,           # 1, 2, 3...
+    场景宽度,        # 960
+    场景高度,        # 540
+
+    模板ID,          # 1, 2, 3...
+    模板左上X,        # 模板区域
+    模板左上Y,
+    模板右下X,
+    模板右下Y,
+
+    搜索区域ID,      # 搜索区域
+    搜索区域左上X,
+    搜索区域左上Y,
+    搜索区域右下X,
+    搜索区域右下Y,
+
+    相似度阈值,      # 90 (百分比)
+    算法编号          # 3 (TM_CCORR_NORMED)
+]
+```
+
+### 推荐算法
+
+| 编号 | 算法 | 推荐度 |
+|------|------|--------|
+| **3** | **TM_CCORR_NORMED** | ⭐ **推荐** |
+| 5 | TM_CCOEFF_NORMED | 高 |
+| 1 | TM_SQDIFF_NORMED | 中 |
+
+### 使用示例
+
+```python
+from agent.scene.streaming_scene_detector import StreamingSceneDetector
+
+# 初始化
+detector = StreamingSceneDetector(
+    template_dir="templates",
+    default_threshold=0.8
+)
+
+# 预加载模板
+detector.preload_all_templates()
+
+# 识别场景
+result = detector.recognize_scene(frame)
+
+if result.matched:
+    print(f"场景: {result.scene_id}, 置信度: {result.confidence:.2f}")
+```
+
+### 场景清单（23个场景）
+
+| 分类 | 场景ID | 说明 |
+|------|--------|------|
+| **UI导航** | 1-9 | 主页、西瓜主页、档案和系统、关机/重启等 |
+| **账号登录** | 10-23 | 登录页面、小键盘输入等 |
+
+详细场景配置见：[bend-agent/docs/TEMPLATE_CONFIG_GUIDE.md](file:///d:/auto-xbox/team-management/bend-agent/docs/TEMPLATE_CONFIG_GUIDE.md)
 
 ---
 
@@ -315,8 +412,8 @@ async def stepN_execute_xxx(
 |------|-----------|-----------|
 | 步骤一 | `microsoft_tokens`, `xbox_tokens` | `streaming_account_email`, `streaming_account_password` |
 | 步骤二 | `current_xbox`, `xbox_session` | `xbox_tokens` |
-| 步骤三 | `frame_capture` | `xbox_session`, `current_xbox` |
-| 步骤四 | `matches_completed_today` | `frame_capture`, `game_accounts`, `task_type` |
+| 步骤三 | `frame_capture`, `scene_detector` | `xbox_session`, `current_xbox` |
+| 步骤四 | `matches_completed_today` | `frame_capture`, `scene_detector`, `game_accounts`, `task_type` |
 
 **⚠️ 任务类型生效规则（✅ 必须遵守）**
 
@@ -339,7 +436,7 @@ async def stepN_execute_xxx(
 │            │                                              │
 │            ▼                                              │
 │   ┌──────────────────┐                                    │
-│   │ 确认登录成功      │ ←── 画面检测验证                  │
+│   │ 确认登录成功      │ ←── 画面检测验证（使用Streaming场景检测器）│
 │   └────────┬─────────┘                                    │
 │            │                                              │
 │            ▼                                              │
@@ -378,6 +475,10 @@ WebSocket消息 ──► TaskExecutor ──► AutomationScheduler ──► A
                step1_stream      step2_xbox      step3_init   step4_game
                _account_login    _streaming      _streaming   _automation
 ```
+
+#### 🔧 场景模板匹配规范
+
+详见上方 **"🎯 Streaming场景模板匹配规范"** 章节。
 
 ---
 
@@ -518,6 +619,11 @@ agent:
   heartbeat_interval: 30      # 心跳间隔（秒）
   reconnect_delay: 5          # 重连延迟（秒）
   max_reconnect_attempts: 10  # 最大重连次数
+
+template:
+  dir: 'templates'            # 模板目录
+  threshold: 0.8              # 匹配阈值
+  cache_enabled: true         # 启用缓存
 ```
 
 ---
@@ -531,6 +637,8 @@ agent:
 | 状态同步 | 使用 `task_game_account_status` 表跟踪 |
 | 并发控制 | 配置最大并发任务数 |
 | 异常处理 | 记录日志并继续执行其他任务 |
+| 模板管理 | 使用Streaming模板管理器，预加载常用模板 |
+| 场景检测 | 使用Streaming场景检测器，支持多区域匹配 |
 
 ---
 
@@ -542,6 +650,7 @@ agent:
 | 2.0 | 2026-05-16 | 添加认证规范、资源清理规范 |
 | 2.1 | 2026-05-21 | 优化文档结构、添加检查清单、完善代码模板 |
 | 3.0 | 2026-05-30 | 添加优化模块说明：GPU解码、SDL窗口、场景检测优化、手柄信号发送 |
+| 3.1 | 2026-06-02 | 添加Streaming场景模板匹配规范（scene_schemas.py、streaming_scene_detector.py、template_manager.py）|
 
 ---
 
@@ -551,6 +660,7 @@ agent:
 - [数据库脚本](bend-platform/db/schema.sql)
 - [部署文档](docker/DEPLOY.md)
 - [Agent 文档](bend-agent/README.md)
+- [模板配置指南](bend-agent/docs/TEMPLATE_CONFIG_GUIDE.md)
 
 ---
 
@@ -624,6 +734,14 @@ agent:
       "type": "must_follow",
       "check": "task_type必须在确认游戏账号登录成功后才能应用",
       "location": ["src/agent/automation/step4_game_automation.py"]
+    },
+    {
+      "id": "R008",
+      "name": "Streaming场景模板匹配",
+      "priority": "P0",
+      "type": "must_follow",
+      "check": "使用configs/scene_schemas.py配置模板，模板文件命名为{场景ID}.{模板ID}.png",
+      "location": ["configs/scene_schemas.py", "src/agent/scene/streaming_scene_detector.py"]
     }
   ]
 }

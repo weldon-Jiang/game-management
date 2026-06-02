@@ -68,19 +68,20 @@ class TaskWindowManager:
         window_info = WindowInfo(
             window_id=window_id,
             streaming_account_id=context.streaming_account_id,
+            streaming_account_email=context.streaming_account_email,
             task_id=context.task_id,
             state="creating",
             created_time=time.time()
         )
 
         try:
-            window_info.window_handle = await self._create_physical_window(window_info)
+            window_info.window_handle = await self._create_physical_window(window_info, context)
             window_info.state = "created"
 
             self._windows[window_id] = window_info
             self._task_to_window[context.task_id] = window_id
 
-            self.logger.info(f"为任务 {context.task_id} 创建窗口 {window_id}")
+            self.logger.info(f"为任务 {context.task_id} 创建窗口 {window_id} (流媒体账号: {context.streaming_account_email})")
             return window_info
 
         except Exception as e:
@@ -131,6 +132,105 @@ class TaskWindowManager:
         else:
             self.logger.warning(f"任务 {task_id} 没有关联的窗口")
 
+    async def show_window(self, window_id: str) -> bool:
+        """
+        显示指定窗口
+
+        参数：
+        - window_id: 窗口ID
+
+        返回：
+        - bool: 是否成功
+        """
+        if window_id not in self._windows:
+            self.logger.warning(f"窗口不存在: {window_id}")
+            return False
+
+        window = self._windows[window_id]
+        if window.window_handle is None:
+            return False
+
+        try:
+            import win32gui
+            import win32con
+
+            win32gui.ShowWindow(window.window_handle, win32con.SW_SHOW)
+            win32gui.SetForegroundWindow(window.window_handle)
+            window.is_visible = True
+            self.logger.info(f"窗口 {window_id} 已显示")
+            return True
+
+        except ImportError:
+            self.logger.warning("win32 API不可用")
+            return False
+        except Exception as e:
+            self.logger.error(f"显示窗口失败: {e}")
+            return False
+
+    async def hide_window(self, window_id: str) -> bool:
+        """
+        隐藏指定窗口
+
+        参数：
+        - window_id: 窗口ID
+
+        返回：
+        - bool: 是否成功
+        """
+        if window_id not in self._windows:
+            self.logger.warning(f"窗口不存在: {window_id}")
+            return False
+
+        window = self._windows[window_id]
+        if window.window_handle is None:
+            return False
+
+        try:
+            import win32gui
+            import win32con
+
+            win32gui.ShowWindow(window.window_handle, win32con.SW_HIDE)
+            window.is_visible = False
+            self.logger.info(f"窗口 {window_id} 已隐藏")
+            return True
+
+        except ImportError:
+            self.logger.warning("win32 API不可用")
+            return False
+        except Exception as e:
+            self.logger.error(f"隐藏窗口失败: {e}")
+            return False
+
+    async def show_window_by_task_id(self, task_id: str) -> bool:
+        """
+        根据任务ID显示窗口
+
+        参数：
+        - task_id: 任务ID
+
+        返回：
+        - bool: 是否成功
+        """
+        window = self.get_window_by_task(task_id)
+        if window:
+            return await self.show_window(window.window_id)
+        return False
+
+    async def hide_window_by_task_id(self, task_id: str) -> bool:
+        """
+        根据任务ID隐藏窗口
+
+        参数：
+        - task_id: 任务ID
+
+        返回：
+        - bool: 是否成功
+        """
+        window = self.get_window_by_task(task_id)
+        if window:
+            return await self.hide_window(window.window_id)
+        return False
+
     def get_window_by_task(self, task_id: str) -> Optional[WindowInfo]:
         """
         根据任务ID获取窗口信息
@@ -157,12 +257,13 @@ class TaskWindowManager:
         """获取当前窗口数量"""
         return len(self._windows)
 
-    async def _create_physical_window(self, window_info: WindowInfo) -> int:
+    async def _create_physical_window(self, window_info: WindowInfo, context: AgentTaskContext) -> int:
         """
         创建物理窗口
 
         参数：
         - window_info: 窗口信息
+        - context: 任务上下文
 
         返回：
         - int: 窗口句柄
@@ -173,7 +274,7 @@ class TaskWindowManager:
             import win32ui
             from PIL import Image
 
-            window_title = f"BendAgent_{window_info.task_id}"
+            window_title = context.streaming_account_email if context.streaming_account_email else f"BendAgent_{window_info.task_id}"
 
             wc = win32gui.WNDCLASS()
             wc.lpszClassName = f"BendAgent_Window_{window_info.task_id}"
@@ -181,10 +282,13 @@ class TaskWindowManager:
 
             class_atom = win32gui.RegisterClass(wc)
 
+            style = win32con.WS_OVERLAPPED | win32con.WS_SYSMENU | win32con.WS_CAPTION
+            style = style & ~win32con.WS_THICKFRAME & ~win32con.WS_MINIMIZEBOX & ~win32con.WS_MAXIMIZEBOX
+
             hwnd = win32gui.CreateWindow(
                 class_atom,
                 window_title,
-                win32con.WS_OVERLAPPEDWINDOW,
+                style,
                 win32con.CW_USEDEFAULT,
                 win32con.CW_USEDEFAULT,
                 1280,
@@ -198,7 +302,7 @@ class TaskWindowManager:
             win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
             win32gui.UpdateWindow(hwnd)
 
-            self.logger.info(f"物理窗口已创建: {hwnd}")
+            self.logger.info(f"物理窗口已创建: {hwnd}, 标题: {window_title}")
             return int(hwnd)
 
         except ImportError:
@@ -262,7 +366,12 @@ class TaskWindowManager:
         return False
 
     async def close_all_windows(self):
-        """关闭所有窗口"""
+        """
+        关闭所有窗口
+
+        注意：此方法仅在Agent关闭时调用，用于清理所有残留窗口
+        正常任务完成时使用 close_window_by_task() 按任务关闭窗口
+        """
         window_ids = list(self._windows.keys())
         for window_id in window_ids:
             await self.close_window(window_id)

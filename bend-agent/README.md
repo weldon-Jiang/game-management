@@ -31,6 +31,7 @@ Bend Platform 的客户端 Agent 服务，负责在 Windows 主机上执行 Xbox
 bend-agent/
 ├── configs/
 │   └── agent.yaml           # Agent 配置文件
+│   └── scene_schemas.py     # ✅ Streaming场景模板配置（新增）
 ├── distribution/
 │   ├── agent.exe             # 打包后的可执行文件
 │   └── agent.yaml.example    # 配置模板
@@ -76,9 +77,11 @@ bend-agent/
 │       ├── scene/             # 场景检测模块
 │       │   ├── scene_detector.py           # 场景检测器
 │       │   ├── optimized_scene_detector.py  # 优化后的场景检测器（降频+缓存）
+│       │   ├── streaming_scene_detector.py  # ✅ Streaming风格场景检测器（新增）
 │       │   └── game_automation_engine.py    # 游戏自动化引擎
 │       ├── vision/            # 视觉识别模块
 │       │   ├── template_matcher.py  # 模板匹配
+│       │   ├── template_manager.py   # ✅ Streaming模板管理器（新增）
 │       │   ├── frame_capture.py     # 画面捕获
 │       │   ├── gpu_decoder.py       # GPU解码器（优化）
 │       │   └── gpu_frame_capture.py  # GPU加速帧捕获（优化）
@@ -167,6 +170,7 @@ python src/main.py --code AGENT-XXXX-XXXX-XXXX
 | `agent.max_reconnect_attempts` | 最大重连次数 | 10 |
 | `video.fps` | 视频捕获帧率 | 10 |
 | `template.threshold` | 模板匹配阈值 | 0.8 |
+| `template.dir` | 模板图片目录 | templates |
 | `gpu.enabled` | 启用GPU硬件加速 | true |
 | `gpu.preferred_type` | 首选GPU类型 | auto |
 
@@ -421,6 +425,35 @@ print(f"场景: {result.scene.value}, 置信度: {result.confidence}")
 stats = detector.get_stats()
 print(f"跳过率: {stats['skip_rate']}, 缓存命中率: {stats['cache_rate']}")
 ```
+
+### StreamingSceneDetector
+
+Streaming风格场景检测器，支持多区域模板匹配。
+
+```python
+from agent.scene.streaming_scene_detector import StreamingSceneDetector
+
+# 初始化
+detector = StreamingSceneDetector(
+    template_dir="templates",
+    default_threshold=0.8
+)
+
+# 预加载模板
+detector.preload_all_templates()
+
+# 识别场景
+result = detector.recognize_scene(frame)
+
+if result.matched:
+    print(f"场景ID: {result.scene_id}, 置信度: {result.confidence:.2f}")
+    for template_result in result.template_results:
+        print(f"  模板{template_result['template_id']}: {template_result['matched']}")
+```
+
+**参考项目**：[D:\auto-xbox\streaming\xsrpst.py](file:///D:/auto-xbox/streaming/xsrpst.py)
+
+**详细配置指南**：[docs/TEMPLATE_CONFIG_GUIDE.md](docs/TEMPLATE_CONFIG_GUIDE.md)
 
 ### XboxPlaySessionManager
 
@@ -725,3 +758,4 @@ scripts\build.bat
 - [部署文档](../docker/DEPLOY.md) - Docker 部署指南
 - [Streaming对比报告](../.trae/documents/streaming_agent_comparison_report.md) - 与Streaming项目功能对比
 - [优化计划报告](../.trae/documents/agent_optimization_plan.md) - Agent优化计划与执行记录
+- [模板配置指南](docs/TEMPLATE_CONFIG_GUIDE.md) - ✅ Streaming场景模板配置详解（新增）

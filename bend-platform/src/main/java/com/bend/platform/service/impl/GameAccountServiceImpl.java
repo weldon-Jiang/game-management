@@ -401,6 +401,13 @@ public class GameAccountServiceImpl implements GameAccountService {
         }
 
         account.setStatus(status);
+        
+        // 状态变为空闲时，自动重置运行Agent
+        if ("idle".equalsIgnoreCase(status) && account.getAgentId() != null) {
+            account.setAgentId(null);
+            log.info("游戏账号状态为空闲，自动重置运行Agent - ID: {}", id);
+        }
+        
         account.setUpdatedTime(LocalDateTime.now());
         gameAccountMapper.updateById(account);
         log.info("更新游戏账号状态 - ID: {}, 状态: {}", id, status);

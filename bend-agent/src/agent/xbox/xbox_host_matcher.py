@@ -77,6 +77,7 @@ class XboxMatchResult:
     is_local_online: bool = False
     is_powered_on: bool = False
     match_reason: str = ""
+    success: bool = False
     error_code: str = ""
     error_details: Dict[str, Any] = field(default_factory=dict)
 
@@ -250,6 +251,7 @@ class XboxHostMatcher:
                 is_authorized=False,
                 is_local_online=False,
                 is_powered_on=False,
+                success=False,
                 match_reason="云端未发现已授权的 Xbox 主机",
                 error_code="CLOUD_NO_AUTHORIZED",
                 error_details={
@@ -293,6 +295,7 @@ class XboxHostMatcher:
                 is_authorized=True,
                 is_local_online=False,
                 is_powered_on=False,
+                success=False,
                 match_reason="没有找到云端授权且局域网在线的 Xbox 主机",
                 error_code="NO_LOCAL_MATCH",
                 error_details={
@@ -327,6 +330,7 @@ class XboxHostMatcher:
                     selected_match.is_powered_on = True
                     selected_match.match_reason = "已唤醒 + 开机成功"
                     selected_match.priority = XboxMatchPriority.AUTHORIZED_ONLINE_POWERED
+                    selected_match.success = True
                     self.logger.info(f"✓ Xbox 唤醒成功: {selected_match.xbox_info.name}")
                 else:
                     self.logger.error(f"✗ 唤醒失败: {wakeup_result.error_message}")
@@ -336,6 +340,7 @@ class XboxHostMatcher:
                         is_authorized=True,
                         is_local_online=True,
                         is_powered_on=False,
+                        success=False,
                         match_reason=f"唤醒 Xbox 失败: {wakeup_result.error_message}",
                         error_code="WAKEUP_FAILED",
                         error_details={
@@ -351,6 +356,7 @@ class XboxHostMatcher:
                     is_authorized=True,
                     is_local_online=True,
                     is_powered_on=False,
+                    success=False,
                     match_reason="Xbox 处于待机模式，但唤醒功能已禁用",
                     error_code="WAKEUP_DISABLED",
                     error_details={
@@ -404,6 +410,7 @@ class XboxHostMatcher:
                 is_authorized=True,
                 is_local_online=is_local_online,
                 is_powered_on=is_powered_on,
+                success=True,
                 match_reason=reason
             )
             

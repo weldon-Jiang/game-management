@@ -87,16 +87,20 @@ class WindowInfo:
     属性说明：
     - window_id: 窗口唯一ID
     - streaming_account_id: 关联的串流账号ID
+    - streaming_account_email: 关联的串流账号邮箱（用于窗口标题显示）
     - task_id: 关联的任务ID
     - window_handle: 窗口句柄
     - state: 窗口状态
+    - is_visible: 窗口是否可见
     - created_time: 创建时间
     """
     window_id: str
     streaming_account_id: str
     task_id: str
+    streaming_account_email: str = ""
     window_handle: Optional[int] = None
     state: str = "created"
+    is_visible: bool = True
     created_time: Optional[float] = None
 
 

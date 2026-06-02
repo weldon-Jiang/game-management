@@ -360,6 +360,13 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         }
 
         account.setTaskStatus(taskStatus);
+        
+        // 状态变为空闲时，自动重置运行Agent
+        if ("idle".equalsIgnoreCase(taskStatus) && account.getAgentId() != null) {
+            account.setAgentId(null);
+            log.info("流媒体账号状态为空闲，自动重置运行Agent - ID: {}", id);
+        }
+        
         streamingAccountMapper.updateById(account);
         log.info("更新流媒体账号任务状态 - ID: {}, 任务状态: {}", id, taskStatus);
     }

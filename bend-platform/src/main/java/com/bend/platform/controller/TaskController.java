@@ -311,4 +311,48 @@ public class TaskController {
         List<TaskGameAccountStatus> statuses = statusService.findByTaskId(id);
         return ApiResponse.success(statuses);
     }
+
+    /**
+     * 显示任务窗口
+     *
+     * @param id 任务ID
+     * @return 操作结果
+     */
+    @PostMapping("/{id}/window/show")
+    public ApiResponse<Void> showWindow(@PathVariable String id) {
+        log.info("显示任务窗口 - TaskID: {}", id);
+        Task task = taskService.findById(id);
+        if (task == null) {
+            return ApiResponse.error(404, "任务不存在");
+        }
+
+        if (task.getTargetAgentId() == null) {
+            return ApiResponse.error(400, "任务未分配Agent");
+        }
+
+        messageService.sendToAgent(task.getTargetAgentId(), "window_show", Map.of("taskId", id));
+        return ApiResponse.success("窗口显示命令已发送", null);
+    }
+
+    /**
+     * 隐藏任务窗口
+     *
+     * @param id 任务ID
+     * @return 操作结果
+     */
+    @PostMapping("/{id}/window/hide")
+    public ApiResponse<Void> hideWindow(@PathVariable String id) {
+        log.info("隐藏任务窗口 - TaskID: {}", id);
+        Task task = taskService.findById(id);
+        if (task == null) {
+            return ApiResponse.error(404, "任务不存在");
+        }
+
+        if (task.getTargetAgentId() == null) {
+            return ApiResponse.error(400, "任务未分配Agent");
+        }
+
+        messageService.sendToAgent(task.getTargetAgentId(), "window_hide", Map.of("taskId", id));
+        return ApiResponse.success("窗口隐藏命令已发送", null);
+    }
 }

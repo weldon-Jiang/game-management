@@ -152,7 +152,8 @@ class AgentAutomationTask:
                 self.context,
                 check_cancel,
                 self._report_progress,
-                self.platform_client
+                self.platform_client,
+                self.window_manager
             )
 
             if not step4_result.success:

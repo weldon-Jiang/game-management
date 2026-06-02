@@ -1,222 +1,275 @@
 """
-Template manager for Bend Agent
-Downloads and caches templates from the platform
-"""
-import asyncio
-import aiohttp
-import os
-import hashlib
-from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+Template Manager - Streaming项目模板管理器
 
-from ..core.config import config
+功能说明：
+- 模板文件管理（加载、保存、缓存）
+- 支持PNG文件和序列化数据
+- 模板预加载和按需加载
+
+参考Streaming项目 (D:\\auto-xbox\\streaming\\xsrpst.py) 的设计：
+- 原始模板：PNG文件在 template/ 目录
+- 序列化数据：templates.dat (gzip压缩)
+
+使用方式：
+    from agent.vision.template_manager import StreamingTemplateManager
+
+    manager = StreamingTemplateManager("templates")
+    template = manager.get_template(1, 1)  # 场景1的模板1
+"""
+
+import os
+import cv2
+import compress_pickle
+import numpy as np
+from typing import Optional, Dict
+from pathlib import Path
+
 from ..core.logger import get_logger
 
 
-@dataclass
-class TemplateInfo:
-    """Template information"""
-    id: str
-    name: str
-    description: str
-    category: str
-    image_url: str
-    local_path: str
-    width: int
-    height: int
-    match_threshold: float
-    game: str
-    checksum: str
-    last_updated: datetime
-
-
-class TemplateManager:
+class StreamingTemplateManager:
     """
-    Template manager for downloading and caching templates from platform
+    Streaming风格模板管理器
+
+    功能说明：
+    - 管理模板文件的加载和缓存
+    - 支持PNG源文件和序列化数据
+    - 提供模板预加载和按需加载
+
+    使用方式：
+        manager = StreamingTemplateManager("templates")
+
+        # 加载单个模板
+        template = manager.get_template(1, 1)
+
+        # 预加载所有模板
+        manager.preload_all_templates()
+
+        # 保存序列化数据
+        manager.save_serialized()
     """
 
-    def __init__(self):
-        self.logger = get_logger('template')
-        self._templates: Dict[str, TemplateInfo] = {}
-        self._cache_dir = config.get('agent.template_cache_dir',
-            os.path.join(os.environ.get('APPDATA', ''), 'BendPlatform', 'Agent', 'templates'))
-        os.makedirs(self._cache_dir, exist_ok=True)
-        self._base_url = config.backend_url
-
-    async def sync_templates(self, categories: List[str] = None) -> int:
+    def __init__(
+        self,
+        template_dir: str = "templates",
+        data_dir: str = "data",
+        use_cache: bool = True
+    ):
         """
-        Sync templates from platform
+        初始化模板管理器
 
-        Args:
-            categories: List of categories to sync (None = all)
-
-        Returns:
-            Number of templates synced
+        参数说明：
+        - template_dir: 模板图片目录
+        - data_dir: 序列化数据目录
+        - use_cache: 是否启用缓存
         """
-        self.logger.info("Starting template sync...")
+        self.template_dir = Path(template_dir)
+        self.data_dir = Path(data_dir)
+        self.use_cache = use_cache
+
+        self.logger = get_logger('template_manager')
+
+        self._template_cache: Dict[str, np.ndarray] = {}
+        self._serialized_data: Optional[Dict[str, np.ndarray]] = None
+
+        self.logger.info(f"StreamingTemplateManager 初始化，模板目录: {self.template_dir}")
+
+    def _get_template_key(self, scene_id: int, template_id: int) -> str:
+        """
+        生成模板唯一标识符
+
+        参数说明：
+        - scene_id: 场景编号
+        - template_id: 模板编号
+
+        返回值：
+        - 模板键（格式："{scene_id}.{template_id}"）
+        """
+        return f"{scene_id}.{template_id}"
+
+    def _get_template_path(self, scene_id: int, template_id: int) -> Path:
+        """
+        获取模板文件路径
+
+        参数说明：
+        - scene_id: 场景编号
+        - template_id: 模板编号
+
+        返回值：
+        - 模板PNG文件路径
+        """
+        filename = f"{scene_id}.{template_id}.png"
+        return self.template_dir / filename
+
+    def get_template(
+        self,
+        scene_id: int,
+        template_id: int,
+        use_serialized: bool = True
+    ) -> Optional[np.ndarray]:
+        """
+        获取模板图片
+
+        参数说明：
+        - scene_id: 场景编号
+        - template_id: 模板编号
+        - use_serialized: 是否优先使用序列化数据
+
+        返回值：
+        - 成功：模板图片numpy数组
+        - 失败：None
+        """
+        cache_key = self._get_template_key(scene_id, template_id)
+
+        if self.use_cache and cache_key in self._template_cache:
+            return self._template_cache[cache_key]
+
+        if use_serialized:
+            if self._serialized_data is None:
+                self.load_serialized()
+
+            if self._serialized_data and cache_key in self._serialized_data:
+                template = self._serialized_data[cache_key]
+                if self.use_cache:
+                    self._template_cache[cache_key] = template
+                return template
+
+        template_path = self._get_template_path(scene_id, template_id)
+        if not template_path.exists():
+            self.logger.warning(f"模板文件不存在: {template_path}")
+            return None
 
         try:
-            templates = await self._fetch_template_list(categories)
-            synced = 0
+            template = cv2.imread(str(template_path), cv2.IMREAD_COLOR)
+            if template is None:
+                self.logger.error(f"无法读取模板: {template_path}")
+                return None
 
-            for template_data in templates:
-                if await self._download_template(template_data):
-                    synced += 1
+            if self.use_cache:
+                self._template_cache[cache_key] = template
 
-            self.logger.info(f"Template sync completed: {synced}/{len(templates)} templates")
-            return synced
+            self.logger.debug(f"加载模板: {cache_key}")
+            return template
 
         except Exception as e:
-            self.logger.error(f"Template sync failed: {e}")
+            self.logger.error(f"加载模板失败 {template_path}: {e}")
+            return None
+
+    def preload_all_templates(self) -> int:
+        """
+        预加载所有模板
+
+        返回值：
+        - 成功加载的模板数量
+        """
+        count = 0
+
+        if not self.template_dir.exists():
+            self.logger.warning(f"模板目录不存在: {self.template_dir}")
             return 0
 
-    async def _fetch_template_list(self, categories: List[str] = None) -> List[Dict]:
-        """Fetch template list from platform"""
-        try:
-            url = f"{self._base_url}{config.get('backend.api_prefix', '/api')}/templates"
-            params = {}
-            if categories:
-                params['category'] = ','.join(categories)
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        if result.get('code') == 0:
-                            return result.get('data', [])
-                    return []
-        except Exception as e:
-            self.logger.error(f"Failed to fetch template list: {e}")
-            return []
-
-    async def _download_template(self, template_data: Dict) -> bool:
-        """
-        Download a single template
-
-        Args:
-            template_data: Template data from API
-
-        Returns:
-            True if downloaded successfully
-        """
-        try:
-            template_id = template_data.get('id')
-            image_url = template_data.get('imageUrl')
-
-            if not image_url:
-                return False
-
-            local_filename = f"{template_id}.png"
-            local_path = os.path.join(self._cache_dir, local_filename)
-
-            if os.path.exists(local_path):
-                existing_checksum = self._calculate_file_checksum(local_path)
-                if existing_checksum == template_data.get('checksum'):
-                    self.logger.debug(f"Template {template_id} already cached")
-                    self._templates[template_id] = self._create_template_info(template_data, local_path)
-                    return True
-
-            download_url = f"{self._base_url}{image_url}"
-            success = await self._download_file(download_url, local_path)
-
-            if success:
-                self._templates[template_id] = self._create_template_info(template_data, local_path)
-                self.logger.info(f"Downloaded template: {template_data.get('name')}")
-                return True
-
-            return False
-
-        except Exception as e:
-            self.logger.error(f"Failed to download template {template_data.get('id')}: {e}")
-            return False
-
-    async def _download_file(self, url: str, dest_path: str) -> bool:
-        """Download file from URL"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        content = await response.read()
-                        with open(dest_path, 'wb') as f:
-                            f.write(content)
-                        return True
-                    return False
-        except Exception as e:
-            self.logger.error(f"Download failed: {e}")
-            return False
-
-    def _create_template_info(self, data: Dict, local_path: str) -> TemplateInfo:
-        """Create TemplateInfo from data"""
-        return TemplateInfo(
-            id=data.get('id'),
-            name=data.get('name'),
-            description=data.get('description', ''),
-            category=data.get('category', 'other'),
-            image_url=data.get('imageUrl', ''),
-            local_path=local_path,
-            width=data.get('width', 0),
-            height=data.get('height', 0),
-            match_threshold=data.get('matchThreshold', 0.8),
-            game=data.get('game', 'other'),
-            checksum=data.get('checksum', ''),
-            last_updated=datetime.now()
-        )
-
-    def _calculate_file_checksum(self, file_path: str) -> str:
-        """Calculate MD5 checksum of a file"""
-        try:
-            with open(file_path, 'rb') as f:
-                return hashlib.md5(f.read()).hexdigest()
-        except Exception:
-            return ''
-
-    def get_template(self, template_id: str) -> Optional[TemplateInfo]:
-        """Get template by ID"""
-        return self._templates.get(template_id)
-
-    def get_templates_by_category(self, category: str) -> List[TemplateInfo]:
-        """Get all templates in a category"""
-        return [t for t in self._templates.values() if t.category == category]
-
-    def get_templates_by_game(self, game: str) -> List[TemplateInfo]:
-        """Get all templates for a game"""
-        return [t for t in self._templates.values() if t.game == game]
-
-    def get_all_templates(self) -> List[TemplateInfo]:
-        """Get all cached templates"""
-        return list(self._templates.values())
-
-    def get_local_path(self, template_id: str) -> Optional[str]:
-        """Get local file path for a template"""
-        template = self._templates.get(template_id)
-        if template and os.path.exists(template.local_path):
-            return template.local_path
-        return None
-
-    async def delete_template(self, template_id: str) -> bool:
-        """Delete a cached template"""
-        template = self._templates.get(template_id)
-        if template and os.path.exists(template.local_path):
+        for template_file in self.template_dir.glob("*.png"):
             try:
-                os.remove(template.local_path)
-                del self._templates[template_id]
-                self.logger.info(f"Deleted template: {template_id}")
-                return True
+                template_name = template_file.stem
+                template = cv2.imread(str(template_file), cv2.IMREAD_COLOR)
+
+                if template is not None:
+                    self._template_cache[template_name] = template
+                    count += 1
+
             except Exception as e:
-                self.logger.error(f"Failed to delete template: {e}")
-        return False
+                self.logger.error(f"预加载失败 {template_file}: {e}")
+
+        self.logger.info(f"预加载完成，共 {count} 个模板")
+        return count
+
+    def load_serialized(self, filename: str = "templates.dat") -> bool:
+        """
+        加载序列化的模板数据
+
+        参数说明：
+        - filename: 序列化文件名
+
+        返回值：
+        - 是否加载成功
+        """
+        serialized_path = self.data_dir / filename
+
+        if not serialized_path.exists():
+            self.logger.warning(f"序列化文件不存在: {serialized_path}")
+            return False
+
+        try:
+            with open(serialized_path, "rb") as f:
+                data_bytes = f.read()
+
+            self._serialized_data = compress_pickle.loads(
+                data_bytes,
+                compression="gzip"
+            )
+
+            self.logger.info(
+                f"加载序列化数据完成，共 {len(self._serialized_data)} 个模板"
+            )
+            return True
+
+        except Exception as e:
+            self.logger.error(f"加载序列化数据失败: {e}")
+            return False
+
+    def save_serialized(self, filename: str = "templates.dat") -> bool:
+        """
+        保存模板到序列化数据文件
+
+        参数说明：
+        - filename: 序列化文件名
+
+        返回值：
+        - 是否保存成功
+        """
+        if not self._template_cache:
+            self.logger.warning("没有缓存的模板可保存")
+            return False
+
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            serialized_path = self.data_dir / filename
+
+            data_bytes = compress_pickle.dumps(
+                self._template_cache,
+                compression="gzip"
+            )
+
+            with open(serialized_path, "wb") as f:
+                f.write(data_bytes)
+
+            self.logger.info(f"保存序列化数据: {serialized_path}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"保存序列化数据失败: {e}")
+            return False
 
     def clear_cache(self):
-        """Clear all cached templates"""
-        for template in self._templates.values():
-            try:
-                if os.path.exists(template.local_path):
-                    os.remove(template.local_path)
-            except Exception:
-                pass
-        self._templates.clear()
-        self.logger.info("Template cache cleared")
+        """清空模板缓存"""
+        self._template_cache.clear()
+        self.logger.debug("模板缓存已清空")
 
+    def get_cache_size(self) -> int:
+        """获取缓存中的模板数量"""
+        return len(self._template_cache)
 
-template_manager = TemplateManager()
+    def get_template_list(self) -> list:
+        """
+        获取所有可用模板列表
+
+        返回值：
+        - 模板路径列表
+        """
+        if not self.template_dir.exists():
+            return []
+
+        return [
+            str(f.relative_to(self.template_dir))
+            for f in self.template_dir.glob("*.png")
+        ]

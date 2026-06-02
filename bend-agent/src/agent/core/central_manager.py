@@ -439,6 +439,15 @@ class CentralManager:
         except Exception as e:
             self.logger.error(f"Error stopping task executor: {e}")
 
+        # 清理所有窗口
+        try:
+            from ..windows.task_window_manager import TaskWindowManager
+            window_manager = TaskWindowManager()
+            await window_manager.close_all_windows()
+            self.logger.info("All windows closed")
+        except Exception as e:
+            self.logger.error(f"Error closing windows: {e}")
+
         # 先关闭API客户端（防止任务清理时继续上报）
         await self.api.close()
         

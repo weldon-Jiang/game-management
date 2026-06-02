@@ -141,6 +141,24 @@
               取消
             </el-button>
             <el-button
+              v-if="row.status === 'running' && row.targetAgentId"
+              type="success"
+              link
+              size="small"
+              @click="handleShowWindow(row)"
+            >
+              显示窗口
+            </el-button>
+            <el-button
+              v-if="row.status === 'running' && row.targetAgentId"
+              type="info"
+              link
+              size="small"
+              @click="handleHideWindow(row)"
+            >
+              隐藏窗口
+            </el-button>
+            <el-button
               v-if="row.status === 'pending'"
               type="danger"
               link
@@ -197,6 +215,16 @@
             :rows="4"
             placeholder='请输入JSON格式的任务参数，如: {"template": "start_button.png", "threshold": 0.8}'
           />
+        </el-form-item>
+        <el-form-item label="显示游戏窗口" prop="enableWindowDisplay">
+          <el-switch
+            v-model="createForm.enableWindowDisplay"
+            :active-value="true"
+            :inactive-value="false"
+            active-text="显示"
+            inactive-text="隐藏"
+          />
+          <div class="form-item-tip">开启后Agent将在任务执行时显示游戏窗口</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -266,7 +294,8 @@ const createForm = reactive({
   name: '',
   type: '',
   priority: 0,
-  paramsJson: ''
+  paramsJson: '',
+  enableWindowDisplay: true
 })
 
 const createFormRef = ref(null)
@@ -329,6 +358,7 @@ const showCreateDialog = () => {
   createForm.type = ''
   createForm.priority = 0
   createForm.paramsJson = ''
+  createForm.enableWindowDisplay = true
   createDialogVisible.value = true
 }
 
@@ -353,7 +383,8 @@ const handleCreate = async () => {
       name: createForm.name,
       type: createForm.type,
       priority: createForm.priority,
-      params: params
+      params: params,
+      enableWindowDisplay: createForm.enableWindowDisplay
     }
 
     const res = await taskApi.create(data)
@@ -420,6 +451,32 @@ const handleCancel = async (task) => {
     }
   } catch (error) {
     ElMessage.error('取消失败')
+  }
+}
+
+const handleShowWindow = async (task) => {
+  try {
+    const res = await taskApi.showWindow(task.id)
+    if (res.code === 0 || res.code === 200) {
+      ElMessage.success('窗口显示命令已发送')
+    } else {
+      ElMessage.error(res.message || '显示窗口失败')
+    }
+  } catch (error) {
+    ElMessage.error('显示窗口失败')
+  }
+}
+
+const handleHideWindow = async (task) => {
+  try {
+    const res = await taskApi.hideWindow(task.id)
+    if (res.code === 0 || res.code === 200) {
+      ElMessage.success('窗口隐藏命令已发送')
+    } else {
+      ElMessage.error(res.message || '隐藏窗口失败')
+    }
+  } catch (error) {
+    ElMessage.error('隐藏窗口失败')
   }
 }
 
@@ -560,5 +617,12 @@ onMounted(() => {
 
 .data-table >>> .el-table__body-wrapper .el-table__row:hover td.el-table__cell {
   background-color: #1a1a2e !important;
+}
+
+.form-item-tip {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 4px;
+  line-height: 1.4;
 }
 </style>

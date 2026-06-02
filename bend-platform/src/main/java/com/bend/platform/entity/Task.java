@@ -223,4 +223,7 @@ public class Task {
 
     @TableField(exist = false)
     private String xboxHostIp;
+
+    @TableField(exist = false)
+    private Boolean enableWindowDisplay;
 }
