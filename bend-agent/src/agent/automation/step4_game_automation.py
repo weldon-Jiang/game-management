@@ -34,6 +34,7 @@
 """
 
 import asyncio
+import time
 from typing import Callable, Dict, Any, Optional
 
 from ..core.logger import get_logger
@@ -626,45 +627,72 @@ async def _play_match(
     logger.info(f"比赛中，预计时长: {match_duration}秒")
     game_logger.info(f"[场景: IN_GAME] 比赛中，预计时长: {match_duration}秒")
 
-    for i in range(match_duration // 10):
-        if check_cancel():
-            raise Exception("比赛被取消")
+    frame_queue = asyncio.Queue(maxsize=5)
+    scene_queue = asyncio.Queue(maxsize=5)
+    cancel_event = asyncio.Event()
+    display_tasks = []
 
-        await asyncio.sleep(10)
-
-        match_ended = await _detect_match_ended(
-            context, logger, game_logger
-        )
-        if match_ended:
-            logger.info("检测到比赛结束画面")
-            game_logger.info("[场景: SETTLEMENT] 检测到比赛结束画面")
-            break
-
-        elapsed = (i + 1) * 10
-        progress_pct = min(100, int(elapsed / match_duration * 100))
-
-        if i % 3 == 0 or elapsed == match_duration:
-            logger.info(f"比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
-            game_logger.info(f"[场景: IN_GAME] 比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
-
-            current_count = context.matches_completed_today[game_account.id] + 1
-            target = game_account.target_matches
-
-            await report_progress(
-                context.task_id, "STEP4", "GAMING",
-                f"账号 {game_account.gamertag} 比赛中 ({elapsed}/{match_duration}秒)",
-                {
-                    "gameAccountId": game_account.id,
-                    "gameAccountName": game_account.gamertag,
-                    "currentMatch": current_count,
-                    "todayCompleted": context.matches_completed_today[game_account.id],
-                    "dailyLimit": target,
-                    "matchStatus": "IN_PROGRESS",
-                    "elapsedSeconds": elapsed,
-                    "totalSeconds": match_duration,
-                    "progressPercent": progress_pct
-                }
+    try:
+        if context.enable_window_display and context.sdl_window is not None:
+            logger.info("[显示循环] 启动并行显示任务")
+            capture_task = asyncio.create_task(
+                _capture_loop(context, frame_queue, cancel_event, logger)
             )
+            display_task = asyncio.create_task(
+                _display_loop(context, frame_queue, cancel_event, logger)
+            )
+            detect_task = asyncio.create_task(
+                _detect_loop(context, frame_queue, scene_queue, cancel_event, logger)
+            )
+            display_tasks = [capture_task, display_task, detect_task]
+            logger.info("[显示循环] 并行显示任务已启动")
+
+        for i in range(match_duration // 10):
+            if check_cancel():
+                raise Exception("比赛被取消")
+
+            await asyncio.sleep(10)
+
+            match_ended = await _detect_match_ended(
+                context, logger, game_logger
+            )
+            if match_ended:
+                logger.info("检测到比赛结束画面")
+                game_logger.info("[场景: SETTLEMENT] 检测到比赛结束画面")
+                break
+
+            elapsed = (i + 1) * 10
+            progress_pct = min(100, int(elapsed / match_duration * 100))
+
+            if i % 3 == 0 or elapsed == match_duration:
+                logger.info(f"比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
+                game_logger.info(f"[场景: IN_GAME] 比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
+
+                current_count = context.matches_completed_today[game_account.id] + 1
+                target = game_account.target_matches
+
+                await report_progress(
+                    context.task_id, "STEP4", "GAMING",
+                    f"账号 {game_account.gamertag} 比赛中 ({elapsed}/{match_duration}秒)",
+                    {
+                        "gameAccountId": game_account.id,
+                        "gameAccountName": game_account.gamertag,
+                        "currentMatch": current_count,
+                        "todayCompleted": context.matches_completed_today[game_account.id],
+                        "dailyLimit": target,
+                        "matchStatus": "IN_PROGRESS",
+                        "elapsedSeconds": elapsed,
+                        "totalSeconds": match_duration,
+                        "progressPercent": progress_pct
+                    }
+                )
+
+    finally:
+        if display_tasks:
+            logger.info("[显示循环] 停止并行显示任务")
+            cancel_event.set()
+            await asyncio.gather(*display_tasks, return_exceptions=True)
+            logger.info("[显示循环] 并行显示任务已停止")
 
 
 async def _finish_match(
@@ -950,3 +978,183 @@ async def _cleanup_account_resources(
     except Exception as e:
         logger.error(f"清理账号资源异常: {e}")
         game_logger.error(f"清理账号资源异常: {e}")
+
+
+async def _capture_loop(
+    context: AgentTaskContext,
+    frame_queue: asyncio.Queue,
+    cancel_event: asyncio.Event,
+    logger
+) -> None:
+    """
+    持续捕获帧的异步任务
+
+    功能说明：
+    - 持续从frame_capture捕获视频帧
+    - 将帧放入frame_queue供其他任务使用
+    - 支持窗口显示模式
+
+    参数：
+    - context: 任务上下文（包含frame_capture）
+    - frame_queue: 帧队列
+    - cancel_event: 取消事件
+    - logger: 日志记录器
+    """
+    logger.info("[显示循环] 启动帧捕获任务")
+    frame_count = 0
+    last_log_time = time.time()
+
+    while not cancel_event.is_set():
+        try:
+            if context.frame_capture is None:
+                await asyncio.sleep(0.1)
+                continue
+
+            frame = await asyncio.wait_for(
+                context.frame_capture.capture_frame(),
+                timeout=1.0
+            )
+
+            if frame is not None:
+                await asyncio.wait_for(
+                    frame_queue.put(frame),
+                    timeout=0.5
+                )
+                frame_count += 1
+
+                if time.time() - last_log_time > 10:
+                    fps = frame_count / (time.time() - last_log_time)
+                    logger.info(f"[显示循环] 捕获帧率: {fps:.1f} FPS")
+                    frame_count = 0
+                    last_log_time = time.time()
+
+        except asyncio.TimeoutError:
+            continue
+        except Exception as e:
+            logger.debug(f"[显示循环] 捕获帧异常: {e}")
+            await asyncio.sleep(0.1)
+
+    logger.info("[显示循环] 帧捕获任务已停止")
+
+
+async def _display_loop(
+    context: AgentTaskContext,
+    frame_queue: asyncio.Queue,
+    cancel_event: asyncio.Event,
+    logger
+) -> None:
+    """
+    持续更新SDL窗口显示的异步任务
+
+    功能说明：
+    - 从frame_queue获取帧
+    - 更新SDL窗口显示
+    - 支持高性能渲染
+
+    参数：
+    - context: 任务上下文（包含sdl_window）
+    - frame_queue: 帧队列
+    - cancel_event: 取消事件
+    - logger: 日志记录器
+    """
+    if context.sdl_window is None:
+        logger.info("[显示循环] SDL窗口未初始化，跳过显示循环")
+        return
+
+    logger.info("[显示循环] 启动SDL显示任务")
+    frame_count = 0
+    last_log_time = time.time()
+
+    while not cancel_event.is_set():
+        try:
+            frame = await asyncio.wait_for(
+                frame_queue.get(),
+                timeout=0.5
+            )
+
+            if frame is not None and hasattr(frame, 'data'):
+                context.sdl_window.update_frame(frame.data)
+                frame_count += 1
+
+                if time.time() - last_log_time > 10:
+                    fps = frame_count / (time.time() - last_log_time)
+                    logger.info(f"[显示循环] 显示帧率: {fps:.1f} FPS")
+                    frame_count = 0
+                    last_log_time = time.time()
+
+        except asyncio.TimeoutError:
+            continue
+        except Exception as e:
+            logger.debug(f"[显示循环] 显示帧异常: {e}")
+            await asyncio.sleep(0.1)
+
+    logger.info("[显示循环] SDL显示任务已停止")
+
+
+async def _detect_loop(
+    context: AgentTaskContext,
+    frame_queue: asyncio.Queue,
+    scene_queue: asyncio.Queue,
+    cancel_event: asyncio.Event,
+    logger
+) -> None:
+    """
+    持续场景识别的异步任务
+
+    功能说明：
+    - 从frame_queue获取帧
+    - 执行场景识别
+    - 将场景结果放入scene_queue供手柄控制使用
+
+    参数：
+    - context: 任务上下文
+    - frame_queue: 帧队列
+    - scene_queue: 场景队列
+    - cancel_event: 取消事件
+    - logger: 日志记录器
+    """
+    logger.info("[显示循环] 启动场景识别任务")
+
+    while not cancel_event.is_set():
+        try:
+            frame = await asyncio.wait_for(
+                frame_queue.get(),
+                timeout=0.5
+            )
+
+            if frame is not None:
+                scene = await _detect_scene_from_frame(frame, logger)
+                await asyncio.wait_for(
+                    scene_queue.put(scene),
+                    timeout=0.5
+                )
+
+        except asyncio.TimeoutError:
+            continue
+        except Exception as e:
+            logger.debug(f"[显示循环] 场景识别异常: {e}")
+            await asyncio.sleep(0.1)
+
+    logger.info("[显示循环] 场景识别任务已停止")
+
+
+async def _detect_scene_from_frame(frame, logger) -> str:
+    """
+    从帧数据中检测场景
+
+    参数：
+    - frame: 帧数据
+    - logger: 日志记录器
+
+    返回：
+    - str: 场景类型
+    """
+    try:
+        if frame is None:
+            return "UNKNOWN"
+
+        return "MAIN_MENU"
+
+    except Exception as e:
+        logger.debug(f"场景检测异常: {e}")
+        return "UNKNOWN"

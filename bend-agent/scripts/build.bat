@@ -26,7 +26,7 @@ mkdir "%BUILD_DIR%"
 
 REM Install dependencies
 echo [2/9] Installing dependencies...
-pip install pyarmor pyinstaller aiohttp websockets Pillow opencv-python numpy pystray pyautogui pydirectinput pywin32 inputs xlib PyYAML python-json-logger asyncio-throttle pycryptodome -q
+pip install pyarmor pyinstaller aiohttp websockets beautifulsoup4 playwright Pillow opencv-python numpy pystray pyautogui pydirectinput pywin32 inputs python-xlib PyYAML python-json-logger asyncio-throttle pycryptodome scikit-image easyocr torch torchvision imageio-ffmpeg pyotp -q
 
 REM Create build directory structure
 echo [3/9] Creating build directory structure...
@@ -96,6 +96,7 @@ pyinstaller --name "BendAgent" ^
     --hidden-import=win32con ^
     --hidden-import=win32ui ^
     --hidden-import=inputs ^
+    --hidden-import=Xlib ^
     --hidden-import=yaml ^
     --hidden-import=cryptography ^
     --hidden-import=pycryptodome ^
@@ -105,7 +106,13 @@ pyinstaller --name "BendAgent" ^
     --hidden-import=skimage.feature ^
     --hidden-import=skimage.transform ^
     --hidden-import=easyocr ^
+    --hidden-import=bs4 ^
+    --hidden-import=playwright ^
     --hidden-import=asyncio_throttle ^
+    --hidden-import=torch ^
+    --hidden-import=torchvision ^
+    --hidden-import=imageio_ffmpeg ^
+    --hidden-import=pyotp ^
     --collect-all=pystray ^
     --noconfirm ^
     "%OBFUSCATED_DIR%\main.py"

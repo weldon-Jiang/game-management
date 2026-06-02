@@ -140,6 +140,25 @@ async def step3_streaming_init(
         if check_cancel():
             return Step3Result(success=False, error_code="CANCELLED", message="任务被取消")
 
+        sdl_window = None
+        if context.enable_window_display:
+            context.update_step_status("step3", TaskStepStatus.RUNNING, "正在初始化SDL显示窗口...")
+            stream_logger.info("正在初始化SDL显示窗口...")
+            sdl_window = await _init_sdl_window(context, logger, stream_logger)
+            if sdl_window:
+                context.sdl_window = sdl_window
+                logger.info("SDL显示窗口初始化成功，已保存到上下文供步骤四使用")
+                stream_logger.info("SDL显示窗口初始化成功")
+            else:
+                logger.warning("SDL显示窗口初始化失败，步骤四将不显示画面")
+                stream_logger.warning("SDL显示窗口初始化失败")
+        else:
+            logger.info("窗口显示已禁用，跳过SDL窗口初始化")
+            stream_logger.info("窗口显示已禁用")
+
+        if check_cancel():
+            return Step3Result(success=False, error_code="CANCELLED", message="任务被取消")
+
         context.update_step_status("step3", TaskStepStatus.RUNNING, "正在检测游戏界面...")
         await report_progress(context.task_id, "STEP3", "RUNNING", "正在检测游戏界面...")
 

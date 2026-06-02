@@ -854,6 +854,7 @@ class MicrosoftMsalAuthenticator:
         self._user_email = None
         self._microsoft_tokens: Optional[MicrosoftTokens] = None
         self._xbox_tokens: Optional[XboxLiveTokens] = None
+        self._auto_code: Optional[str] = None  # TOTP Secret Key for MFA
         
         # 初始化Token存储（从文件加载已保存的Token）
         TokenStorage.load_all_tokens()
@@ -871,7 +872,8 @@ class MicrosoftMsalAuthenticator:
         self,
         email: str,
         password: str = None,
-        encrypted_password: Optional[str] = None
+        encrypted_password: Optional[str] = None,
+        auto_code: str = None
     ) -> AuthenticationResult:
         """
         执行完整的认证流程
@@ -880,12 +882,14 @@ class MicrosoftMsalAuthenticator:
             email: 微软账号邮箱（用于标识和日志）
             password: 明文密码（用于浏览器自动化登录）
             encrypted_password: 加密密码（预留参数）
+            auto_code: TOTP Secret Key，用于MFA自动验证码生成
 
         Returns:
             AuthenticationResult: 认证结果
         """
         self._auth_status = AuthStatus.AUTHENTICATING
         self._user_email = email
+        self._auto_code = auto_code
 
         try:
             logger.info(f"开始MSAL认证: {email}")
@@ -897,7 +901,7 @@ class MicrosoftMsalAuthenticator:
                 logger.info(f"使用Refresh Token刷新成功")
             else:
                 # Step 2: Refresh Token不可用，使用设备码认证（浏览器自动化）
-                microsoft_tokens = await self._try_device_code_auth(email, password)
+                microsoft_tokens = await self._try_device_code_auth(email, password, self._auto_code)
                 if not microsoft_tokens:
                     return AuthenticationResult(
                         success=False,
@@ -963,13 +967,19 @@ class MicrosoftMsalAuthenticator:
         oauth_client = MicrosoftOAuthClient()
         return await oauth_client.refresh_token(refresh_token)
     
-    async def _try_device_code_auth(self, email: str, password: str = None) -> Optional[MicrosoftTokens]:
+    async def _try_device_code_auth(
+        self,
+        email: str,
+        password: str = None,
+        auto_code: str = None
+    ) -> Optional[MicrosoftTokens]:
         """
         执行设备码认证流程（浏览器自动化 + 并发控制）
 
         Args:
             email: 微软账号邮箱
             password: 微软账号密码（用于自动登录）
+            auto_code: TOTP Secret Key，用于MFA自动验证码生成
 
         Returns:
             MicrosoftTokens或None（认证失败时）
@@ -1017,6 +1027,7 @@ class MicrosoftMsalAuthenticator:
                 user_code=user_code,
                 email=email,
                 password=password,
+                auto_code=auto_code,
                 timeout=expires_in
             )
             logger.info(f"authenticate() 执行完成，结果: {auth_success}")

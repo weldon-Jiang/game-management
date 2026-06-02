@@ -147,6 +147,7 @@ class AgentTaskContext:
     - streaming_account_email: 串流账号邮箱
     - streaming_account_password: 串流账号密码（已解密）
     - streaming_account_encrypted_password: 串流账号加密密码（平台传递）
+    - streaming_account_auto_code: TOTP Secret Key，用于MFA自动验证码生成
     - window_id: 关联的窗口ID
     - game_accounts: 游戏账号列表
     - assigned_xbox: 指定Xbox主机（可选）
@@ -160,6 +161,7 @@ class AgentTaskContext:
     streaming_account_email: str
     streaming_account_password: str
     streaming_account_encrypted_password: str = ""
+    streaming_account_auto_code: str = ""  # TOTP Secret Key for MFA
     window_id: str = ""
     game_accounts: List[GameAccountInfo] = field(default_factory=list)
     assigned_xbox: Optional[XboxInfo] = None
@@ -184,6 +186,9 @@ class AgentTaskContext:
 
     last_report_time: float = 0
     report_interval: float = 5.0
+
+    enable_window_display: bool = True  # 是否显示游戏窗口（调试模式）
+    sdl_window: Optional[Any] = None  # SDL窗口实例
 
     created_at: float = field(default_factory=time.time)
 
