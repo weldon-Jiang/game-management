@@ -149,8 +149,10 @@ class WSClient:
         - False: 连接失败
 
         URL格式：
-        - ws://host:port/{agent_id}?agentSecret={secret}
+        - ws://host:port/{agent_id}  (认证: Header X-Agent-Secret Base64)
+        - 兼容: ?agentSecret= 查询参数
         """
+        import base64
         import websockets
 
         async with self._connection_lock:
@@ -168,9 +170,21 @@ class WSClient:
             self._ws_id += 1
             current_ws_id = self._ws_id
 
-            url = f"{self.ws_url}/{self.agent_id}?agentSecret={self.agent_secret}"
+            url = f"{self.ws_url}/{self.agent_id}"
+            extra_headers = {
+                'X-Agent-Secret': base64.b64encode(
+                    self.agent_secret.encode('utf-8')
+                ).decode('ascii'),
+            }
             try:
-                self._ws = await websockets.connect(url, ping_interval=None)
+                try:
+                    self._ws = await websockets.connect(
+                        url, extra_headers=extra_headers, ping_interval=None
+                    )
+                except TypeError:
+                    # Older websockets: extra_headers not supported
+                    legacy_url = f"{url}?agentSecret={self.agent_secret}"
+                    self._ws = await websockets.connect(legacy_url, ping_interval=None)
                 # 检查连接是否被替换（可能被其他重连任务覆盖）
                 if current_ws_id != self._ws_id or not self._running:
                     self.logger.debug(f"Connection {current_ws_id} superseded, closing")

@@ -9,6 +9,7 @@ import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.MerchantRegistrationCodeService;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import com.bend.platform.service.MerchantRegistrationCodeService.ActivationResult;
+import com.bend.platform.util.AgentAuthUtils;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -222,7 +223,7 @@ public class AgentController {
             return ApiResponse.error(404, "Agent未注册");
         }
 
-        if (!agentSecret.equals(instance.getAgentSecret())) {
+        if (!agentInstanceService.validateCredentials(agentId, AgentAuthUtils.decodeSecretHeader(agentSecret))) {
             return ApiResponse.error(401, "Agent密钥验证失败");
         }
 
@@ -266,7 +267,7 @@ public class AgentController {
             return ApiResponse.error(404, "Agent未注册");
         }
 
-        if (!agentSecret.equals(instance.getAgentSecret())) {
+        if (!agentInstanceService.validateCredentials(agentId, AgentAuthUtils.decodeSecretHeader(agentSecret))) {
             return ApiResponse.error(401, "Agent密钥验证失败");
         }
 
@@ -311,7 +312,7 @@ public class AgentController {
             return ApiResponse.error(404, "Agent未注册");
         }
 
-        if (!agentSecret.equals(instance.getAgentSecret())) {
+        if (!agentInstanceService.validateCredentials(agentId, AgentAuthUtils.decodeSecretHeader(agentSecret))) {
             return ApiResponse.error(401, "Agent密钥验证失败");
         }
 
@@ -341,7 +342,7 @@ public class AgentController {
             return ApiResponse.error(404, "Agent未注册");
         }
 
-        if (!agentSecret.equals(instance.getAgentSecret())) {
+        if (!agentInstanceService.validateCredentials(agentId, AgentAuthUtils.decodeSecretHeader(agentSecret))) {
             return ApiResponse.error(401, "Agent密钥验证失败");
         }
 

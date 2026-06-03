@@ -266,7 +266,9 @@ public class TaskServiceImpl implements TaskService {
         taskData.put("params", parseParams(task.getParams()));
         taskData.put("priority", task.getPriority());
 
-        AgentWebSocketEndpoint.sendTaskToAgent(agentId, taskId, taskData);
+        if (!AgentWebSocketEndpoint.sendTaskToAgent(agentId, taskId, taskData)) {
+            throw new BusinessException(400, "Agent不在线，任务未能下发");
+        }
         log.info("任务已分配给Agent - TaskID: {}, AgentID: {}", taskId, agentId);
 
         return task;

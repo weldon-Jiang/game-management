@@ -38,3 +38,4 @@ Thumbs.db
 bend-platform/target/
 bend-platform-web/dist/
 bend-agent/dist/
+.cursor/

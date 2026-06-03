@@ -17,7 +17,10 @@ import com.bend.platform.service.XboxHostService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -60,10 +63,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             throw new BusinessException(400, "taskId和status为必需字段");
         }
 
-        Task task = findTaskForAgentCallback(taskId);
-        if (task == null) {
-            throw new BusinessException(ResultCode.System.DATA_NOT_FOUND, "任务不存在");
-        }
+        Task task = requireTaskForAuthenticatedAgent(taskId);
 
         Map<String, Object> response = new HashMap<>();
         response.put("received", true);
@@ -269,14 +269,46 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         return taskMapper.selectById(taskId);
     }
 
-    @Override
-    public Map<String, Object> getTaskInfo(String taskId) {
-        log.info("【v2.0】获取任务信息 - TaskID: {}", taskId);
-
+    /**
+     * 加载任务并校验其 targetAgentId 与当前 HTTP 认证的 Agent 一致。
+     */
+    private Task requireTaskForAuthenticatedAgent(String taskId) {
         Task task = findTaskForAgentCallback(taskId);
         if (task == null) {
             throw new BusinessException(ResultCode.System.DATA_NOT_FOUND, "任务不存在");
         }
+        String authenticatedAgentId = getAuthenticatedAgentId();
+        if (authenticatedAgentId != null
+                && task.getTargetAgentId() != null
+                && !authenticatedAgentId.equals(task.getTargetAgentId())) {
+            log.warn("Agent 无权操作任务 - AgentID: {}, TaskID: {}, TargetAgent: {}",
+                    authenticatedAgentId, taskId, task.getTargetAgentId());
+            throw new BusinessException(403, "任务不属于当前 Agent");
+        }
+        return task;
+    }
+
+    private String getAuthenticatedAgentId() {
+        try {
+            ServletRequestAttributes attrs =
+                    (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attrs == null) {
+                return null;
+            }
+            HttpServletRequest request = attrs.getRequest();
+            Object agentId = request.getAttribute("agentId");
+            return agentId != null ? agentId.toString() : null;
+        } catch (Exception e) {
+            log.debug("无法读取认证 AgentId: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    @Override
+    public Map<String, Object> getTaskInfo(String taskId) {
+        log.info("【v2.0】获取任务信息 - TaskID: {}", taskId);
+
+        Task task = requireTaskForAuthenticatedAgent(taskId);
 
         Map<String, Object> result = new HashMap<>();
         result.put("taskId", task.getId());
@@ -324,6 +356,9 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         }
 
         String taskId = payload != null ? (String) payload.get("taskId") : null;
+        if (taskId != null) {
+            requireTaskForAuthenticatedAgent(taskId);
+        }
 
         boolean locked = xboxHostService.lock(xboxHostId, taskId);
 
@@ -424,10 +459,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         String status = payload.get("status");
         String message = payload.get("message");
 
-        Task task = findTaskForAgentCallback(taskId);
-        if (task == null) {
-            throw new BusinessException(ResultCode.System.DATA_NOT_FOUND, "任务不存在");
-        }
+        requireTaskForAuthenticatedAgent(taskId);
 
         taskService.updateStatus(taskId, status);
 
@@ -454,10 +486,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
                 ? ((Number) payload.get("dailyLimit")).intValue()
                 : null;
 
-        Task task = findTaskForAgentCallback(taskId);
-        if (task == null) {
-            throw new BusinessException(ResultCode.System.DATA_NOT_FOUND, "任务不存在");
-        }
+        requireTaskForAuthenticatedAgent(taskId);
 
         statusService.updateStatus(taskId, gameAccountId, status);
 
@@ -484,10 +513,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     public List<Map<String, Object>> getGameAccountsStatusLegacy(String taskId) {
         log.warn("【deprecated】使用旧接口 getGameAccountsStatus，请迁移至 /api/v1/agent-callback/task/{taskId}");
 
-        Task task = findTaskForAgentCallback(taskId);
-        if (task == null) {
-            throw new BusinessException(ResultCode.System.DATA_NOT_FOUND, "任务不存在");
-        }
+        Task task = requireTaskForAuthenticatedAgent(taskId);
 
         String streamingAccountId = task.getStreamingAccountId();
         if (streamingAccountId == null) {

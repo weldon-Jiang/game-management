@@ -8,22 +8,19 @@ import com.bend.platform.service.AgentLoadControlService;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.TaskExecutorService;
 import com.bend.platform.service.TaskGameAccountStatusService;
+import com.bend.platform.util.DebugSessionLog;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import java.util.HashMap;
-import java.util.Map;
-
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -55,55 +52,128 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
 
     @Override
     public void executeTask(Task task) {
+        String agentId = task.getTargetAgentId();
         try {
-            if (!loadControlService.canAcceptTask(task.getTargetAgentId())) {
+            if (!loadControlService.canAcceptTask(agentId)) {
                 task.setStatus("pending");
                 task.setErrorMessage("Agent is at maximum capacity, task queued");
                 taskMapper.updateById(task);
                 return;
             }
 
+            boolean agentOnline = AgentWebSocketEndpoint.isAgentOnline(agentId);
+            // #region agent log
+            DebugSessionLog.log("H2", "TaskExecutorServiceImpl.executeTask", "agent_online_check",
+                    Map.of("taskId", task.getId(), "agentId", agentId, "online", agentOnline));
+            // #endregion
+            if (!agentOnline) {
+                failTask(task, "Agent is offline or WebSocket not connected");
+                return;
+            }
+
+            List<GameAccount> boundAccounts = gameAccountService.findByStreamingId(task.getStreamingAccountId());
+            GameAccountSelection selection = resolveGameAccountsForTask(task, boundAccounts);
+            // #region agent log
+            DebugSessionLog.log("H3", "TaskExecutorServiceImpl.executeTask", "game_account_selection",
+                    Map.of("taskId", task.getId(), "selectedCount", selection.ids.size(),
+                            "boundActiveCount", selectionFromBoundAccounts(boundAccounts).ids.size()));
+            // #endregion
+
             task.setStatus("running");
             task.setStartedTime(LocalDateTime.now());
             taskMapper.updateById(task);
 
-            loadControlService.incrementTaskCount(task.getTargetAgentId(), task.getId());
+            loadControlService.incrementTaskCount(agentId, task.getId());
 
-            List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(task.getStreamingAccountId());
-            List<String> gameAccountIds = new ArrayList<>();
-            for (GameAccount ga : gameAccounts) {
-                if (Boolean.TRUE.equals(ga.getIsActive())) {
-                    gameAccountIds.add(ga.getId());
-                }
+            statusService.createStatusRecords(
+                    task.getId(), selection.ids, selection.dailyLimits, task.getStreamingAccountId());
+
+            ObjectNode taskData = buildTaskData(task, selection);
+            Map<String, Object> taskDataMap = objectMapper.convertValue(
+                    taskData, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+
+            log.info("准备发送任务到Agent - TaskID: {}, AgentID: {}, GameAccountCount: {}",
+                    task.getId(), agentId, selection.ids.size());
+
+            boolean sent = AgentWebSocketEndpoint.sendTaskToAgent(agentId, task.getId(), taskDataMap);
+            // #region agent log
+            DebugSessionLog.log("H2", "TaskExecutorServiceImpl.executeTask", "ws_send_result",
+                    Map.of("taskId", task.getId(), "agentId", agentId, "sent", sent));
+            // #endregion
+
+            if (!sent) {
+                loadControlService.decrementTaskCount(agentId, task.getId());
+                failTask(task, "Failed to deliver task to agent via WebSocket");
+                return;
             }
-
-            List<Integer> dailyLimits = new ArrayList<>();
-            for (GameAccount ga : gameAccounts) {
-                if (Boolean.TRUE.equals(ga.getIsActive())) {
-                    dailyLimits.add(ga.getDailyMatchLimit() != null ? ga.getDailyMatchLimit() : 3);
-                }
-            }
-            
-            statusService.createStatusRecords(task.getId(), gameAccountIds, dailyLimits, task.getStreamingAccountId());
-
-            ObjectNode taskData = buildTaskData(task, gameAccounts);
-            Map<String, Object> taskDataMap = objectMapper.convertValue(taskData, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
-            
-            log.info("准备发送任务到Agent - TaskID: {}, AgentID: {}, GameAccountCount: {}", 
-                task.getId(), task.getTargetAgentId(), gameAccountIds.size());
-            
-            AgentWebSocketEndpoint.sendTaskToAgent(task.getTargetAgentId(), task.getId(), taskDataMap);
 
             log.info("任务已发送到Agent - TaskID: {}, AgentID: {}, GameAccountCount: {}",
-                task.getId(), task.getTargetAgentId(), gameAccountIds.size());
+                    task.getId(), agentId, selection.ids.size());
 
         } catch (Exception e) {
             log.error("Failed to execute task {}: {}", task.getId(), e.getMessage(), e);
-            task.setStatus("failed");
-            task.setErrorMessage(e.getMessage());
-            task.setCompletedTime(LocalDateTime.now());
-            taskMapper.updateById(task);
+            if (agentId != null) {
+                loadControlService.decrementTaskCount(agentId, task.getId());
+            }
+            failTask(task, e.getMessage());
         }
+    }
+
+    private void failTask(Task task, String message) {
+        task.setStatus("failed");
+        task.setErrorMessage(message);
+        task.setCompletedTime(LocalDateTime.now());
+        taskMapper.updateById(task);
+    }
+
+    /**
+     * Prefer gameAccounts embedded in task.params (automation selected subset).
+     */
+    private GameAccountSelection resolveGameAccountsForTask(Task task, List<GameAccount> boundAccounts)
+            throws Exception {
+        if (task.getParams() != null) {
+            JsonNode params = objectMapper.readTree(task.getParams());
+            JsonNode gas = params.get("gameAccounts");
+            if (gas != null && gas.isArray() && !gas.isEmpty()) {
+                List<String> ids = new ArrayList<>();
+                List<Integer> limits = new ArrayList<>();
+                for (JsonNode ga : gas) {
+                    String id = null;
+                    if (ga.hasNonNull("id")) {
+                        id = ga.get("id").asText();
+                    } else if (ga.hasNonNull("gameAccountId")) {
+                        id = ga.get("gameAccountId").asText();
+                    }
+                    if (id == null || id.isEmpty()) {
+                        continue;
+                    }
+                    ids.add(id);
+                    if (ga.has("dailyMatchLimit") && !ga.get("dailyMatchLimit").isNull()) {
+                        limits.add(ga.get("dailyMatchLimit").asInt(3));
+                    } else {
+                        GameAccount entity = gameAccountService.findById(id);
+                        limits.add(entity != null && entity.getDailyMatchLimit() != null
+                                ? entity.getDailyMatchLimit() : 3);
+                    }
+                }
+                if (!ids.isEmpty()) {
+                    return new GameAccountSelection(ids, limits);
+                }
+            }
+        }
+        return selectionFromBoundAccounts(boundAccounts);
+    }
+
+    private GameAccountSelection selectionFromBoundAccounts(List<GameAccount> gameAccounts) {
+        List<String> ids = new ArrayList<>();
+        List<Integer> limits = new ArrayList<>();
+        for (GameAccount ga : gameAccounts) {
+            if (Boolean.TRUE.equals(ga.getIsActive())) {
+                ids.add(ga.getId());
+                limits.add(ga.getDailyMatchLimit() != null ? ga.getDailyMatchLimit() : 3);
+            }
+        }
+        return new GameAccountSelection(ids, limits);
     }
 
     @Override
@@ -128,7 +198,7 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
         }
     }
 
-    private ObjectNode buildTaskData(Task task, List<GameAccount> gameAccounts) throws Exception {
+    private ObjectNode buildTaskData(Task task, GameAccountSelection selection) throws Exception {
         ObjectNode taskData = objectMapper.createObjectNode();
         taskData.put("taskId", task.getId());
         taskData.put("type", task.getType());
@@ -138,29 +208,29 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
         }
 
         com.fasterxml.jackson.databind.node.ArrayNode gameAccountList = objectMapper.createArrayNode();
-        for (GameAccount ga : gameAccounts) {
-            if (Boolean.TRUE.equals(ga.getIsActive())) {
-                ObjectNode gaInfo = objectMapper.createObjectNode();
-                gaInfo.put("gameAccountId", ga.getId());
-                gaInfo.put("xboxGameName", ga.getXboxGameName());
-                gaInfo.put("xboxLiveEmail", ga.getXboxLiveEmail());
-                gaInfo.put("isPrimary", ga.getIsPrimary());
-                gaInfo.put("priority", ga.getPriority());
-                gaInfo.put("dailyMatchLimit", ga.getDailyMatchLimit());
-                gaInfo.put("todayMatchCount", ga.getTodayMatchCount());
-                gameAccountList.add(gaInfo);
+        for (String gameAccountId : selection.ids) {
+            GameAccount ga = gameAccountService.findById(gameAccountId);
+            if (ga == null || !Boolean.TRUE.equals(ga.getIsActive())) {
+                continue;
             }
+            ObjectNode gaInfo = objectMapper.createObjectNode();
+            gaInfo.put("gameAccountId", ga.getId());
+            gaInfo.put("xboxGameName", ga.getXboxGameName());
+            gaInfo.put("xboxLiveEmail", ga.getXboxLiveEmail());
+            gaInfo.put("isPrimary", ga.getIsPrimary());
+            gaInfo.put("priority", ga.getPriority());
+            gaInfo.put("dailyMatchLimit", ga.getDailyMatchLimit());
+            gaInfo.put("todayMatchCount", ga.getTodayMatchCount());
+            gameAccountList.add(gaInfo);
         }
         taskData.set("gameAccounts", gameAccountList);
 
         if (task.getParams() != null) {
             try {
-                com.fasterxml.jackson.databind.JsonNode params = objectMapper.readTree(task.getParams());
+                JsonNode params = objectMapper.readTree(task.getParams());
                 if (params.isObject()) {
-                    final ObjectNode finalTaskData = taskData;
-                    ((ObjectNode) params).fields().forEachRemaining(entry -> {
-                        finalTaskData.set(entry.getKey(), entry.getValue());
-                    });
+                    ObjectNode finalTaskData = taskData;
+                    params.fields().forEachRemaining(entry -> finalTaskData.set(entry.getKey(), entry.getValue()));
                 }
             } catch (Exception e) {
                 log.warn("Failed to parse task params: {}", e.getMessage());
@@ -169,4 +239,6 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
 
         return taskData;
     }
+
+    private record GameAccountSelection(List<String> ids, List<Integer> dailyLimits) {}
 }

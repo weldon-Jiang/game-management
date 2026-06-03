@@ -1,0 +1,506 @@
+[
+  {
+    "scene_id": 1,
+    "transition_id": 1,
+    "description": "刚串流上的主页界面",
+    "controller_options": [
+      [
+        50,
+        1,
+        2,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      2
+    ]
+  },
+  {
+    "scene_id": 2,
+    "transition_id": 1,
+    "description": "主页初始界面",
+    "controller_options": [
+      [
+        50,
+        0,
+        512,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      203
+    ]
+  },
+  {
+    "scene_id": 203,
+    "transition_id": 1,
+    "description": "选择游戏--fc25--XSS--游戏",
+    "controller_options": [
+      [
+        50,
+        1,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      101
+    ]
+  },
+  {
+    "scene_id": 101,
+    "transition_id": 1,
+    "description": "登陆游戏--开场--1",
+    "controller_options": [
+      [
+        50,
+        1,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      126
+    ]
+  },
+  {
+    "scene_id": 126,
+    "transition_id": 1,
+    "description": "UT 选择界面",
+    "controller_options": [
+      [
+        50,
+        0,
+        512,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      127
+    ]
+  },
+  {
+    "scene_id": 127,
+    "transition_id": 1,
+    "description": "登陆游戏--UT 选中界面",
+    "controller_options": [
+      [
+        50,
+        0,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      147
+    ]
+  },
+  {
+    "scene_id": 147,
+    "transition_id": 1,
+    "description": "UT主菜单--新闻",
+    "controller_options": [
+      [
+        50,
+        2,
+        8192,
+        0,
+        255,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      149
+    ]
+  },
+  {
+    "scene_id": 149,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏",
+    "controller_options": [
+      [
+        50,
+        1,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      155
+    ]
+  },
+  {
+    "scene_id": 155,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--Rush",
+    "controller_options": [
+      [
+        50,
+        1,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      156
+    ]
+  },
+  {
+    "scene_id": 156,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--Squad Battles",
+    "controller_options": [
+      [
+        50,
+        0,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      168
+    ]
+  },
+  {
+    "scene_id": 168,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--选择对手--对手--左上--未打过状态",
+    "controller_options": [
+      [
+        50,
+        1,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      177
+    ]
+  },
+  {
+    "scene_id": 169,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--选择对手--对手--左上--打过状态",
+    "controller_options": [
+      [
+        50,
+        1,
+        2048,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      177
+    ]
+  },
+  {
+    "scene_id": 170,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--选择对手--对手--右上--未打过状态",
+    "controller_options": [
+      [
+        50,
+        1,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      177
+    ]
+  },
+  {
+    "scene_id": 171,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--选择对手--对手--右上--打过状态",
+    "controller_options": [
+      [
+        50,
+        1,
+        512,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      177
+    ]
+  },
+  {
+    "scene_id": 172,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--选择对手--对手--右下--未打过状态",
+    "controller_options": [
+      [
+        50,
+        1,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      177
+    ]
+  },
+  {
+    "scene_id": 173,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--选择对手--对手--右下--打过状态",
+    "controller_options": [
+      [
+        50,
+        1,
+        1024,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      177
+    ]
+  },
+  {
+    "scene_id": 174,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--选择对手--对手--左下--未打过状态",
+    "controller_options": [
+      [
+        50,
+        1,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      177
+    ]
+  },
+  {
+    "scene_id": 175,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--选择对手--对手--左下--打过状态",
+    "controller_options": [
+      [
+        50,
+        1,
+        64,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      168
+    ]
+  },
+  {
+    "scene_id": 177,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--难度选择--业余--按 A 选择",
+    "controller_options": [
+      [
+        50,
+        1,
+        256,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      176
+    ]
+  },
+  {
+    "scene_id": 177,
+    "transition_id": 2,
+    "description": "UT主菜单--开始游戏--难度选择--业余--按 A 选择",
+    "controller_options": [
+      [
+        50,
+        1,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      183
+    ]
+  },
+  {
+    "scene_id": 183,
+    "transition_id": 1,
+    "description": "UT主菜单--开始游戏--您的阵容满足参赛条件--A--继续",
+    "controller_options": [
+      [
+        50,
+        10,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      189
+    ]
+  },
+  {
+    "scene_id": 1,
+    "transition_id": 2,
+    "description": "西瓜主页界面 - 关机",
+    "controller_options": [
+      [
+        1000,
+        1,
+        2,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      7
+    ]
+  },
+  {
+    "scene_id": 7,
+    "transition_id": 1,
+    "description": "您希望做什么--关闭",
+    "controller_options": [
+      [
+        50,
+        1,
+        256,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      8
+    ]
+  },
+  {
+    "scene_id": 8,
+    "transition_id": 1,
+    "description": "您希望做什么--关机",
+    "controller_options": [
+      [
+        50,
+        1,
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "target_scenes": [
+      8
+    ]
+  }
+]

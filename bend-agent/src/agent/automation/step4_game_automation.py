@@ -45,11 +45,82 @@ from ..task.task_context import (
     TaskStepStatus,
     GameAccountInfo
 )
+from ..input.football_controller import FootballController
+from ..scene.scene_action_mapper import SceneActionMapper
 
 automation_engine = None
 account_switcher = None
 
 VALID_TASK_TYPES = frozenset({'daily_match', 'training', 'mission', 'custom'})
+
+# expected_screen -> Streaming scene IDs (Xbox system UI 1-9, football UT menus 100+)
+EXPECTED_SCREEN_SCENES: Dict[str, list] = {
+    'MAIN_MENU': [127, 149, 147, 101],
+    'MATCH_START': [168, 176],
+    'XBOX_SCENE_3': [3],
+    'XBOX_SCENE_5': [5],
+    'XBOX_SCENE_6': [6],
+}
+
+
+async def _ensure_streaming_scene_detector(context: AgentTaskContext, logger):
+    """创建或复用 StreamingSceneDetector，写入 context。"""
+    if getattr(context, '_streaming_scene_detector', None) is not None:
+        return context._streaming_scene_detector
+
+    from ..core.config import config as agent_config
+    from ..scene.streaming_scene_detector import StreamingSceneDetector
+
+    template_dir = agent_config.get('template.template_dir', './templates')
+    threshold = float(agent_config.get('template.threshold', 0.8))
+    detector = StreamingSceneDetector(
+        template_dir=template_dir,
+        default_threshold=threshold,
+    )
+    context._streaming_scene_detector = detector
+    logger.info("StreamingSceneDetector 已就绪 (template_dir=%s)", template_dir)
+    return detector
+
+
+async def _match_expected_screen(
+    context: AgentTaskContext,
+    expected_screen: str,
+    logger,
+    game_logger,
+    timeout_sec: float = 25.0,
+) -> bool:
+    """使用模板匹配校验期望画面。"""
+    scene_ids = EXPECTED_SCREEN_SCENES.get(expected_screen)
+    if not scene_ids:
+        game_logger.warning(f"[场景: {expected_screen}] 未配置场景ID，跳过模板校验")
+        return False
+
+    detector = await _ensure_streaming_scene_detector(context, logger)
+    deadline = time.time() + timeout_sec
+
+    while time.time() < deadline:
+        frame = await context.frame_capture.capture_frame()
+        if frame is None:
+            await asyncio.sleep(0.4)
+            continue
+
+        image = frame.data if hasattr(frame, 'data') else frame
+        for scene_id in scene_ids:
+            result = detector.recognize_scene(image, scene_id=scene_id)
+            if result.matched:
+                logger.info(
+                    f"场景匹配成功: {expected_screen} -> scene {scene_id} "
+                    f"(confidence={result.confidence:.2f})"
+                )
+                game_logger.info(
+                    f"[场景: {expected_screen}] 匹配 scene {scene_id} "
+                    f"({result.confidence:.2f})"
+                )
+                return True
+        await asyncio.sleep(0.5)
+
+    game_logger.warning(f"[场景: {expected_screen}] 模板匹配超时 ({timeout_sec}s)")
+    return False
 
 
 def _normalize_task_type(task_type: Optional[str]) -> str:
@@ -139,7 +210,54 @@ async def step4_execute_gaming(
     automation_engine = engine
     account_switcher = switcher
 
+    global_frame_queue = None
+    global_scene_queue = None
+    global_cancel_event = None
+    global_async_tasks = []
+    football_controller = None
+    scene_action_mapper = None
+
+    async def _send_controller_signal(signal):
+        """发送手柄信号到Xbox"""
+        if automation_engine and hasattr(automation_engine, 'send_controller_signal'):
+            try:
+                await automation_engine.send_controller_signal(signal)
+                logger.debug(f"[手柄信号] 发送: {signal}")
+            except Exception as e:
+                logger.error(f"[手柄信号] 发送失败: {e}")
+        else:
+            logger.warning("[手柄信号] 引擎不支持信号发送")
+
     try:
+        if context.enable_window_display and context.sdl_window is not None:
+            logger.info("[全局异步] 启动帧捕获、显示和场景检测任务")
+            global_frame_queue = asyncio.Queue(maxsize=5)
+            global_scene_queue = asyncio.Queue(maxsize=5)
+            global_cancel_event = asyncio.Event()
+
+            capture_task = asyncio.create_task(
+                _capture_loop(context, global_frame_queue, global_cancel_event, logger)
+            )
+            display_task = asyncio.create_task(
+                _display_loop(context, global_frame_queue, global_cancel_event, logger)
+            )
+            detect_task = asyncio.create_task(
+                _detect_loop(context, global_frame_queue, global_scene_queue, global_cancel_event, logger)
+            )
+
+            global_async_tasks = [capture_task, display_task, detect_task]
+            logger.info("[全局异步] 帧捕获、显示和场景检测任务已启动")
+
+            logger.info("[比赛控制] 初始化比赛控制器和场景动作映射器")
+            football_controller = FootballController()
+            football_controller.set_signal_sender(_send_controller_signal)
+
+            scene_action_mapper = SceneActionMapper(
+                scene_detector=None,
+                football_controller=football_controller
+            )
+            logger.info("[比赛控制] 比赛控制器和场景动作映射器已初始化")
+
         context.matches_completed_today = {}
         for ga in context.game_accounts:
             context.matches_completed_today[ga.id] = ga.today_match_count or 0
@@ -358,6 +476,13 @@ async def step4_execute_gaming(
         await _close_task_window(window_manager, context.task_id, "error", logger)
         return Step4Result(success=False, error_code="EXCEPTION", message=error_msg)
 
+    finally:
+        if global_async_tasks:
+            logger.info("[全局异步] 停止帧捕获、显示和场景检测任务")
+            global_cancel_event.set()
+            await asyncio.gather(*global_async_tasks, return_exceptions=True)
+            logger.info("[全局异步] 帧捕获、显示和场景检测任务已停止")
+
 
 async def _close_task_window(window_manager, task_id: str, reason: str, logger):
     """
@@ -452,12 +577,26 @@ async def _init_game_automation(context: AgentTaskContext, logger):
                 'account_id': ga.id,
                 'gamertag': ga.gamertag,
                 'email': getattr(ga, 'email', None),
-                'max_matches_per_day': ga.target_matches
+                'position_index': idx,
+                'max_matches_per_day': ga.target_matches,
             }
-            for ga in context.game_accounts
+            for idx, ga in enumerate(context.game_accounts)
         ]
         switcher.set_accounts(accounts_data)
         switcher.set_action_executor(executor)
+
+        streaming_detector = None
+        if context.frame_capture:
+            try:
+                streaming_detector = await _ensure_streaming_scene_detector(context, logger)
+                switcher.set_scene_detector(streaming_detector)
+
+                async def _capture_for_switcher():
+                    return await context.frame_capture.capture_frame()
+
+                switcher.set_frame_getter(_capture_for_switcher)
+            except Exception as e:
+                logger.warning(f"账号切换器场景检测绑定失败: {e}")
 
         logger.info("账号切换器已初始化")
         logger.info(f"已加载 {len(accounts_data)} 个游戏账号")
@@ -488,7 +627,10 @@ async def _execute_match_for_account(
     logger,
     game_logger,
     check_cancel: Callable[[], bool],
-    report_progress: Callable[[str, str, str, Optional[Dict]], None]
+    report_progress: Callable[[str, str, str, Optional[Dict]], None],
+    frame_queue: Optional[asyncio.Queue] = None,
+    scene_queue: Optional[asyncio.Queue] = None,
+    cancel_event: Optional[asyncio.Event] = None
 ) -> tuple:
     """
     为指定账号执行一场比赛
@@ -523,7 +665,11 @@ async def _execute_match_for_account(
 
         await _wait_for_match_start(context, game_account, logger, game_logger, report_progress)
 
-        await _play_match(context, game_account, logger, game_logger, check_cancel, report_progress)
+        await _play_match(
+            context, game_account, logger, game_logger, 
+            check_cancel, report_progress,
+            frame_queue, scene_queue
+        )
 
         await _finish_match(context, game_account, logger, game_logger, report_progress)
 
@@ -638,7 +784,9 @@ async def _play_match(
     logger,
     game_logger,
     check_cancel: Callable[[], bool],
-    report_progress: Callable[[str, str, str, Optional[Dict]], None]
+    report_progress: Callable[[str, str, str, Optional[Dict]], None],
+    frame_queue: Optional[asyncio.Queue] = None,
+    scene_queue: Optional[asyncio.Queue] = None
 ):
     """
     进行比赛
@@ -646,12 +794,16 @@ async def _play_match(
     状态上报：比赛进行中 (GAMING，每30秒上报一次)
 
     画面检测：
-    - 持续检测比赛进行中画面
+    - 使用全局异步任务检测场景
+    - 从全局scene_queue获取检测结果
+    - 根据检测到的场景执行对应的足球动作
     - 检测比赛是否异常结束
     - 检测比赛是否正常结束
 
     参数：
     - context: 任务上下文（包含 frame_capture）
+    - frame_queue: 全局帧队列（可选）
+    - scene_queue: 全局场景队列（可选）
     """
     match_duration = 120
     report_interval = 30
@@ -659,72 +811,67 @@ async def _play_match(
     logger.info(f"比赛中，预计时长: {match_duration}秒")
     game_logger.info(f"[场景: IN_GAME] 比赛中，预计时长: {match_duration}秒")
 
-    frame_queue = asyncio.Queue(maxsize=5)
-    scene_queue = asyncio.Queue(maxsize=5)
-    cancel_event = asyncio.Event()
-    display_tasks = []
+    if frame_queue and scene_queue:
+        logger.info("[比赛进行] 使用全局异步任务进行场景检测和动作控制")
 
-    try:
-        if context.enable_window_display and context.sdl_window is not None:
-            logger.info("[显示循环] 启动并行显示任务")
-            capture_task = asyncio.create_task(
-                _capture_loop(context, frame_queue, cancel_event, logger)
-            )
-            display_task = asyncio.create_task(
-                _display_loop(context, frame_queue, cancel_event, logger)
-            )
-            detect_task = asyncio.create_task(
-                _detect_loop(context, frame_queue, scene_queue, cancel_event, logger)
-            )
-            display_tasks = [capture_task, display_task, detect_task]
-            logger.info("[显示循环] 并行显示任务已启动")
+    for i in range(match_duration // 10):
+        if check_cancel():
+            raise Exception("比赛被取消")
 
-        for i in range(match_duration // 10):
-            if check_cancel():
-                raise Exception("比赛被取消")
-
-            await asyncio.sleep(10)
-
-            match_ended = await _detect_match_ended(
-                context, logger, game_logger
-            )
-            if match_ended:
-                logger.info("检测到比赛结束画面")
-                game_logger.info("[场景: SETTLEMENT] 检测到比赛结束画面")
-                break
-
-            elapsed = (i + 1) * 10
-            progress_pct = min(100, int(elapsed / match_duration * 100))
-
-            if i % 3 == 0 or elapsed == match_duration:
-                logger.info(f"比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
-                game_logger.info(f"[场景: IN_GAME] 比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
-
-                current_count = context.matches_completed_today[game_account.id] + 1
-                target = game_account.target_matches
-
-                await report_progress(
-                    context.task_id, "STEP4", "GAMING",
-                    f"账号 {game_account.gamertag} 比赛中 ({elapsed}/{match_duration}秒)",
-                    {
-                        "gameAccountId": game_account.id,
-                        "gameAccountName": game_account.gamertag,
-                        "currentMatch": current_count,
-                        "todayCompleted": context.matches_completed_today[game_account.id],
-                        "dailyLimit": target,
-                        "matchStatus": "IN_PROGRESS",
-                        "elapsedSeconds": elapsed,
-                        "totalSeconds": match_duration,
-                        "progressPercent": progress_pct
-                    }
+        if scene_queue and not scene_queue.empty():
+            try:
+                scene_result = await asyncio.wait_for(
+                    scene_queue.get(),
+                    timeout=0.5
                 )
+                if scene_result and scene_result != "UNKNOWN":
+                    logger.info(f"[比赛进行] 检测到场景: {scene_result}")
+                    game_logger.info(f"[比赛进行] 检测到场景: {scene_result}")
 
-    finally:
-        if display_tasks:
-            logger.info("[显示循环] 停止并行显示任务")
-            cancel_event.set()
-            await asyncio.gather(*display_tasks, return_exceptions=True)
-            logger.info("[显示循环] 并行显示任务已停止")
+                    if scene_action_mapper:
+                        try:
+                            await scene_action_mapper.on_scene_detected(scene_result)
+                            logger.info(f"[比赛进行] 场景 {scene_result} 对应动作已执行")
+                        except Exception as e:
+                            logger.error(f"[比赛进行] 执行动作失败: {e}")
+            except asyncio.TimeoutError:
+                pass
+
+        await asyncio.sleep(10)
+
+        match_ended = await _detect_match_ended(
+            context, logger, game_logger
+        )
+        if match_ended:
+            logger.info("检测到比赛结束画面")
+            game_logger.info("[场景: SETTLEMENT] 检测到比赛结束画面")
+            break
+
+        elapsed = (i + 1) * 10
+        progress_pct = min(100, int(elapsed / match_duration * 100))
+
+        if i % 3 == 0 or elapsed == match_duration:
+            logger.info(f"比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
+            game_logger.info(f"[场景: IN_GAME] 比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
+
+            current_count = context.matches_completed_today[game_account.id] + 1
+            target = game_account.target_matches
+
+            await report_progress(
+                context.task_id, "STEP4", "GAMING",
+                f"账号 {game_account.gamertag} 比赛中 ({elapsed}/{match_duration}秒)",
+                {
+                    "gameAccountId": game_account.id,
+                    "gameAccountName": game_account.gamertag,
+                    "currentMatch": current_count,
+                    "todayCompleted": context.matches_completed_today[game_account.id],
+                    "dailyLimit": target,
+                    "matchStatus": "IN_PROGRESS",
+                    "elapsedSeconds": elapsed,
+                    "totalSeconds": match_duration,
+                    "progressPercent": progress_pct
+                }
+            )
 
 
 async def _finish_match(
@@ -834,8 +981,14 @@ async def _detect_screen_state(
             game_logger.warning(f"[场景: {expected_screen}] 无法捕获画面")
             return False
 
-        logger.info(f"画面捕获成功: {frame.width}x{frame.height}")
-        game_logger.info(f"[场景: {expected_screen}] 画面捕获成功 ({frame.width}x{frame.height})")
+        matched = await _match_expected_screen(
+            context, expected_screen, logger, game_logger
+        )
+        if not matched:
+            logger.warning(f"未识别到期望画面: {expected_screen}")
+            return False
+
+        logger.info(f"画面状态确认: {expected_screen} ({frame.width}x{frame.height})")
         return True
 
     except asyncio.TimeoutError as e:

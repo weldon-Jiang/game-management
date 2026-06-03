@@ -30,7 +30,10 @@ Xbox 主机智能匹配器
 """
 
 import asyncio
+import json
 import random
+import time
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field
 from enum import Enum
@@ -39,6 +42,26 @@ import socket
 import aiohttp
 
 from ..core.logger import get_logger
+from .xbox_discovery import XboxDiscovery, XboxInfo as DiscoveredXboxInfo
+
+
+def _write_debug_log(hypothesis_id: str, location: str, message: str, data: Dict[str, Any]) -> None:
+    """Write debug-mode NDJSON logs for session ba0362."""
+    try:
+        cwd = Path.cwd().resolve()
+        log_path = cwd.parent / "debug-ba0362.log" if cwd.name == "bend-agent" else cwd / "debug-ba0362.log"
+        payload = {
+            "sessionId": "ba0362",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 class XboxMatchPriority(Enum):
@@ -189,6 +212,14 @@ class XboxHostMatcher:
                 local_xboxes = await self._discover_via_ip_scan()
             
             self._local_xboxes = {xbox.device_id: xbox for xbox in local_xboxes}
+            # region agent log
+            _write_debug_log(
+                "H4",
+                "xbox_host_matcher.discover_local_xboxes",
+                "local_discovery_completed",
+                {"localCount": len(self._local_xboxes)},
+            )
+            # endregion
             
             self.logger.info(f"✓ 发现 {len(self._local_xboxes)} 台本地 Xbox 主机")
             
@@ -203,13 +234,60 @@ class XboxHostMatcher:
     
     async def _discover_via_ssdp(self) -> List[XboxInfo]:
         """通过 SSDP 发现 Xbox"""
-        self.logger.debug("SSDP 发现待实现")
-        return []
+        discovery = XboxDiscovery()
+        devices = await discovery.discover(use_cloud_first=False)
+        xboxes = [self._from_discovered_xbox(device) for device in devices]
+        # region agent log
+        _write_debug_log(
+            "H4",
+            "xbox_host_matcher._discover_via_ssdp",
+            "ssdp_discovery_result",
+            {"count": len(xboxes), "hasIp": [bool(xbox.ip_address) for xbox in xboxes]},
+        )
+        # endregion
+        return xboxes
     
     async def _discover_via_ip_scan(self) -> List[XboxInfo]:
         """通过 IP 扫描发现 Xbox"""
-        self.logger.debug("IP 扫描发现待实现")
-        return []
+        discovery = XboxDiscovery()
+        ips = await discovery._scan_local_network()
+        xboxes: List[XboxInfo] = []
+        for ip in ips:
+            verified = await discovery._verify_xbox_device(ip)
+            if verified:
+                xboxes.append(XboxInfo(
+                    id=verified.get('device_id', ip),
+                    device_id=verified.get('device_id', ip),
+                    name=verified.get('name', f'Xbox ({ip})'),
+                    ip_address=ip,
+                    port=verified.get('port', 5050),
+                    live_id=verified.get('device_id', ip),
+                    power_state=verified.get('power_state', 'On'),
+                    console_type=verified.get('console_type', 'Xbox')
+                ))
+        # region agent log
+        _write_debug_log(
+            "H4",
+            "xbox_host_matcher._discover_via_ip_scan",
+            "ip_scan_result",
+            {"candidateIpCount": len(ips), "verifiedCount": len(xboxes)},
+        )
+        # endregion
+        return xboxes
+
+    def _from_discovered_xbox(self, discovered: DiscoveredXboxInfo) -> XboxInfo:
+        """Convert XboxDiscovery result to matcher-local XboxInfo."""
+        return XboxInfo(
+            id=discovered.device_id,
+            device_id=discovered.device_id,
+            name=discovered.name,
+            ip_address=discovered.ip_address,
+            port=discovered.port,
+            live_id=discovered.live_id,
+            power_state=discovered.power_state,
+            console_type=discovered.console_type,
+            play_path=discovered.play_path
+        )
     
     async def find_best_match(
         self, 
@@ -385,7 +463,7 @@ class XboxHostMatcher:
         
         for authorized_xbox in self._authorized_xboxes:
             device_id = authorized_xbox.device_id
-            local_xbox = self._local_xboxes.get(device_id)
+            local_xbox = self._find_local_match(authorized_xbox)
             is_local_online = local_xbox is not None
             is_powered_on = authorized_xbox.power_state == 'On'
             
@@ -422,6 +500,39 @@ class XboxHostMatcher:
             )
         
         return matches
+
+    def _find_local_match(self, authorized_xbox: XboxInfo) -> Optional[XboxInfo]:
+        """Find a local Xbox that likely corresponds to the cloud-authorized console."""
+        direct = self._local_xboxes.get(authorized_xbox.device_id)
+        if direct:
+            return direct
+
+        authorized_name = (authorized_xbox.name or "").strip().lower()
+        for local in self._local_xboxes.values():
+            if authorized_name and authorized_name == (local.name or "").strip().lower():
+                return local
+
+        if len(self._authorized_xboxes) == 1 and len(self._local_xboxes) == 1:
+            local = next(iter(self._local_xboxes.values()))
+            # region agent log
+            _write_debug_log(
+                "H5",
+                "xbox_host_matcher._find_local_match",
+                "single_candidate_fallback",
+                {"authorizedCount": 1, "localCount": 1, "hasLocalIp": bool(local.ip_address)},
+            )
+            # endregion
+            return local
+
+        # region agent log
+        _write_debug_log(
+            "H5",
+            "xbox_host_matcher._find_local_match",
+            "no_local_identity_match",
+            {"authorizedCount": len(self._authorized_xboxes), "localCount": len(self._local_xboxes)},
+        )
+        # endregion
+        return None
     
     async def _wakeup_xbox(
         self,

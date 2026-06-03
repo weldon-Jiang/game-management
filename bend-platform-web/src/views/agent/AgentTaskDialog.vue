@@ -42,12 +42,12 @@
               <span :class="'step-' + row.currentStep">{{ row.currentStep || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="progress" label="进度" width="120">
+          <el-table-column label="进度" width="120">
             <template #default="{ row }">
               <el-progress
-                :percentage="row.progress || 0"
+                :percentage="getTaskProgressPercent(row)"
                 :stroke-width="8"
-                :color="getProgressColor(row.progress)"
+                :color="getProgressColor(getTaskProgressPercent(row))"
               />
             </template>
           </el-table-column>
@@ -302,6 +302,26 @@ const loadGameAccountStatuses = async () => {
   } finally {
     subtaskLoading.value = false
   }
+}
+
+const STEP_PROGRESS = {
+  STEP1: 25,
+  STEP2: 50,
+  STEP3: 75,
+  STEP4: 100,
+  COMPLETED: 100
+}
+
+const getTaskProgressPercent = (row) => {
+  if (!row) return 0
+  if (row.status === 'completed') return 100
+  if (row.status === 'failed' || row.status === 'cancelled') return 0
+  if (row.currentStep && STEP_PROGRESS[row.currentStep] != null) {
+    return STEP_PROGRESS[row.currentStep]
+  }
+  if (row.status === 'running') return 15
+  if (row.status === 'pending') return 5
+  return 0
 }
 
 const getSubtaskStatusText = (status) => {

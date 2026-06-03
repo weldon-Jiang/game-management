@@ -669,15 +669,14 @@ class CentralManager:
                 frame = await self.video_capture.capture_frame()
                 return {'success': True, 'frame_id': frame.frame_id if frame else None}
             elif command == 'switch_account':
-                # 切换游戏账号
-                account_id = params.get('account_id')
-                account = self.account_manager.get_account(account_id)
-                if account:
-                    success = await self.account_manager.switch_to_account(
-                        account,
-                        lambda: self.video_capture.last_frame.data
-                    )
-                    return {'success': success}
+                # 游戏账号切换由 step4 AccountSwitcher 在自动化任务中执行
+                self.logger.warning(
+                    "switch_account 命令已弃用，请通过平台下发自动化任务 (step4) 切换账号"
+                )
+                return {
+                    'success': False,
+                    'error': 'switch_account 已弃用，请使用自动化任务流程',
+                }
             elif command == 'get_scene':
                 # 获取当前场景
                 frame = await self.video_capture.capture_frame()

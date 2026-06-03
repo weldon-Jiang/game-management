@@ -30,7 +30,7 @@
 │   ┌─────────▼────────────────────────────▼──────────┐           │
 │   │              Bend Agent (Python)                 │            │
 │   │  CentralManager ──▶ AutomationScheduler ──▶    │            │
-│   │                  AutomationTask (四步骤)         │            │
+│   │              AgentAutomationTask (四步骤)        │            │
 │   └─────────────────────────────────────────────────┘            │
 │                          │                                        │
 │                          ▼                                        │

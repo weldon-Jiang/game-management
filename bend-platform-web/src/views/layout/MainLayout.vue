@@ -73,6 +73,14 @@
           <el-icon><Key /></el-icon>
           <template #title>注册码管理</template>
         </el-menu-item>
+        <el-menu-item
+          v-if="authStore.hasManagementPermission || authStore.isOperator"
+          index="Tasks"
+          @click="router.push('/tasks')"
+        >
+          <el-icon><List /></el-icon>
+          <template #title>任务管理</template>
+        </el-menu-item>
 
         <div class="menu-group-title" v-if="!isCollapse && showBillingGroup">订阅与计费</div>
         <el-menu-item v-if="authStore.hasManagementPermission" index="Subscription" @click="router.push('/subscription')">
@@ -160,7 +168,8 @@ import {
   SwitchButton,
   Wallet,
   Tickets,
-  Collection
+  Collection,
+  List
 } from '@element-plus/icons-vue'
 
 const router = useRouter()

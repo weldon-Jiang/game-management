@@ -1,0 +1,332 @@
+# Football Actions Configuration
+# 足球比赛手柄动作配置
+# ====================================
+
+# 基础动作定义
+basic_actions:
+  # 传球动作
+  pass_ground:
+    description: "地面传球"
+    buttons: ["A"]
+    duration_ms: 150
+    repeat: 1
+    priority: 1
+
+  pass_lob:
+    description: "高空传球/长传"
+    buttons: ["X"]
+    duration_ms: 150
+    repeat: 1
+    priority: 2
+
+  through_ball:
+    description: "直塞球"
+    buttons: ["Y"]
+    duration_ms: 150
+    repeat: 1
+    priority: 3
+
+  # 射门动作
+  shoot:
+    description: "射门"
+    buttons: ["B"]
+    duration_ms: 200
+    repeat: 1
+    priority: 1
+    requires_power: true
+
+  shoot_power:
+    description: "大力射门"
+    buttons: ["B"]
+    right_trigger: 32767
+    duration_ms: 300
+    repeat: 1
+    priority: 2
+
+  # 加速动作
+  sprint:
+    description: "加速冲刺"
+    buttons: ["RB"]
+    duration_ms: 500
+    repeat: 1
+    priority: 1
+
+  # 防守动作
+  jockey:
+    description: "移动拦截/压迫"
+    buttons: ["LB"]
+    duration_ms: 300
+    repeat: 1
+    priority: 1
+
+  tackle:
+    description: "抢断"
+    buttons: ["B"]
+    duration_ms: 200
+    repeat: 1
+    priority: 2
+
+  slide_tackle:
+    description: "滑铲"
+    buttons: ["LB", "B"]
+    duration_ms: 300
+    repeat: 1
+    priority: 3
+
+  # 停球动作
+  contain:
+    description: "围堵/逼近"
+    buttons: ["LB"]
+    duration_ms: 200
+    repeat: 1
+    priority: 1
+
+  # 切换球员
+  change_player:
+    description: "切换控制球员"
+    buttons: ["LB"]
+    duration_ms: 100
+    repeat: 1
+    priority: 1
+
+  # 假动作
+  fake_shot:
+    description: "假射"
+    buttons: ["X"]
+    duration_ms: 150
+    repeat: 1
+    priority: 1
+
+  # 停球
+  stop_ball:
+    description: "停球"
+    buttons: ["A"]
+    duration_ms: 100
+    repeat: 1
+    priority: 1
+
+  # 头球
+  header:
+    description: "头球"
+    buttons: ["B"]
+    duration_ms: 200
+    repeat: 1
+    priority: 2
+
+  # 解围
+  clearance:
+    description: "大脚解围"
+    buttons: ["X"]
+    duration_ms: 200
+    repeat: 1
+    priority: 1
+
+# 组合动作序列
+action_sequences:
+  # 进攻序列
+  kickoff:
+    name: "开球"
+    description: "比赛开始时的开球动作"
+    steps:
+      - action: "move_forward"
+        duration_ms: 500
+        left_stick: [0, -1]
+      - action: "pass_ground"
+        duration_ms: 150
+
+  basic_attack:
+    name: "基础进攻"
+    description: "带球进攻并寻找射门机会"
+    steps:
+      - action: "sprint"
+        duration_ms: 300
+      - action: "move_forward"
+        duration_ms: 1000
+        left_stick: [0, -1]
+      - action: "shoot"
+        duration_ms: 200
+
+  pass_and_shoot:
+    name: "传球射门"
+    description: "短传配合后射门"
+    steps:
+      - action: "pass_ground"
+        duration_ms: 150
+      - action: "sprint"
+        duration_ms: 200
+      - action: "move_forward"
+        duration_ms: 800
+        left_stick: [0, -1]
+      - action: "shoot"
+        duration_ms: 200
+
+  counter_attack:
+    name: "快速反击"
+    description: "断球后快速反击"
+    steps:
+      - action: "sprint"
+        duration_ms: 100
+      - action: "move_forward"
+        duration_ms: 1500
+        left_stick: [0, -1]
+      - action: "through_ball"
+        duration_ms: 150
+      - action: "sprint"
+        duration_ms: 500
+      - action: "shoot"
+        duration_ms: 200
+
+  long_ball_counter:
+    name: "长传反击"
+    description: "大脚长传打身后"
+    steps:
+      - action: "clearance"
+        duration_ms: 200
+      - action: "sprint"
+        duration_ms: 2000
+      - action: "shoot"
+        duration_ms: 200
+
+  # 防守序列
+  basic_defend:
+    name: "基础防守"
+    description: "逼近并尝试抢断"
+    steps:
+      - action: "change_player"
+        duration_ms: 100
+      - action: "jockey"
+        duration_ms: 500
+      - action: "tackle"
+        duration_ms: 200
+
+  aggressive_defend:
+    name: "积极防守"
+    description: "积极逼抢"
+    steps:
+      - action: "sprint"
+        duration_ms: 100
+      - action: "slide_tackle"
+        duration_ms: 300
+
+  # 特殊场景序列
+  skip_celebration:
+    name: "跳过庆祝"
+    description: "进球后跳过庆祝动画"
+    steps:
+      - action: "pass_ground"
+        duration_ms: 150
+      - action: "pass_ground"
+        duration_ms: 150
+      - action: "pass_ground"
+        duration_ms: 150
+
+  exit_match:
+    name: "退出比赛"
+    description: "比赛结束后退出"
+    steps:
+      - action: "pass_ground"
+        duration_ms: 150
+      - action: "pass_ground"
+        duration_ms: 150
+
+  corner_kick_offense:
+    name: "角球进攻"
+    description: "执行角球战术"
+    steps:
+      - action: "pass_lob"
+        duration_ms: 200
+      - action: "sprint"
+        duration_ms: 300
+      - action: "header"
+        duration_ms: 200
+
+  corner_kick_defend:
+    name: "角球防守"
+    description: "防守角球"
+    steps:
+      - action: "change_player"
+        duration_ms: 100
+      - action: "jockey"
+        duration_ms: 500
+      - action: "header"
+        duration_ms: 200
+
+  free_kick_offense:
+    name: "任意球进攻"
+    description: "执行任意球"
+    steps:
+      - action: "pass_lob"
+        duration_ms: 200
+      - action: "shoot"
+        duration_ms: 300
+
+  penalty_kick:
+    name: "点球"
+    description: "执行点球射门"
+    steps:
+      - action: "shoot_power"
+        duration_ms: 500
+
+# 动作决策规则
+decision_rules:
+  # 进攻决策
+  attack_rules:
+    - condition: "ball_distance_to_goal < 30"
+      action: "shoot"
+      priority: 1
+
+    - condition: "ball_distance_to_goal < 60 and has_support"
+      action: "pass_ground"
+      priority: 2
+
+    - condition: "ball_distance_to_goal < 90 and opp_defender_near"
+      action: "through_ball"
+      priority: 3
+
+    - condition: "always"
+      action: "sprint"
+      priority: 4
+
+  # 防守决策
+  defend_rules:
+    - condition: "opp_ball and opp_player_near"
+      action: "tackle"
+      priority: 1
+
+    - condition: "opp_ball and distance > 50"
+      action: "jockey"
+      priority: 2
+
+    - condition: "opp_shooting"
+      action: "slide_tackle"
+      priority: 1
+
+# 场景到动作的默认映射
+scene_action_map:
+  100:  # 比赛开始
+    action: "kickoff"
+    type: "sequence"
+
+  101:  # 进球庆祝
+    action: "skip_celebration"
+    type: "sequence"
+
+  102:  # 比赛结束
+    action: "exit_match"
+    type: "sequence"
+
+  103:  # 我方角球
+    action: "corner_kick_offense"
+    type: "sequence"
+
+  104:  # 对方角球
+    action: "corner_kick_defend"
+    type: "sequence"
+
+  105:  # 任意球
+    action: "free_kick_offense"
+    type: "sequence"
+
+  108:  # 点球
+    action: "penalty_kick"
+    type: "sequence"

@@ -5,10 +5,12 @@ Template Manager - Streaming项目模板管理器
 - 模板文件管理（加载、保存、缓存）
 - 支持PNG文件和序列化数据
 - 模板预加载和按需加载
+- 从场景截图中提取模板
 
 参考Streaming项目 (D:\\auto-xbox\\streaming\\xsrpst.py) 的设计：
 - 原始模板：PNG文件在 template/ 目录
 - 序列化数据：templates.dat (gzip压缩)
+- 场景截图：用于生成模板
 
 使用方式：
     from agent.vision.template_manager import StreamingTemplateManager
@@ -21,10 +23,11 @@ import os
 import cv2
 import compress_pickle
 import numpy as np
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Tuple
 from pathlib import Path
 
 from ..core.logger import get_logger
+from configs.scene_schemas import SCENE_SCHEMAS, SCENE_COLUMNS
 
 
 class StreamingTemplateManager:
@@ -35,6 +38,7 @@ class StreamingTemplateManager:
     - 管理模板文件的加载和缓存
     - 支持PNG源文件和序列化数据
     - 提供模板预加载和按需加载
+    - 从场景截图中提取和生成模板
 
     使用方式：
         manager = StreamingTemplateManager("templates")
@@ -47,12 +51,16 @@ class StreamingTemplateManager:
 
         # 保存序列化数据
         manager.save_serialized()
+        
+        # 从场景截图生成模板
+        manager.generate_templates_from_scenes("scenes")
     """
 
     def __init__(
         self,
         template_dir: str = "templates",
         data_dir: str = "data",
+        scene_dir: str = "scenes",
         use_cache: bool = True
     ):
         """
@@ -61,10 +69,12 @@ class StreamingTemplateManager:
         参数说明：
         - template_dir: 模板图片目录
         - data_dir: 序列化数据目录
+        - scene_dir: 场景截图目录
         - use_cache: 是否启用缓存
         """
         self.template_dir = Path(template_dir)
         self.data_dir = Path(data_dir)
+        self.scene_dir = Path(scene_dir)
         self.use_cache = use_cache
 
         self.logger = get_logger('template_manager')
@@ -273,3 +283,180 @@ class StreamingTemplateManager:
             str(f.relative_to(self.template_dir))
             for f in self.template_dir.glob("*.png")
         ]
+
+    def _get_scene_path(self, scene_id: int) -> Path:
+        """
+        获取场景截图文件路径
+
+        参数说明：
+        - scene_id: 场景编号
+
+        返回值：
+        - 场景PNG文件路径
+        """
+        filename = f"{scene_id}.png"
+        return self.scene_dir / filename
+
+    def generate_templates_from_scenes(self, scene_dir: Optional[str] = None) -> int:
+        """
+        从场景截图中提取模板
+
+        参考Streaming项目中的generate_templates()函数：
+        - 读取场景截图
+        - 根据scene_schemas.py中的定义截取模板区域
+        - 保存为模板文件
+
+        参数说明：
+        - scene_dir: 场景截图目录（可选，默认使用初始化时设置的目录）
+
+        返回值：
+        - 成功生成的模板数量
+        """
+        if scene_dir:
+            self.scene_dir = Path(scene_dir)
+
+        if not self.scene_dir.exists():
+            self.logger.error(f"场景目录不存在: {self.scene_dir}")
+            return 0
+
+        count = 0
+        processed_scenes = set()
+
+        for schema in SCENE_SCHEMAS:
+            scene_id = schema[0]
+            scene_width = schema[1]
+            scene_height = schema[2]
+            template_id = schema[3]
+            template_left = schema[4]
+            template_top = schema[5]
+            template_right = schema[6]
+            template_bottom = schema[7]
+
+            if scene_id in processed_scenes:
+                continue
+
+            scene_path = self._get_scene_path(scene_id)
+            if not scene_path.exists():
+                self.logger.warning(f"场景文件不存在: {scene_path}")
+                continue
+
+            try:
+                scene_mat = cv2.imread(str(scene_path), cv2.IMREAD_COLOR)
+                if scene_mat is None:
+                    self.logger.error(f"无法读取场景文件: {scene_path}")
+                    continue
+
+                if scene_mat.shape[1] < scene_width or scene_mat.shape[0] < scene_height:
+                    self.logger.warning(
+                        f"场景尺寸不匹配 {scene_path}: "
+                        f"期望 {scene_width}x{scene_height}, "
+                        f"实际 {scene_mat.shape[1]}x{scene_mat.shape[0]}"
+                    )
+                    continue
+
+                processed_scenes.add(scene_id)
+
+                for s in SCENE_SCHEMAS:
+                    if s[0] != scene_id:
+                        continue
+
+                    tid = s[3]
+                    t_left = s[4]
+                    t_top = s[5]
+                    t_right = s[6]
+                    t_bottom = s[7]
+
+                    try:
+                        template_mat = scene_mat[t_top:t_bottom, t_left:t_right]
+
+                        if template_mat.size == 0:
+                            self.logger.warning(f"模板区域为空: 场景{scene_id}模板{tid}")
+                            continue
+
+                        self.template_dir.mkdir(parents=True, exist_ok=True)
+                        template_path = self._get_template_path(scene_id, tid)
+                        cv2.imwrite(str(template_path), template_mat)
+
+                        self.logger.info(f"生成模板: {scene_id}.{tid}")
+                        count += 1
+
+                    except Exception as e:
+                        self.logger.error(f"提取模板失败 场景{scene_id}模板{tid}: {e}")
+                        continue
+
+            except Exception as e:
+                self.logger.error(f"处理场景失败 {scene_path}: {e}")
+                continue
+
+        self.logger.info(f"模板生成完成，共生成 {count} 个模板")
+        
+        if count > 0:
+            self.save_serialized()
+            
+        return count
+
+    def compare_templates(self, other: Dict[str, np.ndarray]) -> bool:
+        """
+        比较当前缓存的模板和另一个模板字典是否一致
+
+        参数说明：
+        - other: 另一个模板字典
+
+        返回值：
+        - True: 完全一致
+        - False: 不一致
+        """
+        if not self._template_cache:
+            return len(other) == 0
+
+        if len(self._template_cache) != len(other):
+            return False
+
+        for key, template1 in self._template_cache.items():
+            if key not in other:
+                return False
+
+            template2 = other[key]
+            if template1.shape != template2.shape:
+                return False
+
+            comparison = cv2.compare(template1, template2, cv2.CMP_NE)
+            if np.sum(comparison) > 0:
+                return False
+
+        return True
+
+    def export_as_serialized(self, output_path: Optional[str] = None) -> bool:
+        """
+        将当前缓存的模板导出为序列化文件
+
+        参数说明：
+        - output_path: 输出文件路径（可选）
+
+        返回值：
+        - 是否导出成功
+        """
+        if not self._template_cache:
+            self.logger.warning("没有缓存的模板可导出")
+            return False
+
+        if output_path is None:
+            output_path = str(self.data_dir / "templates.dat")
+
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+
+            data_bytes = compress_pickle.dumps(
+                self._template_cache,
+                compression="gzip"
+            )
+
+            with open(output_path, "wb") as f:
+                f.write(data_bytes)
+
+            self.logger.info(f"模板已导出到: {output_path}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"导出模板失败: {e}")
+            return False

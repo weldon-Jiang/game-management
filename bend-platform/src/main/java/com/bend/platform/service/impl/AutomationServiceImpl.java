@@ -184,7 +184,7 @@ public class AutomationServiceImpl implements AutomationService {
             result.put("streamingAccountId", streamingAccountId);
             result.put("streamingAccountName", streamingAccount.getName());
             result.put("taskId", created.getId());
-            result.put("gameAccountsCount", gameAccounts.size());
+            result.put("gameAccountsCount", selectedGameAccounts.size());
             result.put("success", true);
             result.put("pointsDeducted", validationResult.get("totalPoints"));
             results.add(result);

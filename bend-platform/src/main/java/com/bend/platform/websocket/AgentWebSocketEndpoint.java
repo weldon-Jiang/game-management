@@ -1,6 +1,7 @@
 package com.bend.platform.websocket;
 
 import com.bend.platform.config.AgentWebSocketConfigurator;
+import com.bend.platform.util.AgentAuthUtils;
 import com.bend.platform.entity.AgentInstance;
 import com.bend.platform.entity.AgentVersion;
 import com.bend.platform.entity.XboxHost;
@@ -200,7 +201,22 @@ public class AgentWebSocketEndpoint {
         AGENT_SESSIONS.remove(agentId);
     }
 
+    @SuppressWarnings("unchecked")
     private String getAuthToken(Session session) {
+        // Prefer header (Base64) over query string to avoid secrets in URLs/logs
+        Object headersObj = session.getUserProperties().get(AgentWebSocketConfigurator.HANDSHAKE_HEADERS_KEY);
+        if (headersObj instanceof Map<?, ?> headers) {
+            for (String headerName : List.of("X-Agent-Secret", "x-agent-secret")) {
+                Object values = headers.get(headerName);
+                if (values instanceof List<?> secretList && !secretList.isEmpty()) {
+                    Object first = secretList.get(0);
+                    if (first instanceof String encoded && !encoded.isEmpty()) {
+                        return AgentAuthUtils.decodeSecretHeader(encoded);
+                    }
+                }
+            }
+        }
+
         Map<String, List<String>> params = session.getRequestParameterMap();
         if (params.containsKey("agentSecret")) {
             return params.get("agentSecret").get(0);
@@ -252,8 +268,14 @@ public class AgentWebSocketEndpoint {
         sendMessage(session, type, data);
     }
 
-    public static void sendTaskToAgent(String agentId, String taskId, Map<String, Object> taskData) {
-        sendMessageToAgent(agentId, "task", taskData);
+    public static boolean sendTaskToAgent(String agentId, String taskId, Map<String, Object> taskData) {
+        Session session = AGENT_SESSIONS.get(agentId);
+        if (session == null || !session.isOpen()) {
+            log.warn("Agent不在线，任务未下发 - AgentID: {}, TaskID: {}", agentId, taskId);
+            return false;
+        }
+        sendMessage(session, "task", taskData);
+        return true;
     }
 
     public static void sendCancelTaskToAgent(String agentId, String taskId) {

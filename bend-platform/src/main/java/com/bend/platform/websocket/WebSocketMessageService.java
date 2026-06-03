@@ -36,8 +36,12 @@ public class WebSocketMessageService {
 
     public void sendTaskToAgent(String agentId, String taskId, Map<String, Object> taskData) {
         try {
-            AgentWebSocketEndpoint.sendTaskToAgent(agentId, taskId, taskData);
-            log.info("下发任务给Agent - AgentID: {}, TaskID: {}", agentId, taskId);
+            boolean sent = AgentWebSocketEndpoint.sendTaskToAgent(agentId, taskId, taskData);
+            if (sent) {
+                log.info("下发任务给Agent - AgentID: {}, TaskID: {}", agentId, taskId);
+            } else {
+                log.warn("下发任务失败，Agent不在线 - AgentID: {}, TaskID: {}", agentId, taskId);
+            }
         } catch (Exception e) {
             log.error("下发任务失败 - AgentID: {}, TaskID: {}", agentId, taskId, e);
         }

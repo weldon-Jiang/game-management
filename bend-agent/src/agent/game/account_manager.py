@@ -108,7 +108,7 @@ class GameAccountManager:
             await self._navigate_to_accounts()
             await asyncio.sleep(0.5)
 
-            await self._select_account(account)
+            await self._select_account(account, frame_getter)
             await asyncio.sleep(1)
 
             await self._confirm_switch()
@@ -139,8 +139,8 @@ class GameAccountManager:
         await self.input.press_key('a')
         await asyncio.sleep(0.5)
 
-    async def _select_account(self, account: GameAccount):
-        """Select account from list"""
+    async def _select_account(self, account: GameAccount, frame_getter):
+        """Select account from list (legacy; prefer AccountSwitcher in step4)."""
         for _ in range(5):
             await self.input.press_key('up')
             await asyncio.sleep(0.2)
@@ -149,13 +149,28 @@ class GameAccountManager:
             await self.input.press_key('down')
             await asyncio.sleep(0.2)
 
+            frame_data = await self._resolve_frame_data(frame_getter)
+            if frame_data is None:
+                continue
+
             result = await self.matcher.find_template(
-                await frame_getter(),
+                frame_data,
                 f"account_{account.gamertag}.png"
             )
             if result.found:
                 await self.input.press_key('a')
                 break
+
+    @staticmethod
+    async def _resolve_frame_data(frame_getter):
+        frame = frame_getter()
+        if asyncio.iscoroutine(frame):
+            frame = await frame
+        if frame is None:
+            return None
+        if hasattr(frame, 'data'):
+            return frame.data
+        return frame
 
     async def _confirm_switch(self):
         """Confirm account switch"""
@@ -169,9 +184,11 @@ class GameAccountManager:
         if result.found:
             await self.input.press_key('a')
 
-    async def _get_current_frame(self):
-        """Get current frame (placeholder - should be injected)"""
-        return None
+    async def _get_current_frame(self, frame_getter=None):
+        """Get current frame via injected getter when available."""
+        if frame_getter is None:
+            return None
+        return await self._resolve_frame_data(frame_getter)
 
     def update_play_time(self, minutes: int):
         """Update play time for active account"""

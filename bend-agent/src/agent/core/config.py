@@ -34,6 +34,8 @@ class Config:
         返回：
         - 配置值
         """
+        if key == 'platform.api_url':
+            return self._config.platform_api_url
         keys = key.split('.')
         value = self._config
 
@@ -165,6 +167,7 @@ class AgentConfig:
 
     backend_url: str = 'http://localhost:8060'
     ws_url: str = 'ws://localhost:8060/ws/agent'
+    platform_api_url: str = 'http://localhost:8060/api'
 
     log_level: str = 'INFO'
     log_format: str = 'standard'
@@ -210,6 +213,17 @@ class AgentConfig:
         task_config = TaskConfig(**to_config_dict(config.get('task', {}), task_fields))
         auth_config = AuthConfig(**to_config_dict(config.get('auth', {}), auth_fields))
 
+        backend_block = config.get('backend', {}) or {}
+        backend_url = config.get(
+            'backend_url',
+            backend_block.get('base_url', 'http://localhost:8060'),
+        )
+        platform_block = config.get('platform', {}) or {}
+        platform_api_url = platform_block.get('api_url')
+        if not platform_api_url:
+            api_prefix = backend_block.get('api_prefix', '/api')
+            platform_api_url = f"{backend_url.rstrip('/')}{api_prefix}"
+
         return cls(
             network=network_config,
             stream=stream_config,
@@ -218,8 +232,9 @@ class AgentConfig:
             task=task_config,
             auth=auth_config,
             aes=config.get('aes', {}),
-            backend_url=config.get('backend_url', config.get('backend', {}).get('base_url', 'http://localhost:8060')),
-            ws_url=config.get('ws_url', config.get('backend', {}).get('ws_url', 'ws://localhost:8060/ws/agent')),
+            backend_url=backend_url,
+            ws_url=config.get('ws_url', backend_block.get('ws_url', 'ws://localhost:8060/ws/agent')),
+            platform_api_url=platform_api_url,
             log_level=config.get('log_level', 'INFO'),
             log_format=config.get('log_format', 'standard'),
         )
@@ -302,6 +317,7 @@ class AgentConfig:
             'aes': self.aes,
             'backend_url': self.backend_url,
             'ws_url': self.ws_url,
+            'platform_api_url': self.platform_api_url,
             'log_level': self.log_level,
             'log_format': self.log_format,
         }

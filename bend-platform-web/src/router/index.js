@@ -78,13 +78,13 @@ const routes = [
         path: 'registration-codes',
         name: 'RegistrationCodes',
         component: () => import('@/views/registration/RegistrationCodeList.vue'),
-        meta: { title: '注册码管理', icon: 'Key' }
+        meta: { title: '注册码管理', icon: 'Key', requiresAdmin: true }
       },
       {
         path: 'tasks',
         name: 'Tasks',
         component: () => import('@/views/task/TaskList.vue'),
-        meta: { title: '任务管理', icon: 'List' }
+        meta: { title: '任务管理', icon: 'List', requiresOperatorAccess: true }
       },
       {
         path: 'subscription',
@@ -154,6 +154,15 @@ router.beforeEach((to, from, next) => {
 
   // 如果页面需要平台管理员权限，验证用户角色
   if (to.meta.requiresAdmin && !authStore.isPlatformAdmin) {
+    ElMessage.warning('您没有权限访问该页面')
+    next({ name: 'Dashboard' })
+    return
+  }
+
+  // 任务管理等运营页面：商户管理员或操作员
+  if (to.meta.requiresOperatorAccess &&
+      !authStore.hasManagementPermission &&
+      !authStore.isOperator) {
     ElMessage.warning('您没有权限访问该页面')
     next({ name: 'Dashboard' })
     return

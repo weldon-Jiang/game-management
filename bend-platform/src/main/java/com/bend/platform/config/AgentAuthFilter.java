@@ -1,6 +1,8 @@
 package com.bend.platform.config;
 
 import com.bend.platform.service.AgentInstanceService;
+import com.bend.platform.util.AgentAuthUtils;
+import com.bend.platform.util.DebugSessionLog;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
@@ -12,10 +14,9 @@ import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.support.WebApplicationContextUtils;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Agent API 认证过滤器
@@ -37,6 +38,11 @@ public class AgentAuthFilter implements Filter {
     private static final String HEADER_AGENT_ID = "X-Agent-Id";
     private static final String HEADER_AGENT_SECRET = "X-Agent-Secret";
 
+    /** Fixed /api/agents/* segments used by platform JWT APIs (not Agent secret). */
+    private static final Set<String> PLATFORM_AGENT_PATHS = Set.of(
+            "register", "page", "online"
+    );
+
     private AgentInstanceService agentInstanceService;
 
     @Override
@@ -57,7 +63,6 @@ public class AgentAuthFilter implements Filter {
 
         String path = httpRequest.getRequestURI();
 
-        // 仅对 Agent API 路径进行认证
         if (!requiresAgentAuth(path)) {
             chain.doFilter(request, response);
             return;
@@ -74,16 +79,7 @@ public class AgentAuthFilter implements Filter {
             return;
         }
 
-        // Base64 解码 Secret
-        String decodedSecret;
-        try {
-            decodedSecret = new String(Base64.getDecoder().decode(agentSecret), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            log.warn("Agent认证失败 - AgentID: {}, 原因: Secret格式错误, IP: {}",
-                    agentId, getClientIp(httpRequest));
-            sendError(httpResponse, HttpServletResponse.SC_UNAUTHORIZED, "Invalid Secret format");
-            return;
-        }
+        String decodedSecret = AgentAuthUtils.decodeSecretHeader(agentSecret);
 
         // 验证 Agent 凭证
         if (agentInstanceService == null) {
@@ -93,6 +89,11 @@ public class AgentAuthFilter implements Filter {
         }
 
         boolean isValid = agentInstanceService.validateCredentials(agentId, decodedSecret);
+        // #region agent log
+        DebugSessionLog.log("H1", "AgentAuthFilter.doFilter", "credential_check",
+                Map.of("path", path, "agentId", agentId, "valid", isValid,
+                        "secretLen", agentSecret.length(), "decodedLen", decodedSecret.length()));
+        // #endregion
         if (!isValid) {
             log.warn("Agent认证失败 - AgentID: {}, 原因: 无效的认证信息, IP: {}",
                     agentId, getClientIp(httpRequest));
@@ -122,30 +123,44 @@ public class AgentAuthFilter implements Filter {
      * - POST /api/agents/status - 状态更新
      */
     private boolean requiresAgentAuth(String path) {
-        // 平台调用接口或注册接口，不需要 Agent 凭证
-        if (path.equals("/api/agents/register") ||
-            path.equals("/api/agents/page") ||
-            path.matches("/api/agents/[a-zA-Z0-9-]+$")) {
+        if (path.equals("/api/agents/register")
+                || path.equals("/api/agents/page")
+                || path.equals("/api/agents/online")
+                || isPlatformJwtAgentDetailPath(path)) {
             return false;
         }
 
-        // Agent 凭证兑换接口，不需要 Agent 凭证（否则会先有鸡还是先有蛋的问题）
         if (path.startsWith("/api/agent/credentials/")) {
             return false;
         }
 
-        // Agent 回调接口，需要 Agent 凭证
-        // 匹配 /api/{taskId}/progress, /api/{taskId}/match/complete, /api/{taskId}/game-accounts/status 等
-        // 同时匹配 /api/agent-callback/task/{taskId}/...
-        if (path.matches("/api/[^/]+/(progress|match/complete|game-accounts/status|game-account/[^/]+/(status|complete)).*") ||
-            path.startsWith("/api/agent-callback/") ||
-            path.startsWith("/api/v1/agent-callback/")) {
+        if (path.matches("/api/[^/]+/(progress|match/complete|game-accounts/status|game-account/[^/]+/(status|complete)).*")
+                || path.startsWith("/api/agent-callback/")
+                || path.startsWith("/api/v1/agent-callback/")) {
             return true;
         }
 
-        // Agent 服务调用的接口需要凭证
-        return path.equals("/ws/agent") ||
-               isAgentServiceEndpoint(path);
+        return path.equals("/ws/agent") || isAgentServiceEndpoint(path);
+    }
+
+    /**
+     * Platform UI calls GET/DELETE /api/agents/{agentId} with JWT (agentId is not a reserved segment).
+     */
+    private boolean isPlatformJwtAgentDetailPath(String path) {
+        if (!path.startsWith("/api/agents/") || path.contains("//")) {
+            return false;
+        }
+        String segment = path.substring("/api/agents/".length());
+        if (segment.isEmpty() || segment.contains("/")) {
+            return false;
+        }
+        if (PLATFORM_AGENT_PATHS.contains(segment) || isAgentServiceEndpoint(path)) {
+            return false;
+        }
+        if (segment.startsWith("cleanup")) {
+            return false;
+        }
+        return true;
     }
     
     /**

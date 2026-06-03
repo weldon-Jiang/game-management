@@ -36,7 +36,10 @@ class PlatformApiClient:
 
     def __init__(self, base_url: Optional[str] = None, agent_id: Optional[str] = None, agent_secret: Optional[str] = None):
         self.logger = get_logger('platform_api_client')
-        self.base_url = base_url or config.get('platform.api_url', 'http://localhost:8060/api')
+        self.base_url = base_url or config.get(
+            'platform.api_url',
+            getattr(config, 'platform_api_url', None) or 'http://localhost:8060/api',
+        )
         self._api_version = 'v1'
 
         if agent_id is not None and agent_secret is not None:
