@@ -151,7 +151,8 @@ public interface ResultCode {
         DELETE_FAILED(14007, "删除账号失败"),
         BIND_FAILED(14008, "绑定失败"),
         UNBIND_FAILED(14009, "解绑失败"),
-        BIND_GAME_ACCOUNT(14010, "已关联游戏账号");
+        BIND_GAME_ACCOUNT(14010, "已关联游戏账号"),
+        NAME_DUPLICATE(14011, "账号名称已存在");
 
         private final int code;
         private final String message;

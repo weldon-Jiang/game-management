@@ -27,6 +27,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -84,7 +85,7 @@ public class StreamingAccountController {
 
     @GetMapping("/template")
     public ApiResponse<String> downloadTemplate() {
-        String template = "账号名称,邮箱,密码,认证码\n测试账号1,test1@email.com,password1,authcode1\n测试账号2,test2@email.com,password2,authcode2";
+        String template = "游戏昵称,邮箱,密码,认证码\n测试账号1,test1@email.com,password1,authcode1\n测试账号2,test2@email.com,password2,authcode2";
         return ApiResponse.success(template);
     }
 
@@ -140,10 +141,10 @@ public class StreamingAccountController {
      * 获取流媒体账号详情
      *
      * @param id 流媒体账号ID
-     * @return 流媒体账号信息（密码已解密）
+     * @return 流媒体账号信息
      */
     @GetMapping("/{id}")
-    public ApiResponse<StreamingAccount> getById(@PathVariable String id) {
+    public ApiResponse<Map<String, Object>> getById(@PathVariable String id) {
         StreamingAccount account = streamingAccountService.findById(id);
         if (account == null) {
             throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
@@ -153,16 +154,52 @@ public class StreamingAccountController {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
 
-        // 解密密码供前端显示
-        if (account.getPasswordEncrypted() != null) {
-            try {
-                account.setPasswordEncrypted(aesUtil.decrypt(account.getPasswordEncrypted()));
-            } catch (Exception e) {
-                log.warn("解密流媒体账号密码失败 - ID: {}", id, e);
-            }
+        // 构建返回数据，密码不返回，用 passwordSet 标记代替
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", account.getId());
+        result.put("merchantId", account.getMerchantId());
+        result.put("name", account.getName());
+        result.put("email", account.getEmail());
+        result.put("status", account.getStatus());
+        result.put("authCode", account.getAuthCode());
+        result.put("passwordSet", account.getPasswordEncrypted() != null && !account.getPasswordEncrypted().isEmpty());
+        result.put("createdTime", account.getCreatedTime());
+
+        return ApiResponse.success(result);
+    }
+
+    /**
+     * 获取流媒体账号密码详情（用于编辑时点击输入框图标显示真实密码）
+     *
+     * @param id 流媒体账号ID
+     * @return 密码信息
+     */
+    @GetMapping("/{id}/password")
+    public ApiResponse<Map<String, Object>> getPasswordById(@PathVariable String id) {
+        StreamingAccount account = streamingAccountService.findById(id);
+        if (account == null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
         }
 
-        return ApiResponse.success(account);
+        if (!UserContext.isPlatformAdmin() && !account.getMerchantId().equals(UserContext.getMerchantId())) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("passwordSet", account.getPasswordEncrypted() != null && !account.getPasswordEncrypted().isEmpty());
+
+        if (account.getPasswordEncrypted() != null && !account.getPasswordEncrypted().isEmpty()) {
+            try {
+                result.put("password", aesUtil.decrypt(account.getPasswordEncrypted()));
+            } catch (Exception e) {
+                log.warn("解密流媒体账号密码失败 - ID: {}", id, e);
+                result.put("password", null);
+            }
+        } else {
+            result.put("password", null);
+        }
+
+        return ApiResponse.success(result);
     }
 
     /**
@@ -185,12 +222,12 @@ public class StreamingAccountController {
 
         // 检查是否需要更新密码
         boolean hasPassword = request.getPassword() != null && !request.getPassword().isEmpty();
-        
+
         if (UserContext.isPlatformAdmin()) {
             if (hasPassword) {
-                streamingAccountService.updateWithPassword(id, request.getMerchantId(), request.getName(), request.getPassword(), request.getAuthCode());
+                streamingAccountService.updateWithPassword(id, request.getMerchantId(), request.getName(), request.getEmail(), request.getPassword(), request.getAuthCode());
             } else {
-                streamingAccountService.update(id, request.getMerchantId(), request.getName(), request.getAuthCode());
+                streamingAccountService.updateWithPassword(id, request.getMerchantId(), request.getName(), request.getEmail(), null, request.getAuthCode());
             }
         } else {
             if (hasPassword) {

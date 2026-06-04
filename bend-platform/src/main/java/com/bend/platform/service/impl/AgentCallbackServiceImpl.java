@@ -336,7 +336,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             if (ga != null) {
                 Map<String, Object> gaInfo = new HashMap<>();
                 gaInfo.put("id", ga.getId());
-                gaInfo.put("gamertag", ga.getXboxGameName());
+                gaInfo.put("gamertag", ga.getGameName());
                 gaInfo.put("dailyMatchLimit", ga.getDailyMatchLimit());
                 gameAccounts.add(gaInfo);
             }
@@ -535,7 +535,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
                 status.put("id", ts.getGameAccountId());
 
                 GameAccount ga = gameAccountMap.get(ts.getGameAccountId());
-                status.put("gamertag", ga != null ? ga.getXboxGameName() : "");
+                status.put("gamertag", ga != null ? ga.getGameName() : "");
 
                 status.put("todayCompleted", ts.getCompletedCount());
                 status.put("dailyLimit", ts.getTotalMatches());

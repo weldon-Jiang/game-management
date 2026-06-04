@@ -4,8 +4,13 @@ Bend Agent - Main entry point
 import asyncio
 import sys
 import os
+import io
 import argparse
 from pathlib import Path
+
+# 设置标准输出/错误的编码为 UTF-8，解决 Windows PowerShell 重定向时的中文乱码问题
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # 添加源代码目录到路径（仅在开发环境）
 if not getattr(sys, 'frozen', False):

@@ -66,6 +66,11 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             throw new BusinessException(ResultCode.StreamingAccount.EMAIL_DUPLICATE);
         }
 
+        // 检查名称是否已被使用
+        if (findByName(name) != null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NAME_DUPLICATE);
+        }
+
         StreamingAccount account = new StreamingAccount();
         account.setMerchantId(merchantId);
         account.setName(name);
@@ -85,10 +90,11 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         ImportResultDto result = new ImportResultDto();
         List<String> errors = new ArrayList<>();
         int successCount = 0;
+        int skipCount = 0;
 
         if (CollectionUtils.isEmpty(accounts)) {
             errors.add("导入数据不能为空");
-            result.setFailCount(accounts.size());
+            result.setFailCount(accounts != null ? accounts.size() : 0);
             result.setErrors(errors);
             return result;
         }
@@ -96,6 +102,11 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         merchantService.validateMerchantActive(merchantId);
 
         Set<String> emailSet = new HashSet<>();
+        Set<String> nameSet = new HashSet<>();
+        Set<String> existEmails = new HashSet<>();
+        Set<String> existNames = new HashSet<>();
+        List<StreamingAccountImportDto> toImport = new ArrayList<>();
+
         for (int i = 0; i < accounts.size(); i++) {
             StreamingAccountImportDto dto = accounts.get(i);
             int rowNum = i + 2;
@@ -105,23 +116,31 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
                 continue;
             }
 
-            StreamingAccount existing = findByEmail(dto.getEmail());
-            if (existing != null) {
-                errors.add(String.format("第%d行: 邮箱[%s]已存在", rowNum, dto.getEmail()));
+            if (nameSet.contains(dto.getName())) {
+                errors.add(String.format("第%d行: 账号名称[%s]重复", rowNum, dto.getName()));
+                continue;
+            }
+
+            StreamingAccount existingByEmail = findByEmail(dto.getEmail());
+            if (existingByEmail != null) {
+                existEmails.add(dto.getEmail());
+                skipCount++;
+                continue;
+            }
+
+            StreamingAccount existingByName = findByName(dto.getName());
+            if (existingByName != null) {
+                existNames.add(dto.getName());
+                skipCount++;
                 continue;
             }
 
             emailSet.add(dto.getEmail());
+            nameSet.add(dto.getName());
+            toImport.add(dto);
         }
 
-        if (!errors.isEmpty()) {
-            result.setSuccessCount(0);
-            result.setFailCount(accounts.size());
-            result.setErrors(errors);
-            return result;
-        }
-
-        for (StreamingAccountImportDto dto : accounts) {
+        for (StreamingAccountImportDto dto : toImport) {
             try {
                 StreamingAccount entity = new StreamingAccount();
                 entity.setMerchantId(merchantId);
@@ -141,9 +160,10 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         }
 
         result.setSuccessCount(successCount);
-        result.setFailCount(accounts.size() - successCount);
+        result.setSkipCount(skipCount);
+        result.setFailCount(errors.size());
         result.setErrors(errors);
-        log.info("批量导入流媒体账号完成 - 成功: {}, 失败: {}", successCount, accounts.size() - successCount);
+        log.info("批量导入流媒体账号完成 - 成功: {}, 跳过: {}, 失败: {}", successCount, skipCount, errors.size());
         return result;
     }
 
@@ -160,6 +180,13 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
     public StreamingAccount findByEmail(String email) {
         LambdaQueryWrapper<StreamingAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StreamingAccount::getEmail, email);
+        return streamingAccountMapper.selectOne(wrapper);
+    }
+
+    @Override
+    public StreamingAccount findByName(String name) {
+        LambdaQueryWrapper<StreamingAccount> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(StreamingAccount::getName, name);
         return streamingAccountMapper.selectOne(wrapper);
     }
 
@@ -256,6 +283,12 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateWithPassword(String id, String merchantId, String name, String password, String authCode) {
+        updateWithPassword(id, merchantId, name, null, password, authCode);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateWithPassword(String id, String merchantId, String name, String email, String password, String authCode) {
         StreamingAccount account = streamingAccountMapper.selectById(id);
         if (account == null) {
             throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
@@ -267,6 +300,14 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         }
         if (name != null) {
             account.setName(name);
+        }
+        if (email != null) {
+            // 检查邮箱是否与其他账号重复
+            StreamingAccount existingByEmail = findByEmail(email);
+            if (existingByEmail != null && !existingByEmail.getId().equals(id)) {
+                throw new BusinessException(ResultCode.StreamingAccount.EMAIL_DUPLICATE);
+            }
+            account.setEmail(email);
         }
         if (password != null) {
             account.setPasswordEncrypted(aesUtil.encrypt(password));

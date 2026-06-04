@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="header-left">
         <h2>游戏账号</h2>
-        <span class="header-desc">管理Xbox游戏账号</span>
+        <span class="header-desc">管理游戏账号</span>
       </div>
       <div class="header-right">
         <el-button @click="loadData">
@@ -28,8 +28,8 @@
       >
         <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" show-overflow-tooltip />
         <el-table-column prop="streamingName" label="关联流媒体账号" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="xboxGameName" label="Xbox玩家名称" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="xboxLiveEmail" label="Xbox邮箱" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="gameName" label="游戏昵称" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip />
         <el-table-column prop="status" label="状态" width="80" align="center">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)" size="small">
@@ -101,19 +101,43 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="Xbox玩家名" prop="xboxGameName">
-          <el-input v-model="formData.xboxGameName" placeholder="请输入Xbox玩家名称" />
+        <el-form-item label="游戏昵称" prop="gameName">
+          <el-input v-model="formData.gameName" placeholder="请输入游戏昵称" />
         </el-form-item>
-        <el-form-item label="Xbox邮箱" prop="xboxLiveEmail">
-          <el-input v-model="formData.xboxLiveEmail" placeholder="请输入Xbox邮箱" />
+        <el-form-item label="邮箱" prop="email">
+          <el-input v-model="formData.email" placeholder="请输入邮箱" />
         </el-form-item>
-        <el-form-item label="Xbox密码" prop="xboxLivePassword">
-          <el-input
-            v-model="formData.xboxLivePassword"
-            type="password"
-            placeholder="请输入Xbox密码"
-            show-password
-          />
+        <el-form-item label="密码" :prop="dialogType === 'add' ? 'password' : ''">
+          <template v-if="dialogType === 'edit' && !passwordVisible">
+            <el-input v-model="formData.password" placeholder="请输入新密码（点击输入框查看原密码）" @focus="loadPassword">
+              <template #suffix>
+                <el-icon class="password-toggle" @click="loadPassword" title="点击显示密码">
+                  <Hide />
+                </el-icon>
+              </template>
+            </el-input>
+          </template>
+          <template v-else-if="dialogType === 'edit' && passwordVisible">
+            <el-input
+              v-model="formData.password"
+              type="text"
+              placeholder="请输入新密码（不修改请留空）"
+            >
+              <template #suffix>
+                <el-icon class="password-toggle" @click="passwordVisible = false" title="点击隐藏">
+                  <View />
+                </el-icon>
+              </template>
+            </el-input>
+          </template>
+          <template v-else>
+            <el-input
+              v-model="formData.password"
+              type="password"
+              placeholder="请输入密码"
+              show-password
+            />
+          </template>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -253,6 +277,8 @@ const importLoading = ref(false)
 const importResult = ref(null)
 const merchantList = ref([])
 const importMerchantId = ref('')
+const passwordVisible = ref(false)  // 是否显示真实密码
+const passwordLoaded = ref(false)   // 密码是否已加载
 
 /**
  * 表单数据
@@ -260,9 +286,9 @@ const importMerchantId = ref('')
 const formData = reactive({
   id: '',
   merchantId: '',
-  xboxGameName: '',
-  xboxLiveEmail: '',
-  xboxLivePassword: ''
+  gameName: '',
+  email: '',
+  password: ''
 })
 
 /**
@@ -272,11 +298,11 @@ const formRules = {
   merchantId: [
     { required: true, message: '请选择商户', trigger: 'change' }
   ],
-  xboxGameName: [
-    { required: true, message: '请输入Xbox玩家名称', trigger: 'blur' }
+  gameName: [
+    { required: true, message: '请输入游戏昵称', trigger: 'blur' }
   ],
-  xboxLiveEmail: [
-    { required: true, message: '请输入Xbox邮箱', trigger: 'blur' },
+  email: [
+    { required: true, message: '请输入邮箱', trigger: 'blur' },
     { type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' }
   ]
 }
@@ -312,9 +338,11 @@ const showAddDialog = async () => {
   dialogType.value = 'add'
   formData.id = ''
   formData.merchantId = authStore.isPlatformAdmin ? '' : authStore.merchantId
-  formData.xboxGameName = ''
-  formData.xboxLiveEmail = ''
-  formData.xboxLivePassword = ''
+  formData.gameName = ''
+  formData.email = ''
+  formData.password = ''
+  passwordVisible.value = false
+  passwordLoaded.value = false
   if (authStore.isPlatformAdmin && merchantList.value.length === 0) {
     await loadMerchants()
   }
@@ -329,28 +357,39 @@ const showEditDialog = async (row) => {
   dialogType.value = 'edit'
   formData.id = row.id
   formData.merchantId = row.merchantId || ''
-  formData.xboxGameName = row.xboxGameName
-  formData.xboxLiveEmail = row.xboxLiveEmail
-  
-  // 通过API获取账号详情，包含解密后的密码
-  try {
-    const res = await gameAccountApi.getById(row.id)
-    if (res.code === 0 || res.code === 200) {
-      const account = res.data
-      // 使用解密后的密码
-      formData.xboxLivePassword = account.xboxLivePasswordEncrypted || ''
-    } else {
-      formData.xboxLivePassword = ''
-    }
-  } catch (error) {
-    console.error('Failed to get game account detail:', error)
-    formData.xboxLivePassword = ''
-  }
-  
+  formData.gameName = row.gameName
+  formData.email = row.email
+  formData.password = ''
+  passwordVisible.value = false
+  passwordLoaded.value = false
+
   if (authStore.isPlatformAdmin && merchantList.value.length === 0) {
     await loadMerchants()
   }
   dialogVisible.value = true
+}
+
+/**
+ * 加载密码（点击输入框图标或聚焦密码框时调用）
+ */
+const loadPassword = async () => {
+  if (passwordLoaded.value) {
+    // 已经加载过，直接显示
+    passwordVisible.value = true
+    return
+  }
+
+  try {
+    const res = await gameAccountApi.getById(formData.id)
+    if (res.code === 0 || res.code === 200) {
+      formData.password = res.data.password || ''
+      passwordLoaded.value = true
+      passwordVisible.value = true
+    }
+  } catch (error) {
+    console.error('Failed to load password:', error)
+    ElMessage.error('加载密码失败')
+  }
 }
 
 /**
@@ -379,16 +418,16 @@ const handleSubmit = async () => {
     if (dialogType.value === 'add') {
       await gameAccountApi.create({
         merchantId: formData.merchantId,
-        xboxGameName: formData.xboxGameName,
-        xboxLiveEmail: formData.xboxLiveEmail,
-        xboxLivePassword: formData.xboxLivePassword
+        gameName: formData.gameName,
+        email: formData.email,
+        password: formData.password
       })
       ElMessage.success('创建成功')
     } else {
       const updateData = {
         merchantId: formData.merchantId,
-        xboxLiveEmail: formData.xboxLiveEmail,
-        xboxLivePassword: formData.xboxLivePassword || undefined
+        email: formData.email,
+        password: formData.password || undefined
       }
       await gameAccountApi.update(formData.id, updateData)
       ElMessage.success('更新成功')
@@ -487,11 +526,11 @@ const handleImport = async () => {
     }
 
     const header = lines[0].split(',').map(h => h.trim())
-    const requiredHeaders = ['Xbox玩家名称', 'Xbox邮箱', 'Xbox密码']
+    const requiredHeaders = ['游戏昵称', '邮箱', '密码']
     const hasRequiredHeaders = requiredHeaders.every(h => header.includes(h))
 
     if (!hasRequiredHeaders) {
-      ElMessage.warning('CSV文件格式不正确，请检查表头是否包含：Xbox玩家名称、Xbox邮箱、Xbox密码')
+      ElMessage.warning('CSV文件格式不正确，请检查表头是否包含：游戏昵称、邮箱、密码')
       return
     }
 
@@ -500,9 +539,9 @@ const handleImport = async () => {
       const values = lines[i].split(',').map(v => v.trim())
       if (values.length >= 3 && values[0] && values[1] && values[2]) {
         accounts.push({
-          xboxGameName: values[0],
-          xboxLiveEmail: values[1],
-          xboxLivePassword: values[2] || ''
+          gameName: values[0],
+          email: values[1],
+          password: values[2] || ''
         })
       }
     }

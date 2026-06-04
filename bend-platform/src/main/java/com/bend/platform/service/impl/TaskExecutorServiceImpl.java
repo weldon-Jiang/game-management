@@ -215,8 +215,8 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
             }
             ObjectNode gaInfo = objectMapper.createObjectNode();
             gaInfo.put("gameAccountId", ga.getId());
-            gaInfo.put("xboxGameName", ga.getXboxGameName());
-            gaInfo.put("xboxLiveEmail", ga.getXboxLiveEmail());
+            gaInfo.put("gameName", ga.getGameName());
+            gaInfo.put("email", ga.getEmail());
             gaInfo.put("isPrimary", ga.getIsPrimary());
             gaInfo.put("priority", ga.getPriority());
             gaInfo.put("dailyMatchLimit", ga.getDailyMatchLimit());

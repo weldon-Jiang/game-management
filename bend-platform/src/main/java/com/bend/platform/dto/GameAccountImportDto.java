@@ -8,13 +8,13 @@ import lombok.Data;
 @Data
 public class GameAccountImportDto {
 
-    @NotBlank(message = "Xbox玩家名称不能为空")
-    @Size(max = 50, message = "Xbox玩家名称长度不能超过50")
-    private String xboxGameName;
+    @NotBlank(message = "游戏昵称不能为空")
+    @Size(max = 50, message = "游戏昵称长度不能超过50")
+    private String gameName;
 
-    @NotBlank(message = "Xbox邮箱不能为空")
-    @Email(message = "Xbox邮箱格式不正确")
-    private String xboxLiveEmail;
+    @NotBlank(message = "邮箱不能为空")
+    @Email(message = "邮箱格式不正确")
+    private String email;
 
-    private String xboxLivePassword;
+    private String password;
 }

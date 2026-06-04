@@ -92,10 +92,10 @@ public class GameAccountController {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
 
-        // 解密密码供前端显示
-        if (account.getXboxLivePasswordEncrypted() != null) {
+        // 解密密码供前端显示（设置到password字段供前端读取）
+        if (account.getPasswordEncrypted() != null) {
             try {
-                account.setXboxLivePasswordEncrypted(aesUtil.decrypt(account.getXboxLivePasswordEncrypted()));
+                account.setPassword(aesUtil.decrypt(account.getPasswordEncrypted()));
             } catch (Exception e) {
                 log.warn("解密游戏账号密码失败 - ID: {}", id, e);
             }
@@ -129,7 +129,7 @@ public class GameAccountController {
      */
     @GetMapping("/template")
     public ApiResponse<String> downloadTemplate() {
-        String template = "Xbox玩家名称,Xbox邮箱,Xbox密码\nPlayer1,player1@email.com,password1\nPlayer2,player2@email.com,password2";
+        String template = "游戏昵称,邮箱,密码\nPlayer1,player1@email.com,password1\nPlayer2,player2@email.com,password2";
         return ApiResponse.success(template);
     }
 

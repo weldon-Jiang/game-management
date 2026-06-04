@@ -1,6 +1,8 @@
 package com.bend.platform.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 import java.time.LocalDateTime;
 
@@ -46,22 +48,31 @@ public class GameAccount {
     private String merchantId;
 
     /**
-     * Xbox游戏名称
-     * Xbox游戏的玩家名称
+     * 游戏昵称
+     * 玩家的游戏名称
      */
-    private String xboxGameName;
+    private String gameName;
 
     /**
-     * Xbox登录邮箱
-     * Xbox账号的登录邮箱
+     * 登录邮箱
+     * 游戏账号的登录邮箱
      */
-    private String xboxLiveEmail;
+    private String email;
 
     /**
-     * 加密后的Xbox密码
-     * 使用AES加密存储
+     * 加密后的密码
+     * 使用AES加密存储，JsonIgnore避免序列化返回给前端
      */
-    private String xboxLivePasswordEncrypted;
+    @JsonIgnore
+    private String passwordEncrypted;
+
+    /**
+     * 明文密码（仅用于接收前端输入，不存储到数据库）
+     * 使用JsonProperty确保Jackson序列化时包含此字段
+     */
+    @TableField(exist = false)
+    @JsonProperty
+    private String password;
 
     /**
      * 锁定的Xbox ID

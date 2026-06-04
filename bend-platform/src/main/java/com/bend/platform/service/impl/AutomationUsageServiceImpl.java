@@ -239,7 +239,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
             } else if (chargeType.contains("account")) {
                 resourceType = "account";
                 resourceId = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getId() : null;
-                resourceName = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getXboxGameName() : null;
+                resourceName = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getGameName() : null;
                 chargeMode = chargeType.startsWith("subscription_") ? "monthly" : "monthly";
                 pointsDeducted = 0;
             } else {
@@ -253,7 +253,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
             if (chargeType.contains("account")) {
                 resourceType = "account";
                 resourceId = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getId() : null;
-                resourceName = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getXboxGameName() : null;
+                resourceName = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getGameName() : null;
                 chargeMode = "per_use";
                 pointsDeducted = accountPrice * accountCount;
             } else if (chargeType.contains("host")) {

@@ -32,8 +32,8 @@
       >
         <!-- 商户列（仅平台管理员可见） -->
         <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="150" show-overflow-tooltip />
-        <!-- 账号名称 -->
-        <el-table-column prop="name" label="账号名称" min-width="150" show-overflow-tooltip />
+        <!-- 游戏昵称 -->
+        <el-table-column prop="name" label="游戏昵称" min-width="150" show-overflow-tooltip />
         <!-- 邮箱 -->
         <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip />
         <!-- 状态 -->
@@ -154,22 +154,36 @@
             />
           </el-select>
         </el-form-item>
-        <!-- 账号名称 -->
-        <el-form-item label="账号名称" prop="name">
-          <el-input v-model="formData.name" placeholder="请输入账号名称" />
+        <!-- 游戏昵称 -->
+        <el-form-item label="游戏昵称" prop="name">
+          <el-input v-model="formData.name" placeholder="请输入游戏昵称" />
         </el-form-item>
         <!-- 邮箱 -->
         <el-form-item label="邮箱" prop="email">
           <el-input v-model="formData.email" placeholder="请输入邮箱" />
         </el-form-item>
         <!-- 密码 -->
-        <el-form-item label="密码" prop="password">
-          <el-input
-            v-model="formData.password"
-            type="password"
-            placeholder="请输入密码"
-            show-password
-          />
+        <el-form-item label="密码" :prop="dialogType === 'add' ? 'password' : ''">
+          <template v-if="dialogType === 'edit' && !passwordVisible">
+            <el-input v-model="formData.password" placeholder="请输入新密码（点击输入框查看原密码）" @focus="loadPassword">
+            </el-input>
+          </template>
+          <template v-else-if="dialogType === 'edit' && passwordVisible">
+            <el-input
+              v-model="formData.password"
+              type="text"
+              placeholder="请输入新密码（不修改请留空）"
+            >
+            </el-input>
+          </template>
+          <template v-else>
+            <el-input
+              v-model="formData.password"
+              type="password"
+              placeholder="请输入密码"
+              show-password
+            />
+          </template>
         </el-form-item>
         <!-- 认证码（非必填） -->
         <el-form-item label="认证码" prop="authCode">
@@ -280,7 +294,7 @@
       </el-upload>
       <div v-if="importResult" class="import-result">
         <el-alert
-          :title="`导入完成：成功 ${importResult.successCount} 条，失败 ${importResult.failCount} 条`"
+          :title="`导入完成：成功 ${importResult.successCount} 条，跳过 ${importResult.skipCount} 条，失败 ${importResult.failCount} 条`"
           :type="importResult.failCount > 0 ? 'warning' : 'success'"
           show-icon
         >
@@ -523,18 +537,23 @@ const automationTaskTypeName = AUTOMATION_TASK_TYPES[0]?.name || '串流控制'
 const formData = reactive({
   id: '',              // 账号ID（编辑时使用）
   merchantId: '',     // 商户ID
-  name: '',           // 账号名称
+  name: '',           // 游戏昵称
   email: '',          // 邮箱
   password: '',       // 密码（必填）
   authCode: ''        // 认证码（非必填）
 })
+
+// 密码显示状态（编辑时）
+const passwordVisible = ref(false)  // 是否显示真实密码
+const passwordLoaded = ref(false)    // 密码是否已加载
+const actualPassword = ref('')      // 真实密码（点击输入框后加载）
 
 /**
  * 表单验证规则
  */
 const formRules = {
   name: [
-    { required: true, message: '请输入账号名称', trigger: 'blur' },
+    { required: true, message: '请输入游戏昵称', trigger: 'blur' },
     { min: 2, max: 50, message: '长度在 2 到 50 个字符', trigger: 'blur' }
   ],
   email: [
@@ -625,7 +644,33 @@ const showAddDialog = () => {
   formData.email = ''
   formData.password = ''
   formData.authCode = ''
+  passwordVisible.value = false
+  passwordLoaded.value = false
+  actualPassword.value = ''
   dialogVisible.value = true
+}
+
+/**
+ * 加载密码（点击输入框图标或聚焦密码框时调用）
+ */
+const loadPassword = async () => {
+  if (passwordLoaded.value) {
+    // 已经加载过，直接显示
+    passwordVisible.value = true
+    return
+  }
+
+  try {
+    const res = await streamingApi.getPasswordById(formData.id)
+    if (res.code === 0 || res.code === 200) {
+      formData.password = res.data.password || ''
+      passwordLoaded.value = true
+      passwordVisible.value = true
+    }
+  } catch (error) {
+    console.error('Failed to load password:', error)
+    ElMessage.error('加载密码失败')
+  }
 }
 
 /**
@@ -645,23 +690,11 @@ const showEditDialog = async (row) => {
   formData.merchantId = row.merchantId
   formData.name = row.name
   formData.email = row.email
-  formData.authCode = ''
-  
-  // 通过API获取账号详情，包含解密后的密码
-  try {
-    const res = await streamingApi.getById(row.id)
-    if (res.code === 0 || res.code === 200) {
-      const account = res.data
-      // 使用解密后的密码
-      formData.password = account.passwordEncrypted || ''
-    } else {
-      formData.password = ''
-    }
-  } catch (error) {
-    console.error('Failed to get streaming account detail:', error)
-    formData.password = ''
-  }
-  
+  formData.password = ''
+  formData.authCode = row.authCode || ''
+  passwordVisible.value = false
+  passwordLoaded.value = false
+  actualPassword.value = ''
   dialogVisible.value = true
 }
 
@@ -694,6 +727,7 @@ const handleSubmit = async () => {
       const updateData = {
         merchantId: formData.merchantId,
         name: formData.name,
+        email: formData.email,
         authCode: formData.authCode || undefined
       }
       // 如果填写了新密码，则更新密码
@@ -922,11 +956,11 @@ const handleImport = async () => {
     }
 
     const header = lines[0].split(',').map(h => h.trim())
-    const requiredHeaders = ['账号名称', '邮箱', '密码']
+    const requiredHeaders = ['游戏昵称', '邮箱', '密码']
     const hasRequiredHeaders = requiredHeaders.every(h => header.includes(h))
 
     if (!hasRequiredHeaders) {
-      ElMessage.warning('CSV文件格式不正确，请检查表头是否包含：账号名称、邮箱、密码')
+      ElMessage.warning('CSV文件格式不正确，请检查表头是否包含：游戏昵称、邮箱、密码')
       return
     }
 
@@ -964,7 +998,7 @@ const handleImport = async () => {
       importDialogVisible.value = false
       loadData()
     } else {
-      ElMessage.warning(`导入完成：成功 ${res.data.successCount} 条，失败 ${res.data.failCount} 条`)
+      ElMessage.warning(`导入完成：成功 ${res.data.successCount} 条，跳过 ${res.data.skipCount} 条，失败 ${res.data.failCount} 条`)
     }
   } catch (error) {
     console.error('Import failed:', error)
@@ -1264,7 +1298,7 @@ onMounted(() => {
   color: #5a5a5a;
 }
 
-/* 自动化账号名称样式 */
+/* 自动化游戏昵称样式 */
 .automation-account-name {
   color: #10b981;
   font-weight: 500;
@@ -1388,5 +1422,10 @@ onMounted(() => {
 
 :deep(.el-table__body-wrapper .el-table__row:hover td.el-table__cell) {
   background-color: #1a1a2e !important;
+}
+
+/* 密码可见性输入框样式 */
+.password-visible-input :deep(.el-input__inner) {
+  color: #409eff;
 }
 </style>

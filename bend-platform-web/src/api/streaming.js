@@ -4,6 +4,7 @@ export const streamingApi = {
   list: (params) => request.get('/api/streaming-accounts', { params }),
   listAll: () => request.get('/api/streaming-accounts', { params: { pageSize: 10000 } }),
   getById: (id) => request.get(`/api/streaming-accounts/${id}`),
+  getPasswordById: (id) => request.get(`/api/streaming-accounts/${id}/password`),
   create: (data) => request.post('/api/streaming-accounts', data),
   update: (id, data) => request.put(`/api/streaming-accounts/${id}`, data),
   delete: (id) => request.delete(`/api/streaming-accounts/${id}`),

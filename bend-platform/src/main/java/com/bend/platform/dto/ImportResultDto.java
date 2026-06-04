@@ -6,6 +6,7 @@ import java.util.List;
 @Data
 public class ImportResultDto {
     private int successCount;
+    private int skipCount;
     private int failCount;
     private List<String> errors;
 }

@@ -77,10 +77,10 @@ public class GameAccountServiceImpl implements GameAccountService {
         GameAccount entity = new GameAccount();
         entity.setMerchantId(merchantId);
         entity.setStreamingId(account.getStreamingId());
-        entity.setXboxGameName(account.getXboxGameName());
-        entity.setXboxLiveEmail(account.getXboxLiveEmail());
-        if (account.getXboxLivePasswordEncrypted() != null) {
-            entity.setXboxLivePasswordEncrypted(aesUtil.encrypt(account.getXboxLivePasswordEncrypted()));
+        entity.setGameName(account.getGameName());
+        entity.setEmail(account.getEmail());
+        if (account.getPassword() != null) {
+            entity.setPasswordEncrypted(aesUtil.encrypt(account.getPassword()));
         }
         entity.setIsActive(true);
         entity.setIsPrimary(false);
@@ -88,7 +88,7 @@ public class GameAccountServiceImpl implements GameAccountService {
         entity.setUpdatedTime(LocalDateTime.now());
 
         gameAccountMapper.insert(entity);
-        log.info("创建游戏账号成功 - ID: {}, 名称: {}", entity.getId(), entity.getXboxGameName());
+        log.info("创建游戏账号成功 - ID: {}, 名称: {}", entity.getId(), entity.getGameName());
         return entity;
     }
 
@@ -111,18 +111,18 @@ public class GameAccountServiceImpl implements GameAccountService {
             GameAccountImportDto dto = accounts.get(i);
             int rowNum = i + 2;
 
-            if (gamertagSet.contains(dto.getXboxGameName())) {
-                errors.add(String.format("第%d行: Xbox玩家名称[%s]重复", rowNum, dto.getXboxGameName()));
+            if (gamertagSet.contains(dto.getGameName())) {
+                errors.add(String.format("第%d行: 游戏昵称[%s]重复", rowNum, dto.getGameName()));
                 continue;
             }
 
-            GameAccount existing = findByGamertag(dto.getXboxGameName());
+            GameAccount existing = findByGamertag(dto.getGameName());
             if (existing != null) {
-                errors.add(String.format("第%d行: Xbox玩家名称[%s]已存在", rowNum, dto.getXboxGameName()));
+                errors.add(String.format("第%d行: 游戏昵称[%s]已存在", rowNum, dto.getGameName()));
                 continue;
             }
 
-            gamertagSet.add(dto.getXboxGameName());
+            gamertagSet.add(dto.getGameName());
         }
 
         if (!errors.isEmpty()) {
@@ -136,10 +136,10 @@ public class GameAccountServiceImpl implements GameAccountService {
             try {
                 GameAccount entity = new GameAccount();
                 entity.setMerchantId(merchantId);
-                entity.setXboxGameName(dto.getXboxGameName());
-                entity.setXboxLiveEmail(dto.getXboxLiveEmail());
-                if (dto.getXboxLivePassword() != null) {
-                    entity.setXboxLivePasswordEncrypted(aesUtil.encrypt(dto.getXboxLivePassword()));
+                entity.setGameName(dto.getGameName());
+                entity.setEmail(dto.getEmail());
+                if (dto.getPassword() != null) {
+                    entity.setPasswordEncrypted(aesUtil.encrypt(dto.getPassword()));
                 }
                 entity.setIsActive(true);
                 entity.setIsPrimary(false);
@@ -148,8 +148,8 @@ public class GameAccountServiceImpl implements GameAccountService {
                 gameAccountMapper.insert(entity);
                 successCount++;
             } catch (Exception e) {
-                log.error("导入游戏账号失败: {}", dto.getXboxGameName(), e);
-                errors.add(String.format("Xbox玩家名称[%s]: 导入失败", dto.getXboxGameName()));
+                log.error("导入游戏账号失败: {}", dto.getGameName(), e);
+                errors.add(String.format("游戏昵称[%s]: 导入失败", dto.getGameName()));
             }
         }
 
@@ -172,7 +172,7 @@ public class GameAccountServiceImpl implements GameAccountService {
     @Override
     public GameAccount findByGamertag(String gamertag) {
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(GameAccount::getXboxGameName, gamertag);
+        wrapper.eq(GameAccount::getGameName, gamertag);
         return gameAccountMapper.selectOne(wrapper);
     }
 
@@ -244,6 +244,8 @@ public class GameAccountServiceImpl implements GameAccountService {
         for (GameAccount account : accounts) {
             account.setMerchantName(merchantNameMap.get(account.getMerchantId()));
             account.setStreamingName(streamingNameMap.get(account.getStreamingId()));
+            // 列表查询不返回密码
+            account.setPasswordEncrypted(null);
         }
     }
 
@@ -268,11 +270,11 @@ public class GameAccountServiceImpl implements GameAccountService {
         if (account.getMerchantId() != null) {
             existing.setMerchantId(account.getMerchantId());
         }
-        if (account.getXboxLiveEmail() != null) {
-            existing.setXboxLiveEmail(account.getXboxLiveEmail());
+        if (account.getEmail() != null) {
+            existing.setEmail(account.getEmail());
         }
-        if (account.getXboxLivePasswordEncrypted() != null) {
-            existing.setXboxLivePasswordEncrypted(aesUtil.encrypt(account.getXboxLivePasswordEncrypted()));
+        if (account.getPassword() != null) {
+            existing.setPasswordEncrypted(aesUtil.encrypt(account.getPassword()));
         }
         if (account.getIsActive() != null) {
             existing.setIsActive(account.getIsActive());
@@ -289,7 +291,12 @@ public class GameAccountServiceImpl implements GameAccountService {
         wrapper.eq(GameAccount::getMerchantId, merchantId)
                .isNull(GameAccount::getStreamingId)
                .orderByDesc(GameAccount::getCreatedTime);
-        return gameAccountMapper.selectList(wrapper);
+        List<GameAccount> result = gameAccountMapper.selectList(wrapper);
+        // 清除密码字段
+        if (!CollectionUtils.isEmpty(result)) {
+            result.forEach(account -> account.setPasswordEncrypted(null));
+        }
+        return result;
     }
 
     @Override
@@ -433,6 +440,11 @@ public class GameAccountServiceImpl implements GameAccountService {
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(GameAccount::getStreamingId, streamingId)
                .orderByDesc(GameAccount::getCreatedTime);
-        return gameAccountMapper.selectList(wrapper);
+        List<GameAccount> result = gameAccountMapper.selectList(wrapper);
+        // 清除密码字段
+        if (!CollectionUtils.isEmpty(result)) {
+            result.forEach(account -> account.setPasswordEncrypted(null));
+        }
+        return result;
     }
 }

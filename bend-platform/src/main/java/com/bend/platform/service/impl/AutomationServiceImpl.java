@@ -85,7 +85,7 @@ public class AutomationServiceImpl implements AutomationService {
             List<String> busyGameAccountNames = new ArrayList<>();
             for (GameAccount ga : gameAccounts) {
                 if (AccountStatusEnum.BUSY.getCode().equals(ga.getStatus())) {
-                    busyGameAccountNames.add(ga.getXboxGameName());
+                    busyGameAccountNames.add(ga.getGameName());
                 }
             }
             if (!busyGameAccountNames.isEmpty()) {
@@ -281,11 +281,11 @@ public class AutomationServiceImpl implements AutomationService {
         for (GameAccount ga : accounts) {
             Map<String, Object> info = new HashMap<>();
             info.put("id", ga.getId());
-            info.put("xboxGameName", ga.getXboxGameName());
-            info.put("xboxLiveEmail", ga.getXboxLiveEmail());
+            info.put("gameName", ga.getGameName());
+            info.put("email", ga.getEmail());
             info.put("isPrimary", ga.getIsPrimary());
             info.put("passwordToken", credentialTokenService.generateToken(
-                "game_account:" + ga.getId(), ga.getXboxLivePasswordEncrypted()));
+                "game_account:" + ga.getId(), ga.getPasswordEncrypted()));
             result.add(info);
         }
         return result;

@@ -52,6 +52,14 @@ public interface StreamingAccountService {
     StreamingAccount findByEmail(String email);
 
     /**
+     * 根据名称查询流媒体账号
+     *
+     * @param name 账号名称
+     * @return 账号实体，不存在返回null
+     */
+    StreamingAccount findByName(String name);
+
+    /**
      * 分页查询商户下的流媒体账号
      *
      * @param merchantId 商户ID
@@ -107,6 +115,18 @@ public interface StreamingAccountService {
      * @param authCode   新认证码（可选）
      */
     void updateWithPassword(String id, String merchantId, String name, String password, String authCode);
+
+    /**
+     * 更新账号信息（管理员用，包含密码和邮箱）
+     *
+     * @param id         账号ID
+     * @param merchantId 新商户ID（可选）
+     * @param name       新名称（可选）
+     * @param email      新邮箱（可选）
+     * @param password   新密码（可选）
+     * @param authCode   新认证码（可选）
+     */
+    void updateWithPassword(String id, String merchantId, String name, String email, String password, String authCode);
 
     /**
      * 更新账号状态
