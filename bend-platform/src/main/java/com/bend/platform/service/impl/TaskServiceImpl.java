@@ -203,6 +203,7 @@ public class TaskServiceImpl implements TaskService {
      * 功能说明：
      * - 支持按状态和类型筛选
      * - 分页返回任务列表
+     * - 平台管理员可查看所有任务，其他用户只能查看本商户任务
      *
      * 参数说明：
      * - pageNum: 页码（从1开始）
@@ -217,6 +218,15 @@ public class TaskServiceImpl implements TaskService {
     public IPage<Task> findPage(TaskPageRequest request) {
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Task::getDeleted, false);
+
+        // 平台管理员可查看所有任务，其他用户只能查看本商户任务
+        if (!UserContext.isPlatformAdmin()) {
+            String merchantId = UserContext.getMerchantId();
+            if (merchantId != null) {
+                wrapper.eq(Task::getMerchantId, merchantId);
+            }
+        }
+
         if (StringUtils.hasText(request.getStatus())) {
             wrapper.eq(Task::getStatus, request.getStatus());
         }

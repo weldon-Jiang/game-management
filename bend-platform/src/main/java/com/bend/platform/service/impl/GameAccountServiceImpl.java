@@ -477,4 +477,12 @@ public class GameAccountServiceImpl implements GameAccountService {
         }
         return result;
     }
+
+    @Override
+    public List<GameAccount> findByStreamingIdWithCredentials(String streamingId) {
+        LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(GameAccount::getStreamingId, streamingId)
+               .orderByDesc(GameAccount::getCreatedTime);
+        return gameAccountMapper.selectList(wrapper);
+    }
 }

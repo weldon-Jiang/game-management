@@ -413,16 +413,17 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
         }
 
-        account.setTaskStatus(taskStatus);
-        
+        // 只更新status字段，与taskStatus保持一致
+        account.setStatus(taskStatus);
+
         // 状态变为空闲时，自动重置运行Agent
         if ("idle".equalsIgnoreCase(taskStatus) && account.getAgentId() != null) {
             account.setAgentId(null);
             log.info("流媒体账号状态为空闲，自动重置运行Agent - ID: {}", id);
         }
-        
+
         streamingAccountMapper.updateById(account);
-        log.info("更新流媒体账号任务状态 - ID: {}, 任务状态: {}", id, taskStatus);
+        log.info("更新流媒体账号任务状态 - ID: {}, 状态: {}", id, taskStatus);
     }
 
     @Override
@@ -454,7 +455,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         // 清空每个账号的agentId和任务状态
         for (StreamingAccount account : accounts) {
             account.setAgentId(null);
-            account.setTaskStatus("idle");
+            account.setStatus("idle");
             streamingAccountMapper.updateById(account);
             log.info("清空流媒体账号Agent绑定 - AccountID: {}, Email: {}", account.getId(), account.getEmail());
         }

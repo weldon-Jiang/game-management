@@ -3,13 +3,7 @@
     <div class="page-header">
       <div class="header-left">
         <h2>任务管理</h2>
-        <span class="header-desc">创建、下发和管理自动化任务</span>
-      </div>
-      <div class="header-right">
-        <el-button type="primary" @click="showCreateDialog">
-          <el-icon><Plus /></el-icon>
-          创建任务
-        </el-button>
+        <span class="header-desc">查看自动化任务执行情况</span>
       </div>
     </div>
 
@@ -77,10 +71,9 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="agentId" label="执行Agent" width="150" show-overflow-tooltip>
+        <el-table-column prop="targetAgentId" label="执行Agent" width="300">
           <template #default="{ row }">
-            <span v-if="row.agentName">{{ row.agentName }}</span>
-            <span v-else-if="row.agentId" class="text-muted">{{ row.agentId.substring(0, 8) }}...</span>
+            <span v-if="row.targetAgentId" class="agent-id-text">{{ row.targetAgentId }}</span>
             <span v-else class="text-muted">未分配</span>
           </template>
         </el-table-column>
@@ -582,6 +575,11 @@ onMounted(() => {
 .text-muted {
   color: #6b7280;
   font-size: 12px;
+}
+
+.agent-id-text {
+  cursor: pointer;
+  color: #409eff;
 }
 
 .priority-0 { color: #6b7280; }

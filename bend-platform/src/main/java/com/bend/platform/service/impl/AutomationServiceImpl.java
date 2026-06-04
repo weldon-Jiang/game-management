@@ -93,7 +93,7 @@ public class AutomationServiceImpl implements AutomationService {
                 continue;
             }
 
-            List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+            List<GameAccount> gameAccounts = gameAccountService.findByStreamingIdWithCredentials(streamingAccountId);
             List<XboxHost> boundHosts = xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
 
             XboxHost selectedHost = null;

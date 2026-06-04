@@ -55,4 +55,9 @@ public interface GameAccountService {
     void clearAgentIdByStreamingId(String streamingId);
 
     List<GameAccount> findByStreamingId(String streamingId);
+
+    /**
+     * 根据流媒体账号ID查询绑定的游戏账号（保留密码信息）
+     */
+    List<GameAccount> findByStreamingIdWithCredentials(String streamingId);
 }

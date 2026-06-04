@@ -83,13 +83,6 @@ public class StreamingAccount {
     private String agentId;
 
     /**
-     * 任务状态
-     * idle-空闲 busy-忙碌
-     * 表示账号当前是否正在执行任务
-     */
-    private String taskStatus;
-
-    /**
      * 最近错误代码
      * 记录最近一次错误的代码标识
      */

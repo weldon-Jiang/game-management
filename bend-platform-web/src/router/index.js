@@ -84,7 +84,7 @@ const routes = [
         path: 'tasks',
         name: 'Tasks',
         component: () => import('@/views/task/TaskList.vue'),
-        meta: { title: '任务管理', icon: 'List', requiresOperatorAccess: true }
+        meta: { title: '任务管理', icon: 'List' }
       },
       {
         path: 'subscription',

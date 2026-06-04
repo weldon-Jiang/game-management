@@ -51,18 +51,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <!-- 任务状态 -->
-        <el-table-column prop="taskStatus" label="任务状态" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag :type="getAccountTaskStatusType(row.taskStatus)" size="small">
-              {{ getAccountTaskStatusText(row.taskStatus) }}
-            </el-tag>
-          </template>
-        </el-table-column>
         <!-- 运行Agent -->
-        <el-table-column prop="agentId" label="运行Agent" width="180" show-overflow-tooltip>
+        <el-table-column prop="agentId" label="运行Agent" width="300">
           <template #default="{ row }">
-            <span v-if="row.agentId" class="agent-id">{{ row.agentId.substring(0, 8) }}...</span>
+            <span v-if="row.agentId" class="agent-id">{{ row.agentId }}</span>
             <span v-else class="text-muted">未运行</span>
           </template>
         </el-table-column>
