@@ -24,7 +24,7 @@ public interface StreamingAccountService {
      * @param authCode   认证码（可选）
      * @return 创建的账号实体
      */
-    StreamingAccount create(String merchantId, String name, String email, String password, String authCode);
+    StreamingAccount create(String merchantId, String name, String email, String password, String authCode, String platform);
 
     /**
      * 批量导入流媒体账号
@@ -126,7 +126,7 @@ public interface StreamingAccountService {
      * @param password   新密码（可选）
      * @param authCode   新认证码（可选）
      */
-    void updateWithPassword(String id, String merchantId, String name, String email, String password, String authCode);
+    void updateWithPassword(String id, String merchantId, String name, String email, String password, String authCode, String platform);
 
     /**
      * 更新账号状态

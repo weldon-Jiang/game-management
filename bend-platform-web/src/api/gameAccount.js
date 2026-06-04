@@ -8,7 +8,7 @@ export const gameAccountApi = {
   delete: (id) => request.delete(`/api/game-accounts/${id}`),
   downloadTemplate: () => request.get('/api/game-accounts/template'),
   batchImport: (data) => request.post('/api/game-accounts/batch', data),
-  getUnbound: (merchantId) => request.get('/api/game-accounts/unbound', { params: { merchantId } }),
+  getUnbound: (merchantId, platform) => request.get('/api/game-accounts/unbound', { params: { merchantId, platform } }),
   bind: (streamingAccountId, data) => request.post(`/api/game-accounts/bind/${streamingAccountId}`, data),
   unbind: (data) => request.post('/api/game-accounts/unbind', data)
 }

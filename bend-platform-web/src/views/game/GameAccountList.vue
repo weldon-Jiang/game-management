@@ -30,6 +30,13 @@
         <el-table-column prop="streamingName" label="关联流媒体账号" min-width="150" show-overflow-tooltip />
         <el-table-column prop="gameName" label="游戏昵称" min-width="150" show-overflow-tooltip />
         <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="platform" label="平台" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag :type="getPlatformTypeTag(row.platform)" size="small">
+              {{ getPlatformTypeText(row.platform) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="80" align="center">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)" size="small">
@@ -139,6 +146,16 @@
             />
           </template>
         </el-form-item>
+        <el-form-item label="平台类型" prop="platform">
+          <el-select v-model="formData.platform" placeholder="请选择平台类型" style="width: 100%">
+            <el-option
+              v-for="item in PLATFORM_TYPES"
+              :key="item.code"
+              :label="item.name"
+              :value="item.code"
+            />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -228,6 +245,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { gameAccountApi, merchantApi } from '@/api'
+import { PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag } from '@/utils/constants'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
@@ -288,7 +306,8 @@ const formData = reactive({
   merchantId: '',
   gameName: '',
   email: '',
-  password: ''
+  password: '',
+  platform: 'xbox'
 })
 
 /**
@@ -341,6 +360,7 @@ const showAddDialog = async () => {
   formData.gameName = ''
   formData.email = ''
   formData.password = ''
+  formData.platform = 'xbox'
   passwordVisible.value = false
   passwordLoaded.value = false
   if (authStore.isPlatformAdmin && merchantList.value.length === 0) {
@@ -360,6 +380,7 @@ const showEditDialog = async (row) => {
   formData.gameName = row.gameName
   formData.email = row.email
   formData.password = ''
+  formData.platform = row.platform || 'xbox'
   passwordVisible.value = false
   passwordLoaded.value = false
 
@@ -420,14 +441,16 @@ const handleSubmit = async () => {
         merchantId: formData.merchantId,
         gameName: formData.gameName,
         email: formData.email,
-        password: formData.password
+        password: formData.password,
+        platform: formData.platform
       })
       ElMessage.success('创建成功')
     } else {
       const updateData = {
         merchantId: formData.merchantId,
         email: formData.email,
-        password: formData.password || undefined
+        password: formData.password || undefined,
+        platform: formData.platform
       }
       await gameAccountApi.update(formData.id, updateData)
       ElMessage.success('更新成功')
@@ -534,6 +557,8 @@ const handleImport = async () => {
       return
     }
 
+    const platformIdx = header.indexOf('平台类型')
+
     const accounts = []
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim())
@@ -541,7 +566,8 @@ const handleImport = async () => {
         accounts.push({
           gameName: values[0],
           email: values[1],
-          password: values[2] || ''
+          password: values[2] || '',
+          platform: platformIdx >= 0 ? (values[platformIdx] || 'xbox') : 'xbox'
         })
       }
     }

@@ -17,4 +17,6 @@ public class GameAccountImportDto {
     private String email;
 
     private String password;
+
+    private String platform;
 }

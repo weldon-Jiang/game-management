@@ -18,6 +18,8 @@ import com.bend.platform.repository.StreamingAccountMapper;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.util.AesUtil;
 import com.bend.platform.util.DataSecurityUtil;
+import com.bend.platform.util.PlatformTypeUtil;
+import com.bend.platform.enums.PlatformType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -66,12 +68,18 @@ public class GameAccountServiceImpl implements GameAccountService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public GameAccount create(String merchantId, GameAccount account) {
-        StreamingAccount streaming = streamingAccountMapper.selectById(account.getStreamingId());
-        if (streaming == null) {
-            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
-        }
-        if (!streaming.getMerchantId().equals(merchantId)) {
-            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        String accountPlatform = PlatformTypeUtil.normalizeOrDefault(account.getPlatform());
+
+        if (account.getStreamingId() != null && !account.getStreamingId().isBlank()) {
+            StreamingAccount streaming = streamingAccountMapper.selectById(account.getStreamingId());
+            if (streaming == null) {
+                throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+            }
+            if (!streaming.getMerchantId().equals(merchantId)) {
+                throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+            }
+            PlatformTypeUtil.requireSamePlatform(accountPlatform, streaming.getPlatform(),
+                    "游戏账号平台与流媒体账号不一致");
         }
 
         GameAccount entity = new GameAccount();
@@ -79,6 +87,7 @@ public class GameAccountServiceImpl implements GameAccountService {
         entity.setStreamingId(account.getStreamingId());
         entity.setGameName(account.getGameName());
         entity.setEmail(account.getEmail());
+        entity.setPlatform(accountPlatform);
         if (account.getPassword() != null) {
             entity.setPasswordEncrypted(aesUtil.encrypt(account.getPassword()));
         }
@@ -116,6 +125,12 @@ public class GameAccountServiceImpl implements GameAccountService {
                 continue;
             }
 
+            if (dto.getPlatform() != null && !dto.getPlatform().isBlank()
+                    && PlatformType.fromCode(dto.getPlatform()) == null) {
+                errors.add(String.format("第%d行: 平台类型无效，仅支持 xbox、playstation", rowNum));
+                continue;
+            }
+
             GameAccount existing = findByGamertag(dto.getGameName());
             if (existing != null) {
                 errors.add(String.format("第%d行: 游戏昵称[%s]已存在", rowNum, dto.getGameName()));
@@ -138,6 +153,7 @@ public class GameAccountServiceImpl implements GameAccountService {
                 entity.setMerchantId(merchantId);
                 entity.setGameName(dto.getGameName());
                 entity.setEmail(dto.getEmail());
+                entity.setPlatform(PlatformTypeUtil.normalizeOrDefault(dto.getPlatform()));
                 if (dto.getPassword() != null) {
                     entity.setPasswordEncrypted(aesUtil.encrypt(dto.getPassword()));
                 }
@@ -279,6 +295,9 @@ public class GameAccountServiceImpl implements GameAccountService {
         if (account.getIsActive() != null) {
             existing.setIsActive(account.getIsActive());
         }
+        if (account.getPlatform() != null && !account.getPlatform().isBlank()) {
+            existing.setPlatform(PlatformTypeUtil.requireValid(account.getPlatform()));
+        }
         existing.setUpdatedTime(LocalDateTime.now());
 
         gameAccountMapper.updateById(existing);
@@ -286,11 +305,14 @@ public class GameAccountServiceImpl implements GameAccountService {
     }
 
     @Override
-    public List<GameAccount> findUnboundByMerchantId(String merchantId) {
+    public List<GameAccount> findUnboundByMerchantId(String merchantId, String platform) {
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(GameAccount::getMerchantId, merchantId)
-               .isNull(GameAccount::getStreamingId)
-               .orderByDesc(GameAccount::getCreatedTime);
+               .isNull(GameAccount::getStreamingId);
+        if (platform != null && !platform.isBlank()) {
+            wrapper.eq(GameAccount::getPlatform, PlatformTypeUtil.normalizeOrDefault(platform));
+        }
+        wrapper.orderByDesc(GameAccount::getCreatedTime);
         List<GameAccount> result = gameAccountMapper.selectList(wrapper);
         // 清除密码字段
         if (!CollectionUtils.isEmpty(result)) {
@@ -302,11 +324,19 @@ public class GameAccountServiceImpl implements GameAccountService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void bindToStreamingAccount(String streamingAccountId, List<String> gameAccountIds) {
+        StreamingAccount streamingAccount = streamingAccountMapper.selectById(streamingAccountId);
+        if (streamingAccount == null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+        }
+
         for (String gameAccountId : gameAccountIds) {
             GameAccount account = gameAccountMapper.selectById(gameAccountId);
             if (account == null) {
                 throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
             }
+            PlatformTypeUtil.requireSamePlatform(
+                    account.getPlatform(), streamingAccount.getPlatform(),
+                    "游戏账号平台与流媒体账号不一致，无法关联");
             account.setStreamingId(streamingAccountId);
             account.setUpdatedTime(LocalDateTime.now());
             gameAccountMapper.updateById(account);

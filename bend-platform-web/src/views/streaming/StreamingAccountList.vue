@@ -36,6 +36,13 @@
         <el-table-column prop="name" label="游戏昵称" min-width="150" show-overflow-tooltip />
         <!-- 邮箱 -->
         <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="platform" label="平台" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag :type="getPlatformTypeTag(row.platform)" size="small">
+              {{ getPlatformTypeText(row.platform) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <!-- 状态 -->
         <el-table-column prop="status" label="状态" width="100" align="center">
           <template #default="{ row }">
@@ -80,6 +87,8 @@
               type="success"
               link
               size="small"
+              :disabled="!isPlatformAutomationSupported(row.platform)"
+              :title="!isPlatformAutomationSupported(row.platform) ? '该账号为 PlayStation 类型，自动化功能尚未开放' : ''"
               @click="showStartAutomationDialog(row)"
             >
               启动自动化
@@ -185,6 +194,19 @@
             />
           </template>
         </el-form-item>
+        <el-form-item label="平台类型" prop="platform">
+          <el-select v-model="formData.platform" placeholder="请选择平台类型" style="width: 100%">
+            <el-option
+              v-for="item in PLATFORM_TYPES"
+              :key="item.code"
+              :label="item.name"
+              :value="item.code"
+            />
+          </el-select>
+          <div v-if="formData.platform === 'playstation'" class="form-tip">
+            PlayStation 账号已支持录入与管理；自动化功能即将上线，当前仅支持 Xbox。
+          </div>
+        </el-form-item>
         <!-- 认证码（非必填） -->
         <el-form-item label="认证码" prop="authCode">
           <el-input
@@ -228,6 +250,22 @@
               :key="agent.agentId"
               :label="formatAgentLabel(agent)"
               :value="agent.agentId"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="主机（可选）">
+          <el-select
+            v-model="selectedHostId"
+            placeholder="不指定，由 Agent 自动匹配"
+            style="width: 100%"
+            clearable
+            filterable
+          >
+            <el-option
+              v-for="host in boundHosts"
+              :key="host.id"
+              :label="`${host.name || host.xboxId} (${host.ipAddress || '-'})`"
+              :value="host.id"
             />
           </el-select>
         </el-form-item>
@@ -396,8 +434,8 @@ import { ref, reactive, onMounted, nextTick, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi } from '@/api'
-import { getStreamingAccountStatusText, getStreamingAccountStatusType, getAccountTaskStatusText, getAccountTaskStatusType, AUTOMATION_TASK_TYPES } from '@/utils/constants'
+import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi, xboxApi } from '@/api'
+import { getStreamingAccountStatusText, getStreamingAccountStatusType, getAccountTaskStatusText, getAccountTaskStatusType, AUTOMATION_TASK_TYPES, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag, isPlatformAutomationSupported } from '@/utils/constants'
 
 // ==================== 状态定义 ====================
 
@@ -519,6 +557,10 @@ const selectedAccount = ref(null)
  */
 const selectedAgentId = ref('')
 
+const selectedHostId = ref('')
+
+const boundHosts = ref([])
+
 /**
  * 自动化任务类型（从配置常量获取）
  * 当前仅支持串流控制
@@ -540,7 +582,8 @@ const formData = reactive({
   name: '',           // 游戏昵称
   email: '',          // 邮箱
   password: '',       // 密码（必填）
-  authCode: ''        // 认证码（非必填）
+  authCode: '',       // 认证码（非必填）
+  platform: 'xbox'    // 平台类型
 })
 
 // 密码显示状态（编辑时）
@@ -644,6 +687,7 @@ const showAddDialog = () => {
   formData.email = ''
   formData.password = ''
   formData.authCode = ''
+  formData.platform = 'xbox'
   passwordVisible.value = false
   passwordLoaded.value = false
   actualPassword.value = ''
@@ -692,6 +736,7 @@ const showEditDialog = async (row) => {
   formData.email = row.email
   formData.password = ''
   formData.authCode = row.authCode || ''
+  formData.platform = row.platform || 'xbox'
   passwordVisible.value = false
   passwordLoaded.value = false
   actualPassword.value = ''
@@ -719,7 +764,8 @@ const handleSubmit = async () => {
         name: formData.name,
         email: formData.email,
         password: formData.password,
-        authCode: formData.authCode || undefined
+        authCode: formData.authCode || undefined,
+        platform: formData.platform
       })
       ElMessage.success('创建成功')
     } else {
@@ -728,7 +774,8 @@ const handleSubmit = async () => {
         merchantId: formData.merchantId,
         name: formData.name,
         email: formData.email,
-        authCode: formData.authCode || undefined
+        authCode: formData.authCode || undefined,
+        platform: formData.platform
       }
       // 如果填写了新密码，则更新密码
       if (formData.password) {
@@ -758,6 +805,11 @@ const handleSubmit = async () => {
  * - row: 选中的账号行数据
  */
 const showStartAutomationDialog = async (row) => {
+  if (!isPlatformAutomationSupported(row.platform)) {
+    ElMessage.warning('该账号为 PlayStation 类型，自动化功能尚未开放')
+    return
+  }
+
   try {
     const subRes = await subscriptionApi.getStatus()
     const hasSubscription = subRes.data?.currentSubscription
@@ -792,8 +844,22 @@ const showStartAutomationDialog = async (row) => {
 
   selectedAccount.value = row
   selectedAgentId.value = ''
+  selectedHostId.value = ''
+  boundHosts.value = []
   await loadOnlineAgents()
+  await loadBoundHosts(row.id)
   automationDialogVisible.value = true
+}
+
+const loadBoundHosts = async (streamingAccountId) => {
+  try {
+    const res = await xboxApi.listPage({ pageNum: 1, pageSize: 500 })
+    const records = res.data?.records || []
+    boundHosts.value = records.filter(h => h.boundStreamingAccountId === streamingAccountId)
+  } catch (error) {
+    console.error('Failed to load bound hosts:', error)
+    boundHosts.value = []
+  }
 }
 
 /**
@@ -835,6 +901,7 @@ const handleStartAutomation = async () => {
     const res = await automationApi.start({
       streamingAccountIds: [selectedAccount.value.id],
       agentId: selectedAgentId.value,
+      hostId: selectedHostId.value || undefined,
       taskType: automationTaskType,
       description: `为账号 ${selectedAccount.value.name} 启动自动化`
     })
@@ -956,23 +1023,33 @@ const handleImport = async () => {
     }
 
     const header = lines[0].split(',').map(h => h.trim())
-    const requiredHeaders = ['游戏昵称', '邮箱', '密码']
+    const requiredHeaders = ['账号名称', '邮箱', '密码']
+    const legacyHeaders = ['游戏昵称', '邮箱', '密码']
     const hasRequiredHeaders = requiredHeaders.every(h => header.includes(h))
+      || legacyHeaders.every(h => header.includes(h))
 
     if (!hasRequiredHeaders) {
-      ElMessage.warning('CSV文件格式不正确，请检查表头是否包含：游戏昵称、邮箱、密码')
+      ElMessage.warning('CSV文件格式不正确，请检查表头是否包含：账号名称、邮箱、密码（或旧版：游戏昵称、邮箱、密码）')
       return
     }
+
+    const nameKey = header.includes('账号名称') ? '账号名称' : '游戏昵称'
+    const nameIdx = header.indexOf(nameKey)
+    const emailIdx = header.indexOf('邮箱')
+    const passwordIdx = header.indexOf('密码')
+    const authCodeIdx = header.indexOf('认证码')
+    const platformIdx = header.indexOf('平台类型')
 
     const accounts = []
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim())
-      if (values.length >= 3 && values[0] && values[1] && values[2]) {
+      if (values.length >= 3 && values[emailIdx] && values[passwordIdx]) {
         accounts.push({
-          name: values[0],
-          email: values[1],
-          password: values[2],
-          authCode: values[3] || ''
+          name: values[nameIdx],
+          email: values[emailIdx],
+          password: values[passwordIdx],
+          authCode: authCodeIdx >= 0 ? (values[authCodeIdx] || '') : '',
+          platform: platformIdx >= 0 ? (values[platformIdx] || 'xbox') : 'xbox'
         })
       }
     }
@@ -1039,7 +1116,10 @@ const loadBoundGameAccounts = async () => {
  */
 const loadUnboundGameAccounts = async () => {
   try {
-    const res = await gameAccountApi.getUnbound(selectedStreamingAccount.value.merchantId)
+    const res = await gameAccountApi.getUnbound(
+      selectedStreamingAccount.value.merchantId,
+      selectedStreamingAccount.value.platform || 'xbox'
+    )
     unboundGameAccounts.value = res.data || []
   } catch (error) {
     console.error('Failed to load unbound game accounts:', error)
@@ -1170,6 +1250,13 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.form-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-color-warning);
+  line-height: 1.5;
+}
+
 /* 页面容器 */
 .page-container {
   padding: 0;

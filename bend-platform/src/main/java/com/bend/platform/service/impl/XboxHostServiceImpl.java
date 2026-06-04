@@ -13,6 +13,7 @@ import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountLoginRecordService;
 import com.bend.platform.service.XboxHostService;
 import com.bend.platform.util.DataSecurityUtil;
+import com.bend.platform.util.PlatformTypeUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -56,7 +57,7 @@ public class XboxHostServiceImpl implements XboxHostService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public XboxHost create(String merchantId, String xboxId, String name, String ipAddress) {
+    public XboxHost create(String merchantId, String xboxId, String name, String ipAddress, String platform) {
         // 校验商户是否有效
         merchantService.validateMerchantActive(merchantId);
 
@@ -73,6 +74,7 @@ public class XboxHostServiceImpl implements XboxHostService {
         host.setXboxId(xboxId);
         host.setName(name);
         host.setIpAddress(ipAddress);
+        host.setPlatform(PlatformTypeUtil.requireValid(platform));
         host.setStatus("offline");
 
         xboxHostMapper.insert(host);
@@ -258,6 +260,9 @@ public class XboxHostServiceImpl implements XboxHostService {
         XboxHost host = findByXboxId(xboxId);
         
         if (host != null) {
+            if (host.getPlatform() == null || host.getPlatform().isBlank()) {
+                host.setPlatform(PlatformTypeUtil.normalizeOrDefault("xbox"));
+            }
             updateHostInfo(host, name, ipAddress, port, liveId, consoleType, firmwareVersion, macAddress);
             xboxHostMapper.updateById(host);
             log.info("更新已发现的Xbox主机 - ID: {}, XboxID: {}", host.getId(), xboxId);
@@ -267,6 +272,7 @@ public class XboxHostServiceImpl implements XboxHostService {
         host = new XboxHost();
         host.setMerchantId(merchantId);
         host.setXboxId(xboxId);
+        host.setPlatform(PlatformTypeUtil.normalizeOrDefault("xbox"));
         if (StringUtils.isNotBlank(name)) {
             host.setName(name.trim());
         }

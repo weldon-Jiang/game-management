@@ -725,10 +725,22 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
     streaming_account = params.get('streamingAccount', {})
     game_accounts = params.get('gameAccounts', [])
     task_id = params.get('taskId', '')
-    assigned_xbox = params.get('xboxInfo')
-    xbox_hosts = params.get('xboxHosts') or []
-    if not assigned_xbox and xbox_hosts:
-        assigned_xbox = xbox_hosts[0]
+
+    auto_match_host = params.get('autoMatchHost', True)
+    if isinstance(auto_match_host, str):
+        auto_match_host = auto_match_host.lower() not in ('false', '0', 'no')
+
+    assigned_xbox = params.get('host') or params.get('xboxInfo')
+    if not assigned_xbox and not auto_match_host:
+        xbox_hosts = params.get('xboxHosts') or []
+        if xbox_hosts:
+            assigned_xbox = xbox_hosts[0]
+
+    account_platform = (
+        params.get('platform')
+        or streaming_account.get('platform')
+        or 'xbox'
+    )
 
     task_type = (
         params.get('gameActionType')
@@ -759,6 +771,8 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
             game_accounts=game_accounts,
             assigned_xbox=assigned_xbox,
             task_type=task_type,
+            account_platform=account_platform,
+            auto_match_host=auto_match_host,
         )
 
         if not success:

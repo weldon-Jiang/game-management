@@ -20,4 +20,6 @@ public class StreamingAccountImportDto {
     private String password;
 
     private String authCode;
+
+    private String platform;
 }

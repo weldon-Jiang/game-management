@@ -102,6 +102,21 @@ export const AUTOMATION_TASK_TYPES = [
   { code: 'automation', name: '自动化任务' }
 ]
 
+export const PLATFORM_TYPES = [
+  { code: 'xbox', name: 'Xbox', automationSupported: true },
+  { code: 'playstation', name: 'PlayStation', automationSupported: false }
+]
+
+export const PLATFORM_TYPE_MAP = {
+  xbox: 'Xbox',
+  playstation: 'PlayStation'
+}
+
+export const PLATFORM_TYPE_TAG_MAP = {
+  xbox: 'primary',
+  playstation: 'warning'
+}
+
 export const FEATURE_CODE_MAP = {
   stream_control: '串流控制',
   sqb: 'SQB任务',
@@ -279,4 +294,20 @@ export const getAccountTaskStatusType = (status) => {
 export const getTaskTypeText = (type) => {
   if (!type) return '-'
   return TASK_TYPE_MAP[type] || type
+}
+
+export const getPlatformTypeText = (platform) => {
+  if (!platform) return 'Xbox'
+  return PLATFORM_TYPE_MAP[platform] || platform
+}
+
+export const getPlatformTypeTag = (platform) => {
+  if (!platform) return 'primary'
+  return PLATFORM_TYPE_TAG_MAP[platform] || 'info'
+}
+
+export const isPlatformAutomationSupported = (platform) => {
+  const normalized = platform || 'xbox'
+  const item = PLATFORM_TYPES.find(p => p.code === normalized)
+  return item ? item.automationSupported : normalized === 'xbox'
 }

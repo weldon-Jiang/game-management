@@ -26,7 +26,7 @@ public interface GameAccountService {
 
     IPage<GameAccount> findAll(GameAccountPageRequest request);
 
-    List<GameAccount> findUnboundByMerchantId(String merchantId);
+    List<GameAccount> findUnboundByMerchantId(String merchantId, String platform);
 
     void update(String id, GameAccount account);
 

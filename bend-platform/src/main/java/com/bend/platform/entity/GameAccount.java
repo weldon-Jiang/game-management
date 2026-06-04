@@ -48,6 +48,11 @@ public class GameAccount {
     private String merchantId;
 
     /**
+     * Platform type: xbox, playstation
+     */
+    private String platform;
+
+    /**
      * 游戏昵称
      * 玩家的游戏名称
      */

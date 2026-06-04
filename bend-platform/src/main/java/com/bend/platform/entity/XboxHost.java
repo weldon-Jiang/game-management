@@ -33,6 +33,11 @@ public class XboxHost {
 
     private String merchantId;
 
+    /**
+     * Platform type: xbox, playstation
+     */
+    private String platform;
+
     private String xboxId;
 
     private String name;

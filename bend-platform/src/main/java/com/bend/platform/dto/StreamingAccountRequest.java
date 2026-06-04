@@ -21,4 +21,9 @@ public class StreamingAccountRequest {
     private String password;
 
     private String authCode;
+
+    /**
+     * Platform type: xbox, playstation (default xbox)
+     */
+    private String platform = "xbox";
 }

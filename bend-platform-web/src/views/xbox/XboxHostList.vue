@@ -35,6 +35,13 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
+        <el-table-column prop="platform" label="平台" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag :type="getPlatformTypeTag(row.platform)" size="small">
+              {{ getPlatformTypeText(row.platform) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="locked" label="锁定状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.locked ? 'danger' : 'success'" size="small">
@@ -152,6 +159,19 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="dialogType === 'add'" label="平台类型" prop="platform">
+          <el-select v-model="formData.platform" placeholder="请选择平台类型" style="width: 100%">
+            <el-option
+              v-for="item in PLATFORM_TYPES"
+              :key="item.code"
+              :label="item.name"
+              :value="item.code"
+            />
+          </el-select>
+          <div v-if="formData.platform === 'playstation'" class="form-tip">
+            PlayStation 主机可手动录入；局域网发现功能开发中。
+          </div>
+        </el-form-item>
         <el-form-item label="Xbox ID" prop="xboxId">
           <el-input
             v-model="formData.xboxId"
@@ -267,8 +287,8 @@
             type="info"
             :closable="false"
           >
-            <p>点击确定后，系统将向指定Agent发送发现指令。</p>
-            <p>Agent会扫描局域网内的Xbox主机并自动上报结果。</p>
+            <p>点击确定后，系统将向指定 Agent 发送发现指令。</p>
+            <p>当前 Agent 扫描局域网内的 Xbox 主机并自动上报；PlayStation 主机发现功能开发中，PS 主机请使用「新增主机」手动录入。</p>
           </el-alert>
         </div>
       </el-form>
@@ -288,7 +308,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Check, Search } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { xboxApi, streamingApi, merchantApi, agentApi } from '@/api'
-import { getXboxHostStatusText, getXboxHostStatusType } from '@/utils/constants'
+import { getXboxHostStatusText, getXboxHostStatusType, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag } from '@/utils/constants'
 import { connectStomp, subscribeToTopic, getStompClient } from '@/utils/stompClient'
 
 let discoverySubscription = null
@@ -355,7 +375,8 @@ const formData = reactive({
   xboxId: '',
   name: '',
   ipAddress: '',
-  macAddress: ''
+  macAddress: '',
+  platform: 'xbox'
 })
 
 /**
@@ -467,6 +488,7 @@ const showAddDialog = () => {
   formData.name = ''
   formData.ipAddress = ''
   formData.macAddress = ''
+  formData.platform = 'xbox'
   dialogVisible.value = true
 }
 
@@ -500,7 +522,8 @@ const handleSubmit = async () => {
         xboxId: formData.xboxId,
         name: formData.name,
         ipAddress: formData.ipAddress,
-        macAddress: formData.macAddress || undefined
+        macAddress: formData.macAddress || undefined,
+        platform: formData.platform
       })
       ElMessage.success('创建成功')
     } else {
@@ -530,8 +553,15 @@ const showBindDialog = async (row) => {
   bindFormData.gamertag = ''
 
   try {
-    const res = await xboxApi.getAvailableAccounts(row.id)
-    availableAccounts.value = res.data || []
+    const params = { pageNum: 1, pageSize: 500 }
+    if (row.merchantId) {
+      params.merchantId = row.merchantId
+    }
+    const res = await streamingApi.list(params)
+    const hostPlatform = row.platform || 'xbox'
+    availableAccounts.value = (res.data?.records || []).filter(
+      account => (account.platform || 'xbox') === hostPlatform
+    )
     bindDialogVisible.value = true
   } catch (error) {
     console.error('Failed to load available accounts:', error)
@@ -876,6 +906,13 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.form-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-color-warning);
+  line-height: 1.5;
+}
+
 .page-container {
   padding: 0;
 }

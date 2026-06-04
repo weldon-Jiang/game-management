@@ -160,7 +160,9 @@ class AutomationScheduler:
         streaming_account_password: str,
         game_accounts: List[Dict[str, Any]],
         assigned_xbox: Optional[Dict[str, Any]] = None,
-        task_type: str = "daily_match"
+        task_type: str = "daily_match",
+        account_platform: str = "xbox",
+        auto_match_host: bool = True,
     ) -> bool:
         """
         启动自动化任务
@@ -197,6 +199,8 @@ class AutomationScheduler:
             streaming_account_password=decrypted_password,
             window_id=f"window_{task_id}",
             task_type=task_type or "daily_match",
+            account_platform=account_platform or "xbox",
+            auto_match_host=auto_match_host,
         )
 
         # 解密游戏账号密码

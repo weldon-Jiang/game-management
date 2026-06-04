@@ -21,7 +21,7 @@ public interface XboxHostService {
      * @param ipAddress IP地址（可选）
      * @return 创建的主机实体
      */
-    XboxHost create(String merchantId, String xboxId, String name, String ipAddress);
+    XboxHost create(String merchantId, String xboxId, String name, String ipAddress, String platform);
 
     /**
      * 根据ID查询主机

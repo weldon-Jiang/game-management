@@ -79,6 +79,22 @@ class AgentAutomationTask:
         self.logger.info(f"=== 开始执行自动化任务: {self.context.task_id} ===")
         self.context.update_task_status(TaskMainStatus.RUNNING, "任务开始执行")
 
+        if self.context.account_platform == "playstation":
+            message = "PlayStation 自动化尚未开放，当前仅支持 Xbox"
+            self.logger.warning(message)
+            await self._report_progress(
+                self.context.task_id,
+                "STEP1",
+                "FAILED",
+                message
+            )
+            return AutomationResult(
+                success=False,
+                failed_step="STEP1",
+                message=message,
+                error_code="PLATFORM_NOT_SUPPORTED"
+            )
+
         try:
             step1_result = await step1_execute_login(
                 self.context,

@@ -72,7 +72,8 @@ public class XboxHostController {
             merchantId = UserContext.getMerchantId();
         }
 
-        XboxHost host = xboxHostService.create(merchantId, request.getXboxId(), request.getName(), request.getIpAddress());
+        XboxHost host = xboxHostService.create(merchantId, request.getXboxId(), request.getName(),
+                request.getIpAddress(), request.getPlatform());
         return ApiResponse.success("创建成功", host);
     }
 

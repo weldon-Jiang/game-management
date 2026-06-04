@@ -25,6 +25,7 @@ public class XboxHostItemDto {
     private Boolean locked;                  // 是否被锁定
     private String lockedByAgentId;          // 锁定者Agent ID
     private LocalDateTime lockExpiresTime;   // 锁过期时间
+    private String platform;
     private LocalDateTime lastSeenTime;
     private LocalDateTime createdTime;
 }

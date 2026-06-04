@@ -17,4 +17,9 @@ public class XboxHostRequest {
 
     private String name;
     private String ipAddress;
+
+    /**
+     * Platform type: xbox, playstation (default xbox)
+     */
+    private String platform = "xbox";
 }

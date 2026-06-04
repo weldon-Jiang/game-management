@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS `streaming_account` (
     `email` VARCHAR(255) NOT NULL COMMENT '账号邮箱',
     `password_encrypted` VARCHAR(512) DEFAULT NULL COMMENT '加密后的密码',
     `auth_code` VARCHAR(512) DEFAULT NULL COMMENT '认证码',
+    `platform` VARCHAR(32) NOT NULL DEFAULT 'xbox' COMMENT '平台类型: xbox, playstation',
     `status` ENUM('idle','ready','running','paused','error') DEFAULT 'idle' COMMENT '状态',
     `agent_id` VARCHAR(64) DEFAULT NULL COMMENT '当前绑定的Agent ID',
     `task_status` VARCHAR(20) DEFAULT 'idle' COMMENT '任务状态 idle-空闲 busy-忙碌',
@@ -121,6 +122,7 @@ CREATE TABLE IF NOT EXISTS `game_account` (
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `merchant_id` VARCHAR(64) NOT NULL COMMENT '商户ID',
+    `platform` VARCHAR(32) NOT NULL DEFAULT 'xbox' COMMENT '平台类型: xbox, playstation',
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_game_name` (`game_name`),
@@ -283,6 +285,7 @@ CREATE TABLE IF NOT EXISTS `activation_code` (
 CREATE TABLE IF NOT EXISTS `xbox_host` (
     `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
     `merchant_id` VARCHAR(36) NOT NULL COMMENT '商户ID',
+    `platform` VARCHAR(32) NOT NULL DEFAULT 'xbox' COMMENT '平台类型: xbox, playstation',
     `xbox_id` VARCHAR(64) NOT NULL COMMENT 'Xbox主机ID',
     `name` VARCHAR(100) DEFAULT NULL COMMENT '主机名称',
     `ip_address` VARCHAR(45) DEFAULT NULL COMMENT 'IP地址',

@@ -1,11 +1,14 @@
 package com.bend.platform.service.impl;
 
+import com.bend.platform.entity.StreamingAccount;
 import com.bend.platform.entity.XboxHost;
 import com.bend.platform.exception.BusinessException;
+import com.bend.platform.repository.StreamingAccountMapper;
 import com.bend.platform.repository.XboxHostMapper;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.XboxHostBindingService;
+import com.bend.platform.util.PlatformTypeUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class XboxHostBindingServiceImpl implements XboxHostBindingService {
 
     private final XboxHostMapper xboxHostMapper;
+    private final StreamingAccountMapper streamingAccountMapper;
     private final MerchantService merchantService;
 
     @Override
@@ -34,6 +38,14 @@ public class XboxHostBindingServiceImpl implements XboxHostBindingService {
         if (host == null) {
             throw new BusinessException(ResultCode.XboxHost.NOT_FOUND);
         }
+
+        StreamingAccount streamingAccount = streamingAccountMapper.selectById(streamingAccountId);
+        if (streamingAccount == null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+        }
+
+        PlatformTypeUtil.requireSamePlatform(host.getPlatform(), streamingAccount.getPlatform(),
+                "主机平台与流媒体账号不一致，无法绑定");
 
         merchantService.validateMerchantActive(host.getMerchantId());
 

@@ -65,6 +65,11 @@ public class StreamingAccount {
     private String authCode;
 
     /**
+     * Platform type: xbox, playstation
+     */
+    private String platform;
+
+    /**
      * 账号状态
      * active-正常 inactive-未激活 error-错误 offline-离线
      */

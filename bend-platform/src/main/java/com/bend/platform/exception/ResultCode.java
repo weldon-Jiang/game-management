@@ -33,7 +33,10 @@ public interface ResultCode {
         BAD_REQUEST(10400, "请求参数错误"),
         NOT_FOUND(10404, "数据不存在"),
         UNAUTHORIZED(10401, "未授权"),
-        FORBIDDEN(10403, "禁止访问");
+        FORBIDDEN(10403, "禁止访问"),
+        INVALID_PLATFORM(10008, "平台类型无效，仅支持 xbox、playstation"),
+        PLATFORM_MISMATCH(10009, "游戏账号/主机平台与流媒体账号不一致，无法关联"),
+        PLATFORM_NOT_SUPPORTED(10010, "PlayStation 自动化尚未开放，当前仅支持 Xbox");
 
         private final int code;
         private final String message;
@@ -266,7 +269,8 @@ public interface ResultCode {
         LOCK_FAILED(18006, "锁定失败"),
         UNLOCK_FAILED(18007, "解锁失败"),
         ALREADY_LOCKED(18008, "已被其他主机锁定"),
-        BIND_STREAMING_ACCOUNT(18009, "已关联流媒体账号");
+        BIND_STREAMING_ACCOUNT(18009, "已关联流媒体账号"),
+        PLATFORM_MISMATCH(18010, "游戏账号平台与流媒体账号不一致，无法关联");
 
         private final int code;
         private final String message;

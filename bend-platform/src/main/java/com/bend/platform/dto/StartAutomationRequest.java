@@ -31,4 +31,9 @@ public class StartAutomationRequest {
     private List<String> selectedGameAccountIds;
 
     private String gameActionType;
+
+    /**
+     * Optional single host for automation (max one).
+     */
+    private String hostId;
 }

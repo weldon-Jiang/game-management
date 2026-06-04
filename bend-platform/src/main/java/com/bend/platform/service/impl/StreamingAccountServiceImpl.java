@@ -7,6 +7,7 @@ import com.bend.platform.dto.ImportResultDto;
 import com.bend.platform.dto.StreamingAccountImportDto;
 import com.bend.platform.dto.StreamingAccountPageRequest;
 import com.bend.platform.entity.StreamingAccount;
+import com.bend.platform.enums.PlatformType;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.StreamingAccountMapper;
@@ -14,6 +15,7 @@ import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.util.AesUtil;
 import com.bend.platform.util.DataSecurityUtil;
+import com.bend.platform.util.PlatformTypeUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -57,7 +59,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public StreamingAccount create(String merchantId, String name, String email, String password, String authCode) {
+    public StreamingAccount create(String merchantId, String name, String email, String password, String authCode, String platform) {
         // 校验商户是否有效
         merchantService.validateMerchantActive(merchantId);
 
@@ -77,6 +79,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         account.setEmail(email);
         account.setPasswordEncrypted(aesUtil.encrypt(password));
         account.setAuthCode(authCode);
+        account.setPlatform(PlatformTypeUtil.requireValid(platform));
         account.setStatus("idle");
 
         streamingAccountMapper.insert(account);
@@ -121,6 +124,12 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
                 continue;
             }
 
+            if (dto.getPlatform() != null && !dto.getPlatform().isBlank()
+                    && PlatformType.fromCode(dto.getPlatform()) == null) {
+                errors.add(String.format("第%d行: 平台类型无效，仅支持 xbox、playstation", rowNum));
+                continue;
+            }
+
             StreamingAccount existingByEmail = findByEmail(dto.getEmail());
             if (existingByEmail != null) {
                 existEmails.add(dto.getEmail());
@@ -148,6 +157,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
                 entity.setEmail(dto.getEmail());
                 entity.setPasswordEncrypted(aesUtil.encrypt(dto.getPassword()));
                 entity.setAuthCode(dto.getAuthCode());
+                entity.setPlatform(PlatformTypeUtil.normalizeOrDefault(dto.getPlatform()));
                 entity.setStatus("idle");
                 entity.setCreatedTime(LocalDateTime.now());
                 entity.setUpdatedTime(LocalDateTime.now());
@@ -283,12 +293,12 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateWithPassword(String id, String merchantId, String name, String password, String authCode) {
-        updateWithPassword(id, merchantId, name, null, password, authCode);
+        updateWithPassword(id, merchantId, name, null, password, authCode, null);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void updateWithPassword(String id, String merchantId, String name, String email, String password, String authCode) {
+    public void updateWithPassword(String id, String merchantId, String name, String email, String password, String authCode, String platform) {
         StreamingAccount account = streamingAccountMapper.selectById(id);
         if (account == null) {
             throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
@@ -314,6 +324,9 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         }
         if (authCode != null) {
             account.setAuthCode(authCode);
+        }
+        if (platform != null && !platform.isBlank()) {
+            account.setPlatform(PlatformTypeUtil.requireValid(platform));
         }
 
         streamingAccountMapper.updateById(account);

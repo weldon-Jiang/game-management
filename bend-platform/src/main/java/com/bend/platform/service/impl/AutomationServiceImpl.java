@@ -5,16 +5,19 @@ import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.StreamingAccount;
 import com.bend.platform.entity.Task;
 import com.bend.platform.entity.XboxHost;
+import com.bend.platform.enums.PlatformType;
 import com.bend.platform.enums.AccountStatusEnum;
 import com.bend.platform.enums.GameActionType;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.*;
+import com.bend.platform.util.PlatformTypeUtil;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -67,6 +70,18 @@ public class AutomationServiceImpl implements AutomationService {
                 continue;
             }
 
+            String platform = PlatformTypeUtil.normalizeOrDefault(streamingAccount.getPlatform());
+            if (PlatformType.PLAYSTATION.getCode().equals(platform)) {
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("streamingAccountId", streamingAccountId);
+                errorResult.put("streamingAccountName", streamingAccount.getName());
+                errorResult.put("success", false);
+                errorResult.put("message", ResultCode.System.PLATFORM_NOT_SUPPORTED.getMessage());
+                results.add(errorResult);
+                log.warn("自动化启动失败 - PlayStation 自动化尚未开放: {}", streamingAccount.getName());
+                continue;
+            }
+
             if (taskService.hasRunningTask(streamingAccountId)) {
                 Map<String, Object> errorResult = new HashMap<>();
                 errorResult.put("streamingAccountId", streamingAccountId);
@@ -79,7 +94,53 @@ public class AutomationServiceImpl implements AutomationService {
             }
 
             List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-            List<XboxHost> xboxHosts = xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
+            List<XboxHost> boundHosts = xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
+
+            XboxHost selectedHost = null;
+            boolean autoMatchHost = true;
+            if (StringUtils.hasText(request.getHostId())) {
+                selectedHost = xboxHostService.findById(request.getHostId());
+                if (selectedHost == null) {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("streamingAccountId", streamingAccountId);
+                    errorResult.put("streamingAccountName", streamingAccount.getName());
+                    errorResult.put("success", false);
+                    errorResult.put("message", "指定的主机不存在");
+                    results.add(errorResult);
+                    continue;
+                }
+                if (!streamingAccountId.equals(selectedHost.getBoundStreamingAccountId())) {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("streamingAccountId", streamingAccountId);
+                    errorResult.put("streamingAccountName", streamingAccount.getName());
+                    errorResult.put("success", false);
+                    errorResult.put("message", "指定的主机未绑定到该流媒体账号");
+                    results.add(errorResult);
+                    continue;
+                }
+                if (!platform.equals(PlatformTypeUtil.normalizeOrDefault(selectedHost.getPlatform()))) {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("streamingAccountId", streamingAccountId);
+                    errorResult.put("streamingAccountName", streamingAccount.getName());
+                    errorResult.put("success", false);
+                    errorResult.put("message", "主机平台与流媒体账号不一致");
+                    results.add(errorResult);
+                    continue;
+                }
+                if (Boolean.TRUE.equals(selectedHost.getLocked())) {
+                    Map<String, Object> errorResult = new HashMap<>();
+                    errorResult.put("streamingAccountId", streamingAccountId);
+                    errorResult.put("streamingAccountName", streamingAccount.getName());
+                    errorResult.put("success", false);
+                    errorResult.put("message", "指定的主机已被锁定");
+                    results.add(errorResult);
+                    continue;
+                }
+                autoMatchHost = false;
+            }
+
+            List<XboxHost> xboxHostsForBilling = selectedHost != null
+                    ? List.of(selectedHost) : boundHosts;
 
             // 校验游戏账号状态（是否有忙碌中的账号）
             List<String> busyGameAccountNames = new ArrayList<>();
@@ -100,7 +161,7 @@ public class AutomationServiceImpl implements AutomationService {
             }
 
             Map<String, Object> validationResult = automationUsageService.validateAndCalculatePoints(
-                    merchantId, streamingAccountId, gameAccounts, xboxHosts);
+                    merchantId, streamingAccountId, gameAccounts, xboxHostsForBilling);
 
             if (!Boolean.TRUE.equals(validationResult.get("canStart"))) {
                 String message = (String) validationResult.get("message");
@@ -135,9 +196,17 @@ public class AutomationServiceImpl implements AutomationService {
             }
 
             Map<String, Object> taskParams = new HashMap<>();
+            taskParams.put("platform", platform);
+            taskParams.put("autoMatchHost", autoMatchHost);
+            taskParams.put("host", selectedHost != null ? buildHostInfo(selectedHost) : null);
             taskParams.put("streamingAccount", buildStreamingAccountInfo(streamingAccount));
             taskParams.put("gameAccounts", buildGameAccountsInfo(selectedGameAccounts));
-            taskParams.put("xboxHosts", buildXboxHostsInfo(xboxHosts));
+            if (selectedHost != null) {
+                taskParams.put("xboxHosts", buildXboxHostsInfo(List.of(selectedHost)));
+                taskParams.put("xboxInfo", buildHostInfo(selectedHost));
+            } else {
+                taskParams.put("xboxHosts", buildXboxHostsInfo(boundHosts));
+            }
             taskParams.put("taskType", request.getTaskType());
             taskParams.put("merchantId", merchantId);
 
@@ -147,6 +216,10 @@ public class AutomationServiceImpl implements AutomationService {
             task.setType(request.getTaskType());
             task.setTargetAgentId(agentId);
             task.setStreamingAccountId(streamingAccountId);
+            task.setGamePlatform(platform);
+            if (selectedHost != null) {
+                task.setXboxHostId(selectedHost.getId());
+            }
             task.setPriority(request.getPriority() != null ? request.getPriority() : 0);
             task.setParams(toJson(taskParams));
             task.setCreatedBy(userId);
@@ -166,7 +239,7 @@ public class AutomationServiceImpl implements AutomationService {
             automationUsageService.deductPointsAndRecordUsage(
                     merchantId, userId, created.getId(),
                     streamingAccountId, streamingAccount.getName(),
-                    selectedGameAccounts.size(), xboxHosts.size(), validationResult);
+                    selectedGameAccounts.size(), xboxHostsForBilling.size(), validationResult);
 
             // 更新流媒体账号状态为忙碌
             streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.BUSY.getCode());
@@ -270,6 +343,7 @@ public class AutomationServiceImpl implements AutomationService {
         info.put("id", account.getId());
         info.put("name", account.getName());
         info.put("email", account.getEmail());
+        info.put("platform", PlatformTypeUtil.normalizeOrDefault(account.getPlatform()));
         info.put("authCode", account.getAuthCode());
         info.put("passwordToken", credentialTokenService.generateToken(
             "streaming_account:" + account.getId(), account.getPasswordEncrypted()));
@@ -291,16 +365,21 @@ public class AutomationServiceImpl implements AutomationService {
         return result;
     }
 
+    private Map<String, Object> buildHostInfo(XboxHost host) {
+        Map<String, Object> info = new HashMap<>();
+        info.put("id", host.getId());
+        info.put("xboxId", host.getXboxId());
+        info.put("name", host.getName());
+        info.put("ipAddress", host.getIpAddress());
+        info.put("platform", PlatformTypeUtil.normalizeOrDefault(host.getPlatform()));
+        info.put("boundGamertag", host.getBoundGamertag());
+        return info;
+    }
+
     private List<Map<String, Object>> buildXboxHostsInfo(List<XboxHost> xboxHosts) {
         List<Map<String, Object>> result = new ArrayList<>();
         for (XboxHost xbox : xboxHosts) {
-            Map<String, Object> info = new HashMap<>();
-            info.put("id", xbox.getId());
-            info.put("xboxId", xbox.getXboxId());
-            info.put("name", xbox.getName());
-            info.put("ipAddress", xbox.getIpAddress());
-            info.put("boundGamertag", xbox.getBoundGamertag());
-            result.add(info);
+            result.add(buildHostInfo(xbox));
         }
         return result;
     }

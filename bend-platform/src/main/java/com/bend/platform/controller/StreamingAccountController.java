@@ -79,13 +79,14 @@ public class StreamingAccountController {
         }
 
         StreamingAccount account = streamingAccountService.create(
-                merchantId, request.getName(), request.getEmail(), request.getPassword(), request.getAuthCode());
+                merchantId, request.getName(), request.getEmail(), request.getPassword(),
+                request.getAuthCode(), request.getPlatform());
         return ApiResponse.success("创建成功", account);
     }
 
     @GetMapping("/template")
     public ApiResponse<String> downloadTemplate() {
-        String template = "游戏昵称,邮箱,密码,认证码\n测试账号1,test1@email.com,password1,authcode1\n测试账号2,test2@email.com,password2,authcode2";
+        String template = "账号名称,邮箱,密码,认证码,平台类型\n测试账号1,test1@email.com,password1,authcode1,xbox\n测试账号2,test2@email.com,password2,authcode2,playstation";
         return ApiResponse.success(template);
     }
 
@@ -225,9 +226,11 @@ public class StreamingAccountController {
 
         if (UserContext.isPlatformAdmin()) {
             if (hasPassword) {
-                streamingAccountService.updateWithPassword(id, request.getMerchantId(), request.getName(), request.getEmail(), request.getPassword(), request.getAuthCode());
+                streamingAccountService.updateWithPassword(id, request.getMerchantId(), request.getName(),
+                        request.getEmail(), request.getPassword(), request.getAuthCode(), request.getPlatform());
             } else {
-                streamingAccountService.updateWithPassword(id, request.getMerchantId(), request.getName(), request.getEmail(), null, request.getAuthCode());
+                streamingAccountService.updateWithPassword(id, request.getMerchantId(), request.getName(),
+                        request.getEmail(), null, request.getAuthCode(), request.getPlatform());
             }
         } else {
             if (hasPassword) {

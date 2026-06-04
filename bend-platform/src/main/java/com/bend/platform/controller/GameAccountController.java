@@ -129,7 +129,7 @@ public class GameAccountController {
      */
     @GetMapping("/template")
     public ApiResponse<String> downloadTemplate() {
-        String template = "游戏昵称,邮箱,密码\nPlayer1,player1@email.com,password1\nPlayer2,player2@email.com,password2";
+        String template = "游戏昵称,邮箱,密码,平台类型\nPlayer1,player1@email.com,password1,xbox\nPlayer2,player2@email.com,password2,playstation";
         return ApiResponse.success(template);
     }
 
@@ -180,13 +180,15 @@ public class GameAccountController {
     }
 
     @GetMapping("/unbound")
-    public ApiResponse<List<GameAccount>> findUnboundAccounts(@RequestParam(required = false) String merchantId) {
+    public ApiResponse<List<GameAccount>> findUnboundAccounts(
+            @RequestParam(required = false) String merchantId,
+            @RequestParam(required = false) String platform) {
         if (merchantId == null || merchantId.isEmpty()) {
             merchantId = UserContext.getMerchantId();
         } else if (!UserContext.isPlatformAdmin() && !merchantId.equals(UserContext.getMerchantId())) {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
-        List<GameAccount> accounts = gameAccountService.findUnboundByMerchantId(merchantId);
+        List<GameAccount> accounts = gameAccountService.findUnboundByMerchantId(merchantId, platform);
         return ApiResponse.success(accounts);
     }
 

@@ -26,4 +26,9 @@ public class GameAccountRequest {
 
     @Size(max = 500, message = "备注长度不能超过500")
     private String remark;
+
+    /**
+     * Platform type: xbox, playstation (default xbox)
+     */
+    private String platform = "xbox";
 }
