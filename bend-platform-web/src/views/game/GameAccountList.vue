@@ -446,7 +446,7 @@ const handleSubmit = async () => {
  * @param {Object} row - 当前行数据
  */
 const handleDelete = async (row) => {
-  await ElMessageBox.confirm(`确定要删除账号「${row.xboxGameName}」吗？`, '提示', {
+  await ElMessageBox.confirm(`确定要删除账号「${row.gameName}」吗？`, '提示', {
     confirmButtonText: '确定删除',
     cancelButtonText: '取消',
     type: 'warning'

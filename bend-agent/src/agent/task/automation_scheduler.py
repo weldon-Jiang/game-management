@@ -205,8 +205,8 @@ class AutomationScheduler:
             decrypted_game_password = await self._decrypt_game_account_password(ga)
             game_accounts_with_passwords.append(GameAccountInfo(
                 id=ga.get("id", ""),
-                gamertag=ga.get("xboxGameName", ga.get("gamertag", "")),
-                email=ga.get("xboxLiveEmail", ga.get("email", "")),
+                gamertag=ga.get("gameName", ga.get("gamertag", "")),
+                email=ga.get("email", ""),
                 password=decrypted_game_password or "",
                 is_primary=ga.get("isPrimary", False),
                 target_matches=ga.get("dailyMatchLimit", ga.get("targetMatches", 3)),
@@ -553,7 +553,7 @@ class AutomationScheduler:
         - 解密后的密码
         - None: 解密失败
         """
-        gamertag = ga.get("xboxGameName", ga.get("gamertag", "unknown"))
+        gamertag = ga.get("gameName", ga.get("gamertag", "unknown"))
         password_token = ga.get("passwordToken", "")
         if not password_token:
             self.logger.warning(f"游戏账号 {gamertag} 密码为空")

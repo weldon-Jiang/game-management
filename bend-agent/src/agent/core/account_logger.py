@@ -140,7 +140,7 @@ class AccountLogger:
         获取游戏账号专用日志记录器（按天轮转）
         
         参数说明：
-        - game_account_name: 游戏账号名称（xboxGameName）
+        - game_account_name: 游戏账号名称（gameName）
         
         返回值：
         - 配置好的logging.Logger实例

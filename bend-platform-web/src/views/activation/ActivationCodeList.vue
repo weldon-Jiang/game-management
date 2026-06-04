@@ -231,7 +231,7 @@
               <el-option
                 v-for="item in gameAccountList"
                 :key="item.id"
-                :label="item.xboxGameName || item.name || item.id"
+                :label="item.gameName || item.name || item.id"
                 :value="item.id"
               />
             </el-select>
@@ -571,7 +571,7 @@ const handleGenerate = async () => {
     } else if (generateFormData.subscriptionType === 'account') {
       boundResourceNames = gameAccountList.value
         .filter(item => generateFormData.boundResourceIds.includes(item.id))
-        .map(item => item.xboxGameName || item.name)
+        .map(item => item.gameName || item.name)
     } else if (generateFormData.subscriptionType === 'host') {
       boundResourceNames = xboxHostList.value
         .filter(item => generateFormData.boundResourceIds.includes(item.id))

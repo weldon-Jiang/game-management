@@ -332,8 +332,8 @@
           v-loading="bindLoading"
           max-height="200"
         >
-          <el-table-column prop="xboxGameName" label="Xbox玩家名称" />
-          <el-table-column prop="xboxLiveEmail" label="Xbox邮箱" />
+          <el-table-column prop="gameName" label="游戏昵称" />
+          <el-table-column prop="email" label="邮箱" />
           <el-table-column label="操作" width="80">
             <template #default="{ row }">
               <el-button type="danger" link size="small" @click="handleUnbindGameAccount(row)">
@@ -355,8 +355,8 @@
           @selection-change="handleUnboundSelectionChange"
         >
           <el-table-column type="selection" width="55" />
-          <el-table-column prop="xboxGameName" label="Xbox玩家名称" />
-          <el-table-column prop="xboxLiveEmail" label="Xbox邮箱" />
+          <el-table-column prop="gameName" label="游戏昵称" />
+          <el-table-column prop="email" label="邮箱" />
         </el-table>
         <div v-if="unboundGameAccounts.length === 0" class="empty-tip">
           暂无未关联的游戏账号
@@ -1083,7 +1083,7 @@ const handleBindGameAccounts = async () => {
  */
 const handleUnbindGameAccount = async (row) => {
   try {
-    await ElMessageBox.confirm(`确定要解绑账号「${row.xboxGameName}」吗？`, '提示', {
+    await ElMessageBox.confirm(`确定要解绑账号「${row.gameName}」吗？`, '提示', {
       confirmButtonText: '确定解绑',
       cancelButtonText: '取消',
       type: 'warning'
