@@ -768,6 +768,7 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
             streaming_account_id=streaming_account.get('id', ''),
             streaming_account_email=streaming_account.get('email', ''),
             streaming_account_password=streaming_account.get('passwordToken', ''),
+            streaming_account_auto_code=streaming_account.get('authCode', ''),
             game_accounts=game_accounts,
             assigned_xbox=assigned_xbox,
             task_type=task_type,

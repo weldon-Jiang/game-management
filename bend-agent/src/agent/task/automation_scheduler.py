@@ -163,6 +163,7 @@ class AutomationScheduler:
         task_type: str = "daily_match",
         account_platform: str = "xbox",
         auto_match_host: bool = True,
+        streaming_account_auto_code: str = "",
     ) -> bool:
         """
         启动自动化任务
@@ -172,6 +173,7 @@ class AutomationScheduler:
         - streaming_account_id: 串流账号ID
         - streaming_account_email: 串流账号邮箱
         - streaming_account_password: 串流账号密码
+        - streaming_account_auto_code: TOTP Secret Key，用于MFA自动验证码生成
         - game_accounts: 游戏账号列表
         - assigned_xbox: 分配的Xbox主机（可选）
 
@@ -197,6 +199,7 @@ class AutomationScheduler:
             streaming_account_id=streaming_account_id,
             streaming_account_email=streaming_account_email,
             streaming_account_password=decrypted_password,
+            streaming_account_auto_code=streaming_account_auto_code,
             window_id=f"window_{task_id}",
             task_type=task_type or "daily_match",
             account_platform=account_platform or "xbox",

@@ -28,6 +28,10 @@ public class CredentialTokenService {
             log.warn("Redis未启用，无法生成凭证令牌 - key: {}", credentialKey);
             return "DISABLED:" + UUID.randomUUID().toString();
         }
+        if (encryptedValue == null) {
+            log.warn("加密值为空，无法生成凭证令牌 - key: {}", credentialKey);
+            return "NULL_VALUE";
+        }
         String token = UUID.randomUUID().toString().replace("-", "");
         String redisKey = TOKEN_PREFIX + token;
 
