@@ -261,9 +261,20 @@
             />
           </el-select>
         </el-form-item>
-        <!-- 任务类型（只读显示） -->
-        <el-form-item label="任务类型">
-          <span class="automation-account-name">{{ automationTaskTypeName }}</span>
+        <!-- 游戏操作类型 -->
+        <el-form-item label="游戏操作类型" required>
+          <el-select
+            v-model="selectedGameActionType"
+            placeholder="请选择游戏操作类型"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="type in visibleGameActionTypes"
+              :key="type.code"
+              :label="type.name"
+              :value="type.code"
+            />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -427,7 +438,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi, xboxApi } from '@/api'
-import { getStreamingAccountStatusText, getStreamingAccountStatusType, getAccountTaskStatusText, getAccountTaskStatusType, AUTOMATION_TASK_TYPES, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag, isPlatformAutomationSupported } from '@/utils/constants'
+import { getStreamingAccountStatusText, getStreamingAccountStatusType, getAccountTaskStatusText, getAccountTaskStatusType, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag, isPlatformAutomationSupported, getVisibleGameActionTypes } from '@/utils/constants'
 
 // ==================== 状态定义 ====================
 
@@ -553,16 +564,11 @@ const selectedHostId = ref('')
 
 const boundHosts = ref([])
 
-/**
- * 自动化任务类型（从配置常量获取）
- * 当前仅支持串流控制
- */
-const automationTaskType = AUTOMATION_TASK_TYPES[0]?.code || 'stream_control'
+// 可见的游戏操作类型列表
+const visibleGameActionTypes = getVisibleGameActionTypes()
 
-/**
- * 自动化任务类型名称（显示用）
- */
-const automationTaskTypeName = AUTOMATION_TASK_TYPES[0]?.name || '串流控制'
+// 选中的游戏操作类型
+const selectedGameActionType = ref('')
 
 /**
  * 表单数据
@@ -838,6 +844,7 @@ const showStartAutomationDialog = async (row) => {
   selectedAgentId.value = ''
   selectedHostId.value = ''
   boundHosts.value = []
+  selectedGameActionType.value = visibleGameActionTypes[0]?.code || 'squad_battle'
   await loadOnlineAgents()
   await loadBoundHosts(row.id)
   automationDialogVisible.value = true
@@ -894,7 +901,7 @@ const handleStartAutomation = async () => {
       streamingAccountIds: [selectedAccount.value.id],
       agentId: selectedAgentId.value,
       hostId: selectedHostId.value || undefined,
-      taskType: automationTaskType,
+      gameActionType: selectedGameActionType.value,
       description: `为账号 ${selectedAccount.value.name} 启动自动化`
     })
 

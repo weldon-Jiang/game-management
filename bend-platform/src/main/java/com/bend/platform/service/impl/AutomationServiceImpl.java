@@ -207,13 +207,13 @@ public class AutomationServiceImpl implements AutomationService {
             } else {
                 taskParams.put("xboxHosts", buildXboxHostsInfo(boundHosts));
             }
-            taskParams.put("taskType", request.getTaskType());
+            taskParams.put("gameActionType", request.getGameActionType());
             taskParams.put("merchantId", merchantId);
 
             Task task = new Task();
             task.setName("自动化任务-" + streamingAccount.getName());
             task.setDescription(request.getDescription() != null ? request.getDescription() : "流媒体账号自动化任务");
-            task.setType(request.getTaskType());
+            task.setType("automation");
             task.setTargetAgentId(agentId);
             task.setStreamingAccountId(streamingAccountId);
             task.setGamePlatform(platform);
@@ -226,10 +226,10 @@ public class AutomationServiceImpl implements AutomationService {
             task.setStatus("pending");
             task.setTimeoutSeconds(3600);
             
-            // 设置游戏操作类型，默认为每日比赛
+            // 设置游戏操作类型，默认为SQB模式
             String gameActionType = request.getGameActionType();
             if (gameActionType == null || gameActionType.isEmpty()) {
-                gameActionType = GameActionType.DAILY_MATCH.getCode();
+                gameActionType = GameActionType.SQUAD_BATTLE.getCode();
             }
             task.setGameActionType(gameActionType);
 

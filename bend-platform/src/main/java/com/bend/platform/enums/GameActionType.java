@@ -1,23 +1,25 @@
 package com.bend.platform.enums;
 
 /**
- * Step4 game automation mode (sent to Agent as gameActionType / task_type).
+ * Step4 game automation action type (sent to Agent as gameActionType).
  *
  * @see TaskType Agent WebSocket task routing channel (stream_control, etc.)
  */
 public enum GameActionType {
 
-    DAILY_MATCH("daily_match", "每日比赛"),
-    TRAINING("training", "训练模式"),
-    MISSION("mission", "任务挑战"),
-    CUSTOM("custom", "自定义操作");
+    AUCTION_TRANSFER("auction_transfer", "拍卖行转会", true),
+    SQUAD_BATTLE("squad_battle", "SQB模式", true),
+    DIVISIONS_RIVALS("divisions_rivals", "DR模式", false),
+    WEEKEND_LEAGUE("weekend_league", "周赛", false);
 
     private final String code;
     private final String description;
+    private final boolean visible;
 
-    GameActionType(String code, String description) {
+    GameActionType(String code, String description, boolean visible) {
         this.code = code;
         this.description = description;
+        this.visible = visible;
     }
 
     public String getCode() {
@@ -28,15 +30,19 @@ public enum GameActionType {
         return description;
     }
 
+    public boolean isVisible() {
+        return visible;
+    }
+
     public static GameActionType fromCode(String code) {
         if (code == null || code.isEmpty()) {
-            return DAILY_MATCH;
+            return SQUAD_BATTLE;
         }
         for (GameActionType type : values()) {
             if (type.code.equals(code)) {
                 return type;
             }
         }
-        return DAILY_MATCH;
+        return SQUAD_BATTLE;
     }
 }

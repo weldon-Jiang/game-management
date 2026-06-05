@@ -742,10 +742,9 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
         or 'xbox'
     )
 
-    task_type = (
+    game_action_type = (
         params.get('gameActionType')
-        or params.get('task_type')
-        or 'daily_match'
+        or 'squad_battle'
     )
 
     if not streaming_account:
@@ -771,7 +770,7 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
             streaming_account_auto_code=streaming_account.get('authCode', ''),
             game_accounts=game_accounts,
             assigned_xbox=assigned_xbox,
-            task_type=task_type,
+            game_action_type=game_action_type,
             account_platform=account_platform,
             auto_match_host=auto_match_host,
         )

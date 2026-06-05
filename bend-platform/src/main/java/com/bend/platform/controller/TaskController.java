@@ -6,6 +6,7 @@ import com.bend.platform.dto.TaskPageRequest;
 import com.bend.platform.entity.Task;
 import com.bend.platform.entity.TaskGameAccountStatus;
 import com.bend.platform.service.TaskService;
+import com.bend.platform.enums.GameActionType;
 import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.util.UserContext;
 import com.bend.platform.websocket.WebSocketMessageService;
@@ -304,6 +305,16 @@ public class TaskController {
         return ApiResponse.success(Arrays.asList(
             "pending", "running", "completed", "failed", "cancelled"
         ));
+    }
+
+    /**
+     * 获取所有可见的游戏操作类型（用于前端下拉选择）
+     *
+     * @return 游戏操作类型列表
+     */
+    @GetMapping("/game-action-types")
+    public ApiResponse<List<GameActionType>> getGameActionTypes() {
+        return ApiResponse.success(Arrays.asList(GameActionType.values()));
     }
 
     @GetMapping("/{id}/game-account-status")

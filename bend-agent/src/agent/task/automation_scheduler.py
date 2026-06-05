@@ -160,7 +160,7 @@ class AutomationScheduler:
         streaming_account_password: str,
         game_accounts: List[Dict[str, Any]],
         assigned_xbox: Optional[Dict[str, Any]] = None,
-        task_type: str = "daily_match",
+        game_action_type: str = "squad_battle",
         account_platform: str = "xbox",
         auto_match_host: bool = True,
         streaming_account_auto_code: str = "",
@@ -201,7 +201,7 @@ class AutomationScheduler:
             streaming_account_password=decrypted_password,
             streaming_account_auto_code=streaming_account_auto_code,
             window_id=f"window_{task_id}",
-            task_type=task_type or "daily_match",
+            game_action_type=game_action_type or "squad_battle",
             account_platform=account_platform or "xbox",
             auto_match_host=auto_match_host,
         )

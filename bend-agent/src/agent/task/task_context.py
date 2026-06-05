@@ -171,7 +171,7 @@ class AgentTaskContext:
     assigned_xbox: Optional[XboxInfo] = None
     account_platform: str = "xbox"
     auto_match_host: bool = True
-    task_type: str = "daily_match"
+    game_action_type: str = "squad_battle"
 
     current_step: str = "PENDING"
     task_status: TaskMainStatus = TaskMainStatus.PENDING

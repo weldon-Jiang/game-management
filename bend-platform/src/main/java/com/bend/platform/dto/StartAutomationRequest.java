@@ -18,9 +18,6 @@ public class StartAutomationRequest {
     @NotBlank(message = "Agent ID不能为空")
     private String agentId;
 
-    @NotBlank(message = "任务类型不能为空")
-    private String taskType = "stream_control";
-
     @Min(value = 0, message = "优先级最小值为0")
     @Max(value = 99, message = "优先级最大值为99")
     private Integer priority = 0;

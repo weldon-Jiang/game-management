@@ -51,9 +51,9 @@
           scrollbar-always-on
         >
         <el-table-column prop="name" label="任务名称" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="type" label="类型" width="120" align="center" show-overflow-tooltip>
+        <el-table-column prop="gameActionType" label="游戏操作" width="120" align="center" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag size="small" type="info">{{ getTaskTypeText(row.type) }}</el-tag>
+            <el-tag size="small" type="info">{{ getGameActionTypeText(row.gameActionType) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100" align="center">
@@ -264,7 +264,7 @@ import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { taskApi, agentApi } from '@/api'
-import { getTaskTypeText, getTaskStatusText, getTaskStatusType } from '@/utils/constants'
+import { getTaskTypeText, getTaskStatusText, getTaskStatusType, getGameActionTypeText } from '@/utils/constants'
 
 const filterStatus = ref('')
 const filterType = ref('')

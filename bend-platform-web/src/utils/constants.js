@@ -102,6 +102,14 @@ export const AUTOMATION_TASK_TYPES = [
   { code: 'automation', name: '自动化任务' }
 ]
 
+// 游戏操作类型（可见的才会在前端下拉中显示）
+export const GAME_ACTION_TYPE_MAP = {
+  auction_transfer: { text: '拍卖行转会', visible: true },
+  squad_battle: { text: 'SQB模式', visible: true },
+  divisions_rivals: { text: 'DR模式', visible: false },
+  weekend_league: { text: '周赛', visible: false }
+}
+
 export const PLATFORM_TYPES = [
   { code: 'xbox', name: 'Xbox', automationSupported: true },
   { code: 'playstation', name: 'PlayStation', automationSupported: false }
@@ -310,4 +318,21 @@ export const isPlatformAutomationSupported = (platform) => {
   const normalized = platform || 'xbox'
   const item = PLATFORM_TYPES.find(p => p.code === normalized)
   return item ? item.automationSupported : normalized === 'xbox'
+}
+
+/**
+ * 获取可见的游戏操作类型列表（用于前端下拉选择）
+ */
+export const getVisibleGameActionTypes = () => {
+  return Object.entries(GAME_ACTION_TYPE_MAP)
+    .filter(([_, config]) => config.visible)
+    .map(([code, config]) => ({ code, name: config.text }))
+}
+
+/**
+ * 获取游戏操作类型中文名称
+ */
+export const getGameActionTypeText = (code) => {
+  if (!code) return '-'
+  return GAME_ACTION_TYPE_MAP[code]?.text || code
 }

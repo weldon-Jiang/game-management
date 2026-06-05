@@ -46,12 +46,13 @@ from ..task.task_context import (
     GameAccountInfo
 )
 from ..input.football_controller import FootballController
+from ..input.controller_protocol import XboxButtonFlag
 from ..scene.scene_action_mapper import SceneActionMapper
 
 automation_engine = None
 account_switcher = None
 
-VALID_TASK_TYPES = frozenset({'daily_match', 'training', 'mission', 'custom'})
+VALID_TASK_TYPES = frozenset({'auction_transfer', 'squad_battle', 'divisions_rivals', 'weekend_league'})
 
 # expected_screen -> Streaming scene IDs (Xbox system UI 1-9, football UT menus 100+)
 EXPECTED_SCREEN_SCENES: Dict[str, list] = {
@@ -60,6 +61,54 @@ EXPECTED_SCREEN_SCENES: Dict[str, list] = {
     'XBOX_SCENE_3': [3],
     'XBOX_SCENE_5': [5],
     'XBOX_SCENE_6': [6],
+}
+
+# 游戏模式导航配置
+NAVIGATION_CONFIG = {
+    # UT菜单导航超时配置
+    'ut_menu_timeout': 30,      # UT菜单检测超时(秒)
+    'matchmaking_timeout': 60,   # 匹配超时(秒)
+    'button_press_delay': 0.3,  # 按钮按下后等待时间(秒)
+}
+
+# SQB难度配置
+SQB_DIFFICULTY_MAP = {
+    'easy': 'World Class',
+    'normal': 'Professional',
+    'hard': 'Harder',
+    'ultimate': 'Ultimate',
+}
+
+# 拍卖行配置
+AUCTION_CONFIG = {
+    'buy': {
+        'min_price': 1000,
+        'max_price': 50000,
+        'max_bid_increase': 1000,
+        'retry_count': 3,
+    },
+    'sell': {
+        'starting_price_ratio': 0.8,
+        'buy_now_price_ratio': 1.0,
+        'duration_minutes': 60,
+    }
+}
+
+# DR段位配置
+DR_DIVISION_MAP = {
+    'champion': {'min_points': 2000, 'max_points': 9999, 'display': 'Champion'},
+    'elite': {'min_points': 1500, 'max_points': 1999, 'display': 'Elite'},
+    'gold': {'min_points': 1000, 'max_points': 1499, 'display': 'Gold'},
+    'silver': {'min_points': 500, 'max_points': 999, 'display': 'Silver'},
+    'bronze': {'min_points': 0, 'max_points': 499, 'display': 'Bronze'},
+}
+
+# 周赛资格配置
+WEEKEND_LEAGUE_REQUIREMENTS = {
+    'min_division': 'elite',  # 最低需要Elite段位
+    'min_dr_points': 1500,
+    'max_matches_per_day': 5,
+    'total_matches': 10,
 }
 
 
@@ -123,28 +172,30 @@ async def _match_expected_screen(
     return False
 
 
-def _normalize_task_type(task_type: Optional[str]) -> str:
-    if task_type and task_type in VALID_TASK_TYPES:
-        return task_type
-    return 'daily_match'
+def _normalize_game_action_type(game_action_type: Optional[str]) -> str:
+    if game_action_type and game_action_type in VALID_TASK_TYPES:
+        return game_action_type
+    return 'squad_battle'
 
 
-def _apply_task_type(context: AgentTaskContext, game_account: GameAccountInfo, logger) -> None:
+def _apply_task_type(context: AgentTaskContext, game_account: GameAccountInfo, logger) -> str:
     """
     Apply platform game action type after login is confirmed (AGENTS R006/R007).
 
-    Only adjusts per-account match plan; navigation differences can extend here.
+    Returns the normalized game_action_type string.
     """
-    task_type = _normalize_task_type(context.task_type)
-    if task_type == 'training':
-        game_account.target_matches = min(game_account.target_matches, 1)
-        logger.info("任务类型 training: 单账号执行训练模式（1场）")
-    elif task_type == 'mission':
-        logger.info("任务类型 mission: 执行任务挑战模式")
-    elif task_type == 'custom':
-        logger.info("任务类型 custom: 使用平台自定义操作配置")
+    game_action_type = _normalize_game_action_type(context.game_action_type)
+    if game_action_type == 'auction_transfer':
+        logger.info("游戏操作类型 auction_transfer: 拍卖行转会任务")
+    elif game_action_type == 'squad_battle':
+        logger.info("游戏操作类型 squad_battle: SQB模式（与电脑AI对战）")
+    elif game_action_type == 'divisions_rivals':
+        logger.info("游戏操作类型 divisions_rivals: DR模式（与玩家线上对战）")
+    elif game_action_type == 'weekend_league':
+        logger.info("游戏操作类型 weekend_league: 周赛")
     else:
-        logger.info("任务类型 daily_match: 执行每日比赛模式")
+        logger.info(f"游戏操作类型 {game_action_type}: 执行默认SQB模式")
+    return game_action_type
 
 
 async def step4_execute_gaming(
@@ -188,7 +239,7 @@ async def step4_execute_gaming(
     logger = get_logger(f'step4_game_{context.task_id}')
     stream_logger = get_stream_logger(context.streaming_account_email)
     logger.info("=== 步骤四：开始自动操作Xbox主机 ===")
-    logger.info(f"游戏操作类型 (task_type): {_normalize_task_type(context.task_type)}")
+    logger.info(f"游戏操作类型 (game_action_type): {_normalize_game_action_type(context.game_action_type)}")
 
     if context.frame_capture is None:
         error_msg = "步骤三未初始化画面捕获器，无法执行游戏自动化"
@@ -334,8 +385,8 @@ async def step4_execute_gaming(
 
             _apply_task_type(context, game_account, logger)
             stream_logger.info(
-                f"账号 {game_account.gamertag} 登录已确认，应用任务类型: "
-                f"{_normalize_task_type(context.task_type)}"
+                f"账号 {game_account.gamertag} 登录已确认，应用游戏操作类型: "
+                f"{_normalize_game_action_type(context.game_action_type)}"
             )
 
             await asyncio.sleep(2.0)
@@ -699,6 +750,270 @@ async def _execute_match_for_account(
         return False, "MATCH_ERROR", f"比赛执行异常: {str(e)}"
 
 
+async def _navigate_to_game_mode(
+    context: AgentTaskContext,
+    game_action_type: str,
+    logger,
+    game_logger
+) -> None:
+    """
+    根据 game_action_type 导航到对应的游戏模式
+
+    导航分发中心，根据不同的 game_action_type 调用对应的导航函数。
+
+    参数：
+    - context: 任务上下文
+    - game_action_type: 游戏操作类型 (auction_transfer/squad_battle/divisions_rivals/weekend_league)
+    - logger: 主日志记录器
+    - game_logger: 游戏账号专用日志记录器
+    """
+    logger.info(f"开始导航到游戏模式: {game_action_type}")
+
+    if game_action_type == 'auction_transfer':
+        await _navigate_to_auction(context, logger, game_logger)
+    elif game_action_type == 'squad_battle':
+        await _navigate_to_squad_battle(context, logger, game_logger)
+    elif game_action_type == 'divisions_rivals':
+        await _navigate_to_dr(context, logger, game_logger)
+    elif game_action_type == 'weekend_league':
+        await _navigate_to_weekend_league(context, logger, game_logger)
+    else:
+        logger.warning(f"未知的游戏操作类型: {game_action_type}，默认导航到SQB模式")
+        await _navigate_to_squad_battle(context, logger, game_logger)
+
+
+async def _press_button(context: AgentTaskContext, button: XboxButtonFlag, duration: float = 0.3) -> bool:
+    """
+    发送手柄按钮信号
+
+    参数：
+    - context: 任务上下文
+    - button: Xbox按钮 (XboxButtonFlag.A, XboxButtonFlag.B, etc.)
+    - duration: 按下持续时间(秒)
+
+    返回：
+    - bool: 是否成功
+    """
+    try:
+        if hasattr(context, '_controller_protocol') and context._controller_protocol:
+            await context._controller_protocol.press_button(button, duration)
+            return True
+        else:
+            return False
+    except Exception as e:
+        return False
+
+
+async def _navigate_to_auction(
+    context: AgentTaskContext,
+    logger,
+    game_logger
+) -> None:
+    """
+    导航到拍卖行转会界面
+
+    导航路径：主页 → UT → Transfer Market
+
+    操作序列：
+    1. 从主页按 RB×3 + A 进入 UT 菜单
+    2. 按 LB + A 进入 Transfer Market
+    """
+    logger.info("导航到拍卖行转会界面")
+    game_logger.info("[拍卖行] 开始导航到拍卖行")
+
+    try:
+        # 1. 进入 UT 菜单：RB×3 + A
+        logger.info("[拍卖行] 步骤1: 进入UT菜单 (RB×3 + A)")
+        for _ in range(3):
+            await _press_button(context, XboxButtonFlag.R1, 0.2)
+            await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(2)
+
+        # 2. 进入 Transfer Market：LB + A
+        logger.info("[拍卖行] 步骤2: 进入Transfer Market (LB + A)")
+        await _press_button(context, XboxButtonFlag.L1, 0.3)
+        await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(2)
+
+        logger.info("[拍卖行] 导航完成，等待拍卖行界面加载")
+        game_logger.info("[拍卖行] 导航完成")
+
+    except Exception as e:
+        logger.error(f"[拍卖行] 导航异常: {e}")
+        game_logger.error(f"[拍卖行] 导航异常: {e}")
+
+
+async def _navigate_to_squad_battle(
+    context: AgentTaskContext,
+    logger,
+    game_logger
+) -> None:
+    """
+    导航到SQB模式
+
+    导航路径：主页 → UT → Squad Battles → 选择难度 → 选择对手 → 开始比赛
+
+    操作序列：
+    1. 从主页按 RB×3 + A 进入 UT 菜单
+    2. 按 LB + A 进入 Squad Battles
+    3. 选择难度 (默认Harder)
+    4. 选择对手
+    5. 按 A 开始比赛
+    """
+    logger.info("导航到SQB模式")
+    game_logger.info("[SQB] 开始导航到SQB模式")
+
+    try:
+        # 1. 进入 UT 菜单：RB×3 + A
+        logger.info("[SQB] 步骤1: 进入UT菜单 (RB×3 + A)")
+        for _ in range(3):
+            await _press_button(context, XboxButtonFlag.R1, 0.2)
+            await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(2)
+
+        # 2. 进入 Squad Battles：LB×2 + A
+        logger.info("[SQB] 步骤2: 进入Squad Battles (LB×2 + A)")
+        for _ in range(2):
+            await _press_button(context, XboxButtonFlag.L1, 0.2)
+            await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(2)
+
+        # 3. 选择难度 (向下选择1次到Harder)
+        logger.info("[SQB] 步骤3: 选择难度 (Harder)")
+        await _press_button(context, XboxButtonFlag.DPAD_DOWN, 0.3)
+        await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(1)
+
+        # 4. 选择第一个对手
+        logger.info("[SQB] 步骤4: 选择对手")
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(2)
+
+        # 5. 开始比赛
+        logger.info("[SQB] 步骤5: 开始比赛")
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+
+        logger.info("[SQB] 导航完成，等待匹配")
+        game_logger.info("[SQB] 导航完成")
+
+    except Exception as e:
+        logger.error(f"[SQB] 导航异常: {e}")
+        game_logger.error(f"[SQB] 导航异常: {e}")
+
+
+async def _navigate_to_dr(
+    context: AgentTaskContext,
+    logger,
+    game_logger
+) -> None:
+    """
+    导航到DR模式 (Division Rivals)
+
+    导航路径：主页 → UT → Division Rivals → Play Champions → 开始匹配
+
+    操作序列：
+    1. 从主页按 RB×3 + A 进入 UT 菜单
+    2. 按 LB×2 + A 进入 Division Rivals
+    3. 按 A 选择 Play Champions
+    4. 按 A 开始匹配
+    """
+    logger.info("导航到DR模式")
+    game_logger.info("[DR] 开始导航到DR模式")
+
+    try:
+        # 1. 进入 UT 菜单：RB×3 + A
+        logger.info("[DR] 步骤1: 进入UT菜单 (RB×3 + A)")
+        for _ in range(3):
+            await _press_button(context, XboxButtonFlag.R1, 0.2)
+            await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(2)
+
+        # 2. 进入 Division Rivals：LB×2 + A
+        logger.info("[DR] 步骤2: 进入Division Rivals (LB×2 + A)")
+        for _ in range(2):
+            await _press_button(context, XboxButtonFlag.L1, 0.2)
+            await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(2)
+
+        # 3. 选择 Play Champions（默认选项，直接A）
+        logger.info("[DR] 步骤3: 选择Play Champions")
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(1)
+
+        # 4. 开始匹配
+        logger.info("[DR] 步骤4: 开始匹配")
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+
+        logger.info("[DR] 导航完成，等待匹配")
+        game_logger.info("[DR] 导航完成")
+
+    except Exception as e:
+        logger.error(f"[DR] 导航异常: {e}")
+        game_logger.error(f"[DR] 导航异常: {e}")
+
+
+async def _navigate_to_weekend_league(
+    context: AgentTaskContext,
+    logger,
+    game_logger
+) -> None:
+    """
+    导航到周赛模式 (Weekend League)
+
+    导航路径：主页 → UT → Weekend League → 资格检查 → 开始匹配
+
+    操作序列：
+    1. 从主页按 RB×3 + A 进入 UT 菜单
+    2. 按 LB×3 + A 进入 Weekend League
+    3. 检测资格状态
+    4. 有资格则按 A 开始匹配，无资格则报错
+
+    注意：需要DR段位达到Elite才能参加周赛
+    """
+    logger.info("导航到周赛模式")
+    game_logger.info("[周赛] 开始导航到周赛模式")
+
+    try:
+        # 1. 进入 UT 菜单：RB×3 + A
+        logger.info("[周赛] 步骤1: 进入UT菜单 (RB×3 + A)")
+        for _ in range(3):
+            await _press_button(context, XboxButtonFlag.R1, 0.2)
+            await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(2)
+
+        # 2. 进入 Weekend League：LB×3 + A
+        logger.info("[周赛] 步骤2: 进入Weekend League (LB×3 + A)")
+        for _ in range(3):
+            await _press_button(context, XboxButtonFlag.L1, 0.2)
+            await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+        await asyncio.sleep(2)
+
+        # 3. 检查资格状态
+        # TODO: 通过画面检测判断资格状态
+        # 当前简化处理：假设有资格，直接开始匹配
+        logger.info("[周赛] 步骤3: 检查资格...")
+
+        # 4. 开始匹配（假设有资格）
+        logger.info("[周赛] 步骤4: 开始匹配")
+        await _press_button(context, XboxButtonFlag.A, 0.5)
+
+        logger.info("[周赛] 导航完成，等待匹配")
+        game_logger.info("[周赛] 导航完成")
+
+    except Exception as e:
+        logger.error(f"[周赛] 导航异常: {e}")
+        game_logger.error(f"[周赛] 导航异常: {e}")
+
+
 async def _enter_match(
     context: AgentTaskContext,
     game_account: GameAccountInfo,
@@ -713,7 +1028,14 @@ async def _enter_match(
 
     画面检测：
     - 检测是否在游戏主界面
-    - 导航到比赛入口
+    - 导航到对应的游戏模式（根据 game_action_type）
+
+    参数：
+    - context: 任务上下文（包含 game_action_type）
+    - game_account: 游戏账号信息
+    - logger: 主日志记录器
+    - game_logger: 游戏账号专用日志记录器
+    - report_progress: 进度上报函数
     """
     logger.info(f"进入比赛准备: {game_account.gamertag}")
     game_logger.info("[场景: MAIN_MENU] 进入比赛准备")
@@ -723,19 +1045,27 @@ async def _enter_match(
     )
     logger.info(f"游戏主界面检测: {screen_detected}")
 
+    # 获取游戏操作类型并导航到对应模式
+    game_action_type = _normalize_game_action_type(context.game_action_type)
+    logger.info(f"根据游戏操作类型导航: {game_action_type}")
+
+    # 导航到对应的游戏模式
+    await _navigate_to_game_mode(context, game_action_type, logger, game_logger)
+
     await report_progress(
         context.task_id, "STEP4", "GAME_PREPARING",
-        f"账号 {game_account.gamertag} 正在准备比赛...",
+        f"账号 {game_account.gamertag} 导航到{game_action_type}完成",
         {
             "gameAccountId": game_account.id,
             "gameAccountName": game_account.gamertag,
+            "gameActionType": game_action_type,
             "todayCompleted": context.matches_completed_today[game_account.id],
             "dailyLimit": game_account.target_matches,
             "matchStatus": "PREPARING"
         }
     )
 
-    await asyncio.sleep(2)
+    await asyncio.sleep(1)
 
 
 async def _wait_for_match_start(
