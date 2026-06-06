@@ -1,425 +1,306 @@
-# Streaming场景模板配置指南
+# 游戏场景模板制作指南
 
-## 📋 概述
+## 一、概述
 
-本指南说明如何在Agent项目中配置和使用Streaming风格的场景模板匹配系统。
-
-参考项目：[D:\auto-xbox\streaming\xsrpst.py](file:///D:/auto-xbox/streaming/xsrpst.py)
+本文档说明如何为游戏自动化制作场景识别模板。模板用于 `StreamingSceneDetector` 进行画面匹配。
 
 ---
 
-## 📁 文件结构
+## 二、技术规格
 
-### 新增文件
+### 2.1 游戏画面规格
+
+| 参数 | 值 |
+|------|-----|
+| 分辨率 | 960 × 540 |
+| 格式 | PNG |
+| 颜色空间 | RGB |
+
+### 2.2 模板目录
 
 ```
-bend-agent/
-├── configs/
-│   └── scene_schemas.py          # 场景模板配置（新增）
-├── src/agent/
-│   ├── scene/
-│   │   └── streaming_scene_detector.py  # Streaming场景检测器（新增）
-│   └── vision/
-│       └── template_manager.py    # Streaming模板管理器（新增）
-└── templates/                     # 模板图片目录（需创建）
-    ├── 1.1.png                   # 场景1-模板1
-    ├── 2.1.png                   # 场景2-模板1
-    ├── 2.2.png                   # 场景2-模板2
-    └── ...
+bend-agent/templates/
 ```
 
 ---
 
-## 🎯 核心概念
+## 三、模板文件命名规范
 
-### 1. 场景（Scene）
-
-场景是指Xbox UI的特定界面状态，例如：
-- 场景1：刚串流上的主页界面
-- 场景2：西瓜主页界面
-- 场景10：XB账号登录页面
-
-### 2. 模板（Template）
-
-模板是用于识别场景的图片，例如：
-- "我的游戏和应用" 图标
-- "档案和系统" 文字
-- 各种键盘按键图标
-
-### 3. 搜索区域（Search Region）
-
-在截图中的特定区域进行模板匹配，可以：
-- 提高匹配准确性
-- 减少计算量
-- 避免误匹配
-
----
-
-## 📊 场景配置详解
-
-### 配置格式
-
-每个场景配置包含15个字段：
-
-```python
-[
-    场景ID,           # 场景唯一标识 (1, 2, 3...)
-    场景宽度,        # 通常 960
-    场景高度,        # 通常 540
-
-    模板ID,          # 模板唯一标识 (1, 2, 3...)
-    模板左上X,        # 模板在模板图片中的位置
-    模板左上Y,
-    模板右下X,
-    模板右下Y,
-
-    搜索区域ID,      # 搜索区域标识
-    搜索区域左上X,    # 在截图中的搜索范围
-    搜索区域左上Y,
-    搜索区域右下X,
-    搜索区域右下Y,
-
-    相似度阈值,      # 0-100（百分比）
-    算法编号          # 0-5
-]
-```
-
-### 配置示例
-
-```python
-# 场景1：刚串流上的主页界面
-[1, 960, 540, 1, 401, 50, 558, 63, 1, 399, 48, 600, 65, 90, 3]
-```
-
-**含义**：
-- 场景ID：1
-- 场景分辨率：960x540
-- 模板ID：1（"我的游戏和应用"）
-- 模板区域：(401,50)-(558,63)
-- 搜索区域：(399,48)-(600,65)
-- 相似度阈值：90%
-- 算法：TM_CCORR_NORMED（编号3）
-
----
-
-## 🔧 模板文件命名规则
-
-### 命名格式
+### 3.1 命名格式
 
 ```
 {场景ID}.{模板ID}.png
 ```
 
-### 示例
+### 3.2 命名示例
 
 ```
-templates/
-├── 1.1.png    # 场景1的模板1
-├── 2.1.png    # 场景2的模板1
-├── 2.2.png    # 场景2的模板2
-├── 3.1.png    # 场景3的模板1
-├── 3.2.png    # 场景3的模板2
-├── 3.3.png    # 场景3的模板3
-├── 10.1.png   # 场景10的模板1
-├── 10.2.png   # 场景10的模板2
-└── ...
+50.1.png    # 场景50的第1个模板
+50.2.png    # 场景50的第2个模板
+55.1.png    # 场景55的第1个模板
+156.1.png  # 场景156的第1个模板
 ```
 
 ---
 
-## 🛠️ 使用方式
+## 四、场景ID分配表
 
-### 1. 基本使用
+### 4.1 已有场景ID
+
+| ID段 | 用途 | 说明 |
+|------|------|------|
+| 1-9 | Xbox系统界面 | 主页、关机、重启等 |
+| 10-50 | 登录相关 | 账号登录、小键盘 |
+| 100-180 | UT菜单相关 | 已有模板 |
+
+### 4.2 新分配场景ID（本次任务）
+
+| ID段 | 用途 | 游戏模式 | 优先级 |
+|------|------|---------|--------|
+| **50-54** | 拍卖行相关 | auction_transfer | 高 |
+| **55-58** | SQB相关 | squad_battle | 高 |
+| **60-64** | DR相关 | divisions_rivals | 中 |
+| **70-74** | 周赛相关 | weekend_league | 中 |
+
+---
+
+## 五、scene_schemas.py 配置格式
+
+### 5.1 配置列说明
 
 ```python
-from agent.scene.streaming_scene_detector import StreamingSceneDetector
-
-# 初始化检测器
-detector = StreamingSceneDetector(
-    template_dir="templates",
-    default_threshold=0.8
-)
-
-# 获取场景数量
-print(f"场景总数: {detector.get_scene_count()}")
-print(f"模板总数: {detector.get_template_count()}")
-
-# 识别场景
-result = detector.recognize_scene(frame)
-
-if result.matched:
-    print(f"识别到场景: {result.scene_id}")
-    print(f"匹配置信度: {result.confidence:.2f}")
-else:
-    print("未识别到场景")
+SCENE_COLUMNS = [
+    'scene_id',           # 场景编号 (如 50)
+    'scene_width',        # 场景宽度 (960)
+    'scene_height',       # 场景高度 (540)
+    'template_id',        # 模板编号 (如 1)
+    'template_left',      # 模板区域 左上角X
+    'template_top',       # 模板区域 左上角Y
+    'template_right',     # 模板区域 右下角X
+    'template_bottom',    # 模板区域 右下角Y
+    'search_id',          # 搜索区域编号 (通常同scene_id)
+    'search_left',        # 搜索区域 左上角X
+    'search_top',         # 搜索区域 左上角Y
+    'search_right',       # 搜索区域 右下角X
+    'search_bottom',      # 搜索区域 右下角Y
+    'likeness',          # 相似度阈值 (0-100%)
+    'algorithm'           # 匹配算法编号
+]
 ```
 
-### 2. 识别指定场景
+### 5.2 配置示例
 
 ```python
-# 只识别场景1
-result = detector.recognize_scene(frame, scene_id=1)
+# 场景50：UT主菜单---拍卖行入口
+# 模板1：UT菜单左上角的"UT"图标 (56,21) ~ (84,45)
+[50, 960, 540, 1, 56, 21, 84, 45, 1, 54, 19, 86, 47, 90, 3],
 
-if result.matched:
-    print(f"场景1匹配成功，置信度: {result.confidence:.2f}")
+# 场景50：UT主菜单---拍卖行入口
+# 模板2：右下角的"TRANSFER MARKET"按钮 (347,453) ~ (371,465)
+[50, 960, 540, 2, 347, 453, 371, 465, 1, 345, 451, 373, 467, 90, 3],
 ```
 
-### 3. 批量识别候选场景
+### 5.3 算法说明
 
-```python
-# 识别多个候选场景
-result = detector.recognize_scenes_batch(frame, candidate_ids=[1, 2, 3])
+| 编号 | 算法 | 推荐度 |
+|------|------|--------|
+| **3** | **TM_CCORR_NORMED** | ⭐ **推荐** |
+| 5 | TM_CCOEFF_NORMED | 高 |
+| 1 | TM_SQDIFF_NORMED | 中 |
 
-if result.matched:
-    print(f"最佳匹配场景: {result.scene_id}")
+**推荐使用 TM_CCORR_NORMED (3)**
+
+### 5.4 相似度阈值
+
+| 阈值 | 适用场景 |
+|------|---------|
+| 85-90 | 按钮、图标等清晰图像 |
+| 80-85 | 文字区域、模糊图像 |
+| 90+ | 高度精确匹配 |
+
+**推荐使用 90**
+
+---
+
+## 六、模板制作流程
+
+### 6.1 步骤一：截图
+
+在游戏画面中截取**完整游戏画面**（960×540）
+
+### 6.2 步骤二：确定识别区域
+
+从截图中找出需要识别的**特征区域**：
+- 按钮（如 "TRANSFER MARKET"）
+- 图标（如 UT 图标）
+- 菜单项
+
+### 6.3 步骤三：裁剪模板
+
+从完整截图中裁剪出特征区域，保存为PNG
+
+### 6.4 步骤四：记录坐标
+
+记录模板在原图中的位置坐标
+
+```
+┌─────────────────────────────────────┐
+│                                     │
+│   完整游戏画面 960×540               │
+│                                     │
+│        ┌──────────┐                 │
+│        │ 模板区域  │ ← 裁剪出来保存  │
+│        └──────────┘                 │
+│          (left,top) ~ (right,bottom)│
+│                                     │
+└─────────────────────────────────────┘
 ```
 
-### 4. 模板管理
+### 6.5 步骤五：注册配置
+
+在 `configs/scene_schemas.py` 中添加配置
+
+---
+
+## 七、截图示例说明
+
+### 7.1 拍卖行相关 (50-54)
+
+| 场景ID | 场景名称 | 需要的模板 |
+|--------|---------|-----------|
+| 50 | UT主菜单 | UT图标、TRANSFER MARKET按钮 |
+| 51 | 转会市场搜索 | 搜索框、球员类型按钮 |
+| 52 | 球员搜索结果 | 球员卡片、购买按钮 |
+| 53 | 球员详情-买入 | 价格输入框、确认购买按钮 |
+| 54 | 球员详情-卖出 | 挂售价格、确认出售按钮 |
+
+### 7.2 SQB相关 (55-58)
+
+| 场景ID | 场景名称 | 需要的模板 |
+|--------|---------|-----------|
+| 55 | UT主菜单 | UT图标 |
+| 56 | Squad Battles入口 | SQB按钮 |
+| 57 | 难度选择 | 难度列表、Harder按钮 |
+| 58 | 对手选择 | 对手卡片、开始比赛按钮 |
+
+### 7.3 DR相关 (60-64)
+
+| 场景ID | 场景名称 | 需要的模板 |
+|--------|---------|-----------|
+| 60 | UT主菜单 | UT图标 |
+| 61 | Division Rivals入口 | RIVALS按钮 |
+| 62 | 段位信息 | 当前段位显示 |
+| 63 | 匹配等待 | 匹配中动画 |
+| 64 | 奖励确认 | 奖励确认按钮 |
+
+### 7.4 周赛相关 (70-74)
+
+| 场景ID | 场景名称 | 需要的模板 |
+|--------|---------|-----------|
+| 70 | UT主菜单 | UT图标 |
+| 71 | Weekend League入口 | WL按钮 |
+| 72 | 资格确认-有资格 | 有资格状态 |
+| 73 | 资格确认-无资格 | 无资格状态 |
+| 74 | WL匹配等待 | 匹配中动画 |
+
+---
+
+## 八、模板制作示例
+
+### 8.1 现有模板参考
+
+查看现有模板路径：`bend-agent/templates/`
+
+已有模板示例：
+```
+100.1.png  - 场景100的第1个模板
+127.1.png  - 场景127的第1个模板
+149.1.png  - 场景149的第1个模板
+```
+
+### 8.2 坐标系统
+
+```
+屏幕坐标系统 (960×540)
+┌─────────────────────────────── 0,0
+│
+│
+│
+│
+│                      X →
+│                   ─────────
+│                   │        │
+│                   │        │
+│                   Y ↓       │
+└────────────────────────── 960,540
+```
+
+### 8.3 模板区域 vs 搜索区域
+
+| 区域 | 说明 | 建议 |
+|------|------|------|
+| **模板区域** | 模板图片实际内容 | 紧贴特征区域 |
+| **搜索区域** | 在画面中搜索的范围 | 比模板区域稍大 |
+
+**注意**：搜索区域应包含模板区域，通常向外扩展 2-5 像素
+
+---
+
+## 九、常见问题
+
+### 9.1 模板匹配失败
+
+| 可能原因 | 解决方案 |
+|---------|---------|
+| 相似度阈值太高 | 降低 likeness 到 85 |
+| 模板区域太小 | 扩大模板区域 |
+| 游戏UI变化 | 重新截图制作模板 |
+
+### 9.2 误匹配
+
+| 可能原因 | 解决方案 |
+|---------|---------|
+| 阈值太低 | 提高 likeness 到 90 |
+| 模板特征不明显 | 选择更独特的区域 |
+
+### 9.3 多个模板匹配
+
+| 可能原因 | 解决方案 |
+|---------|---------|
+| 多个相似按钮 | 扩大搜索区域排除其他 |
+
+---
+
+## 十、配置注册示例
+
+### 10.1 添加新场景
+
+在 `configs/scene_schemas.py` 末尾添加：
 
 ```python
-from agent.vision.template_manager import StreamingTemplateManager
+# === 新增：拍卖行相关 (50-54) ===
 
-# 初始化管理器
-manager = StreamingTemplateManager(
-    template_dir="templates",
-    data_dir="data"
-)
+# 场景50：UT主菜单---TRANSFER MARKET入口
+[50, 960, 540, 1, 56, 21, 84, 45, 1, 54, 19, 86, 47, 90, 3],
+[50, 960, 540, 2, 347, 453, 371, 465, 1, 345, 451, 373, 467, 90, 3],
 
-# 预加载所有模板
-count = manager.preload_all_templates()
-print(f"预加载了 {count} 个模板")
+# 场景51：转会市场---搜索界面
+[51, 960, 540, 1, 56, 21, 84, 45, 1, 54, 19, 86, 47, 90, 3],
+```
 
-# 获取单个模板
-template = manager.get_template(1, 1)  # 场景1的模板1
+### 10.2 添加入口函数
 
-# 保存为序列化数据
-manager.save_serialized()
+如果需要在代码中使用，添加入口函数：
 
-# 从序列化数据加载
-manager.load_serialized()
-
-# 获取缓存大小
-print(f"缓存中模板数: {manager.get_cache_size()}")
+```python
+SCENE_NAMES = {
+    # ... 现有配置 ...
+    50: "UT主菜单---TRANSFER MARKET入口",
+    51: "转会市场---搜索界面",
+}
 ```
 
 ---
 
-## 📝 场景清单
-
-### UI导航场景（1-9）
-
-| 场景ID | 场景名称 | 模板数量 | 说明 |
-|--------|---------|---------|------|
-| 1 | 刚串流上的主页界面 | 1 | 检测"我的游戏和应用"图标 |
-| 2 | 西瓜主页界面 | 2 | 检测"西瓜图标"和"主页图标" |
-| 3 | 档案和系统页面-添加和切换 | 3 | 检测"档案和系统"等文字 |
-| 4 | 档案和系统页面-注销 | 1 | 检测"注销"选项 |
-| 5 | 你是谁-添加和切换页面 | 3 | 检测"您是谁"等文字 |
-| 6 | 添加和切换页面-选择用户 | 2 | 检测"已登录状态" |
-| 7 | 您希望做什么-关机重启页面 | 3 | 检测"您希望做什么" |
-| 8 | 您希望做什么-关闭主机 | 2 | 检测"关闭主机" |
-| 9 | 您希望做什么-重启系统 | 2 | 检测"重新启动主机" |
-
-### 账号登录场景（10-23）
-
-| 场景ID | 场景名称 | 模板数量 | 说明 |
-|--------|---------|---------|------|
-| 10 | XB账号登录页面 | 3 | 检测"登录"和输入框 |
-| 11 | #+= LT键位 | 2 | LT键 |
-| 12 | LB键位 | 2 | LB键 |
-| 13 | 大写L键位 | 2 | 大写L键 |
-| 14 | @键位 | 2 | @符号键 |
-| 15 | RT键位 | 2 | RT键 |
-| 16 | RB键位 | 2 | RB键 |
-| 17 | Y键位 | 2 | Y键 |
-| 18 | RB键位 | 2 | RB键 |
-| 19 | X键位 | 2 | X键 |
-| 20 | 1键位 | 2 | 数字1键 |
-| 21 | 2键位 | 2 | 数字2键 |
-| 22 | 3键位 | 2 | 数字3键 |
-| 23 | 4键位 | 2 | 数字4键 |
-
----
-
-## ⚙️ 算法说明
-
-### 支持的算法
-
-| 编号 | 算法名称 | 说明 | 阈值判断 |
-|------|---------|------|---------|
-| 0 | TM_SQDIFF | 平方差匹配 | 越小越好 |
-| 1 | TM_SQDIFF_NORMED | 归一化平方差 | min_val ≤ 阈值 |
-| 2 | TM_CCORR | 相关匹配 | 越大越好 |
-| **3** | **TM_CCORR_NORMED** | **归一化相关（推荐）** | **max_val ≥ 阈值** |
-| 4 | TM_CCOEFF | 相关系数 | 越大越好 |
-| 5 | TM_CCOEFF_NORMED | 归一化相关系数 | max_val ≥ 阈值 |
-
-### 推荐配置
-
-```
-推荐算法：TM_CCORR_NORMED (编号3)
-推荐阈值：90%
-原因：平衡性能和准确性
-```
-
----
-
-## 📦 模板准备指南
-
-### 1. 截图分辨率
-
-所有模板应为 **960x540** 像素
-
-### 2. 截取模板区域
-
-根据配置中的坐标截取模板：
-
-```python
-# 配置中的坐标
-template_left = 401
-template_top = 50
-template_right = 558
-template_bottom = 63
-
-# 从截图截取
-template = frame[template_top:template_bottom, template_left:template_right]
-```
-
-### 3. 保存模板
-
-```python
-import cv2
-
-# 保存为PNG
-cv2.imwrite(f"templates/1.1.png", template)
-```
-
-### 4. 检查清单
-
-- [ ] 模板分辨率为 960x540
-- [ ] 模板区域与配置一致
-- [ ] 文件命名为 `{场景ID}.{模板ID}.png`
-- [ ] 放置在 `templates/` 目录
-
----
-
-## 🔄 集成到现有代码
-
-### 在步骤三中使用
-
-```python
-# step3_streaming_init.py
-from agent.scene.streaming_scene_detector import StreamingSceneDetector
-
-async def step3_init_streaming(context, check_cancel, report_progress):
-    # 初始化场景检测器
-    detector = StreamingSceneDetector(
-        template_dir="templates",
-        default_threshold=0.8
-    )
-
-    # 预加载模板
-    detector.preload_all_templates()
-
-    # 保存到上下文供步骤四使用
-    context.scene_detector = detector
-
-    return Step3Result(success=True)
-```
-
-### 在步骤四中使用
-
-```python
-# step4_game_automation.py
-async def step4_execute_automation(context, check_cancel, report_progress):
-    detector = context.scene_detector
-
-    while True:
-        # 获取画面
-        frame = await context.frame_capture.capture_frame()
-
-        # 识别场景
-        result = detector.recognize_scene(frame)
-
-        if result.matched:
-            print(f"当前场景: {result.scene_id}")
-
-            # 根据场景执行操作
-            if result.scene_id == 1:
-                # 执行主页相关操作
-                pass
-            elif result.scene_id == 10:
-                # 执行登录相关操作
-                pass
-
-        await asyncio.sleep(0.5)
-```
-
----
-
-## 📊 性能优化
-
-### 1. 模板预加载
-
-```python
-# 启动时预加载所有模板
-detector = StreamingSceneDetector(template_dir="templates")
-detector.preload_all_templates()  # 预加载
-```
-
-### 2. 限制候选场景
-
-```python
-# 只识别可能的场景
-result = detector.recognize_scenes_batch(frame, candidate_ids=[1, 2, 3])
-```
-
-### 3. 缓存策略
-
-```python
-# 使用缓存
-manager = StreamingTemplateManager(template_dir="templates", use_cache=True)
-
-# 清空缓存
-manager.clear_cache()
-```
-
----
-
-## 🐛 常见问题
-
-### 1. 模板文件不存在
-
-```
-WARNING: 模板文件不存在: templates/1.1.png
-```
-
-**解决**：确保模板文件放置在正确目录
-
-### 2. 匹配失败
-
-```
-WARNING: 场景ID不存在: 99
-```
-
-**解决**：检查场景ID是否在 SCENE_SCHEMAS 中定义
-
-### 3. 置信度低
-
-**解决**：
-- 检查模板图片质量
-- 调整相似度阈值
-- 扩大搜索区域范围
-
----
-
-## 📚 参考资料
-
-- [Streaming项目分析报告](../.trae/documents/Streaming场景与模板完整清单.md)
-- [Streaming模板匹配核心分析](../.trae/documents/Streaming模板匹配核心要点.md)
-- Streaming项目源码：[D:\auto-xbox\streaming\xsrpst.py](file:///D:/auto-xbox/streaming/xsrpst.py)
-
----
-
-*文档版本：1.0*
-*最后更新：2026-06-02*
+*文档版本: 1.0*
+*创建日期: 2026-06-04*

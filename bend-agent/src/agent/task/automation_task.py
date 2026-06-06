@@ -18,7 +18,8 @@ from ..core.logger import get_logger
 from .task_context import (
     AgentTaskContext,
     AutomationResult,
-    TaskMainStatus
+    TaskMainStatus,
+    TaskStepStatus,
 )
 from ..windows.task_window_manager import TaskWindowManager
 from ..automation.step1_stream_account_login import step1_execute_login
@@ -104,12 +105,7 @@ class AgentAutomationTask:
 
             if not step1_result.success:
                 self.logger.error(f"步骤一失败: {step1_result.message}")
-                await self._report_progress(
-                    self.context.task_id,
-                    "STEP1",
-                    "FAILED",
-                    step1_result.message
-                )
+                await self._report_step_outcome("STEP1", step1_result)
                 await self._cleanup()
                 return AutomationResult(
                     success=False,
@@ -126,12 +122,7 @@ class AgentAutomationTask:
 
             if not step2_result.success:
                 self.logger.error(f"步骤二失败: {step2_result.message}")
-                await self._report_progress(
-                    self.context.task_id,
-                    "STEP2",
-                    "FAILED",
-                    step2_result.message
-                )
+                await self._report_step_outcome("STEP2", step2_result)
                 await self._cleanup()
                 return AutomationResult(
                     success=False,
@@ -148,12 +139,7 @@ class AgentAutomationTask:
 
             if not step3_result.success:
                 self.logger.error(f"步骤三失败: {step3_result.message}")
-                await self._report_progress(
-                    self.context.task_id,
-                    "STEP3",
-                    "FAILED",
-                    step3_result.message
-                )
+                await self._report_step_outcome("STEP3", step3_result)
                 await self._cleanup()
                 return AutomationResult(
                     success=False,
@@ -174,12 +160,7 @@ class AgentAutomationTask:
 
             if not step4_result.success:
                 self.logger.error(f"步骤四失败: {step4_result.message}")
-                await self._report_progress(
-                    self.context.task_id,
-                    "STEP4",
-                    "FAILED",
-                    step4_result.message
-                )
+                await self._report_step_outcome("STEP4", step4_result)
                 await self._cleanup()
                 return AutomationResult(
                     success=False,
@@ -191,7 +172,9 @@ class AgentAutomationTask:
             success_msg = f"自动化任务完成，共完成 {step4_result.total_matches} 场比赛"
             self.logger.info(f"=== {success_msg} ===")
             self.context.update_task_status(TaskMainStatus.COMPLETED, success_msg)
-            await self._report_progress(self.context.task_id, "COMPLETED", "COMPLETED", success_msg)
+            await self._report_progress(
+                self.context.task_id, "STEP4", "COMPLETED", success_msg
+            )
 
             await self._cleanup()
 
@@ -205,7 +188,10 @@ class AgentAutomationTask:
             self.logger.info("任务被取消")
             self.context.update_task_status(TaskMainStatus.CANCELLED, "任务被取消")
             await self._report_progress(
-                self.context.task_id, "CANCELLED", "CANCELLED", "任务被取消"
+                self.context.task_id,
+                self._get_active_step(),
+                "CANCELLED",
+                "任务被取消",
             )
             await self._cleanup()
             return AutomationResult(
@@ -220,9 +206,10 @@ class AgentAutomationTask:
             self.context.update_task_status(TaskMainStatus.FAILED, error_msg)
             await self._report_progress(
                 self.context.task_id,
+                self._get_active_step(),
                 "FAILED",
-                "FAILED",
-                error_msg
+                error_msg,
+                error_code="EXCEPTION",
             )
             await self._cleanup()
             return AutomationResult(
@@ -260,6 +247,38 @@ class AgentAutomationTask:
         if self.platform_client:
             await self.platform_client.close()
 
+    def _get_active_step(self) -> str:
+        """Resolve the most relevant step label for top-level callbacks."""
+        step_order = (
+            ("step4", "STEP4"),
+            ("step3", "STEP3"),
+            ("step2", "STEP2"),
+            ("step1", "STEP1"),
+        )
+        for step_name, step_label in step_order:
+            step_status = getattr(self.context, f"{step_name}_status", None)
+            if step_status and step_status.status == TaskStepStatus.RUNNING:
+                return step_label
+        for step_name, step_label in step_order:
+            step_status = getattr(self.context, f"{step_name}_status", None)
+            if step_status and step_status.status in (
+                TaskStepStatus.FAILED,
+                TaskStepStatus.SKIPPED,
+            ):
+                return step_label
+        return "STEP1"
+
+    async def _report_step_outcome(self, step: str, result: Any) -> bool:
+        """Report step failure/cancellation with the correct platform status."""
+        status = "CANCELLED" if result.error_code == "CANCELLED" else "FAILED"
+        return await self._report_progress(
+            self.context.task_id,
+            step,
+            status,
+            result.message,
+            error_code=None if status == "CANCELLED" else result.error_code,
+        )
+
     async def _report_progress(
         self,
         task_id: str,
@@ -268,7 +287,7 @@ class AgentAutomationTask:
         message: str,
         extra_data: Optional[Dict[str, Any]] = None,
         **kwargs
-    ) -> None:
+    ) -> bool:
         """
         上报进度到平台
 
@@ -278,15 +297,26 @@ class AgentAutomationTask:
         - status: 状态
         - message: 消息
         - **kwargs: 其他字段
+
+        返回：
+        - bool: 是否上报成功
         """
         if extra_data:
             kwargs.update(extra_data)
 
-        if self.platform_client:
-            # 上报任务进度
-            await self.platform_client.report_progress(
-                task_id, step, status, message, **kwargs
+        if not self.platform_client:
+            return False
+
+        result = await self.platform_client.report_progress(
+            task_id, step, status, message, **kwargs
+        )
+        if result.get("success") is False:
+            self.logger.error(
+                f"进度上报失败 - TaskID: {task_id}, Step: {step}, "
+                f"Status: {status}, Error: {result.get('error')}"
             )
+            return False
+        return True
 
     async def _cleanup(self) -> None:
         """清理任务资源并关闭窗口"""

@@ -240,6 +240,8 @@ async def step4_execute_gaming(
     stream_logger = get_stream_logger(context.streaming_account_email)
     logger.info("=== 步骤四：开始自动操作Xbox主机 ===")
     logger.info(f"游戏操作类型 (game_action_type): {_normalize_game_action_type(context.game_action_type)}")
+    context.update_step_status("step4", TaskStepStatus.RUNNING, "开始游戏自动化...")
+    await report_progress(context.task_id, "STEP4", "RUNNING", "开始游戏自动化...")
 
     if context.frame_capture is None:
         error_msg = "步骤三未初始化画面捕获器，无法执行游戏自动化"
@@ -360,9 +362,26 @@ async def step4_execute_gaming(
 
             switch_result = await account_switcher.switch_to(game_account.id)
             if not switch_result.success:
-                logger.warning(f"账号切换失败: {switch_result.error_message}")
-                game_logger.warning(f"账号切换失败: {switch_result.error_message}")
-                stream_logger.warning(f"游戏账号 {game_account.gamertag} 切换失败: {switch_result.error_message}")
+                switch_msg = (
+                    f"账号 {game_account.gamertag} 切换失败: "
+                    f"{switch_result.error_message}"
+                )
+                logger.warning(switch_msg)
+                game_logger.warning(switch_msg)
+                stream_logger.warning(switch_msg)
+                await report_progress(
+                    context.task_id,
+                    "STEP4",
+                    "RUNNING",
+                    switch_msg,
+                    {
+                        "gameAccountId": game_account.id,
+                        "gameAccountName": game_account.gamertag,
+                        "matchStatus": "SWITCH_FAILED",
+                        "accountStatus": "failed",
+                        "errorCode": "ACCOUNT_SWITCH_FAILED",
+                    },
+                )
                 continue
 
             login_confirmed = await _detect_screen_state(
@@ -379,6 +398,8 @@ async def step4_execute_gaming(
                         "gameAccountId": game_account.id,
                         "gameAccountName": game_account.gamertag,
                         "matchStatus": "LOGIN_UNCONFIRMED",
+                        "accountStatus": "failed",
+                        "errorCode": "LOGIN_UNCONFIRMED",
                     }
                 )
                 continue

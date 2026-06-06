@@ -41,7 +41,7 @@ import time
 import json
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
 import logging
@@ -388,7 +388,7 @@ class MicrosoftOAuthClient:
             logger.error(f"获取设备代码异常: {e}")
             return None
     
-    async def poll_for_token(self, device_code: str, expires_in: int) -> Optional[MicrosoftTokens]:
+    async def poll_for_token(self, device_code: str, max_wait_seconds: int) -> Optional[MicrosoftTokens]:
         """
         轮询获取Token
         
@@ -396,12 +396,16 @@ class MicrosoftOAuthClient:
         
         Args:
             device_code: 设备代码
-            expires_in: 设备代码有效期（秒）
+            max_wait_seconds: 最大等待时间（秒），超时后立即停止轮询
         
         Returns:
             MicrosoftTokens对象或None
         """
         import aiohttp
+
+        if max_wait_seconds <= 0:
+            logger.warning("设备代码认证超时：无剩余等待时间")
+            return None
         
         url = f"{self.AUTHORITY}/oauth2/v2.0/token"
         data = {
@@ -409,12 +413,17 @@ class MicrosoftOAuthClient:
             "client_id": self.CLIENT_ID,
             "device_code": device_code
         }
-        
-        # 计算最大轮询次数（有效期/5秒 + 额外10次）
-        max_attempts = int(expires_in / 5) + 10
-        
-        for attempt in range(max_attempts):
-            await asyncio.sleep(5)
+
+        start_time = time.time()
+        attempt = 0
+
+        while (time.time() - start_time) < max_wait_seconds:
+            elapsed = time.time() - start_time
+            sleep_time = min(5, max_wait_seconds - elapsed)
+            if sleep_time <= 0:
+                break
+            await asyncio.sleep(sleep_time)
+            attempt += 1
             
             try:
                 async with aiohttp.ClientSession() as session:
@@ -422,7 +431,6 @@ class MicrosoftOAuthClient:
                         result = await resp.json()
                         
                         if resp.status == 200:
-                            # Token获取成功
                             expires_at = time.time() + result.get("expires_in", 3600)
                             logger.info(f"Token获取成功，有效期: {result.get('expires_in', 3600)}秒")
                             return MicrosoftTokens(
@@ -436,20 +444,16 @@ class MicrosoftOAuthClient:
                         
                         error = result.get("error")
                         if error == "authorization_pending":
-                            # 用户尚未完成授权
-                            logger.debug(f"等待用户授权... ({attempt+1}/{max_attempts})")
+                            logger.debug(f"等待用户授权... (第{attempt}次轮询)")
                             continue
                         elif error == "slow_down":
-                            # 服务器要求减慢轮询速度
                             logger.debug("服务器请求过频繁，减慢轮询速度")
                             await asyncio.sleep(3)
                             continue
                         elif error in ("expired_token", "invalid_grant"):
-                            # 设备代码过期或无效
                             logger.error(f"设备代码认证失败: {error}")
                             return None
                         else:
-                            # 其他错误
                             logger.error(f"未知错误: {error}, {result.get('error_description')}")
                             return None
                             
@@ -855,9 +859,24 @@ class MicrosoftMsalAuthenticator:
         self._microsoft_tokens: Optional[MicrosoftTokens] = None
         self._xbox_tokens: Optional[XboxLiveTokens] = None
         self._auto_code: Optional[str] = None  # TOTP Secret Key for MFA
+        self._last_device_code_error: Optional[str] = None
         
         # 初始化Token存储（从文件加载已保存的Token）
         TokenStorage.load_all_tokens()
+
+    @staticmethod
+    def _get_device_code_timeout() -> int:
+        """读取设备码认证总超时（秒），默认 300 秒（5 分钟）"""
+        try:
+            from ..core.config import get_config
+            return max(60, int(get_config().auth.DEVICE_CODE_TIMEOUT))
+        except Exception:
+            return 300
+
+    @staticmethod
+    def _remaining_seconds(deadline: float) -> int:
+        """计算距离截止时间的剩余秒数"""
+        return max(0, int(deadline - time.time()))
     
     @property
     def is_authenticated(self) -> bool:
@@ -901,12 +920,20 @@ class MicrosoftMsalAuthenticator:
                 logger.info(f"使用Refresh Token刷新成功")
             else:
                 # Step 2: Refresh Token不可用，使用设备码认证（浏览器自动化）
-                microsoft_tokens = await self._try_device_code_auth(email, password, self._auto_code)
+                microsoft_tokens, device_code_error = await self._try_device_code_auth(
+                    email, password, self._auto_code
+                )
                 if not microsoft_tokens:
+                    error_code = device_code_error or self._last_device_code_error or "DEVICE_CODE_FAILED"
+                    if error_code == "DEVICE_CODE_TIMEOUT":
+                        message = f"设备码认证超时（{self._get_device_code_timeout()}秒）"
+                    else:
+                        message = "设备码认证失败"
                     return AuthenticationResult(
                         success=False,
                         status=AuthStatus.FAILED,
-                        message="设备码认证失败"
+                        message=message,
+                        error_code=error_code
                     )
                 self._microsoft_tokens = microsoft_tokens
                 logger.info(f"设备码认证成功")
@@ -972,9 +999,9 @@ class MicrosoftMsalAuthenticator:
         email: str,
         password: str = None,
         auto_code: str = None
-    ) -> Optional[MicrosoftTokens]:
+    ) -> Tuple[Optional[MicrosoftTokens], Optional[str]]:
         """
-        执行设备码认证流程（浏览器自动化 + 并发控制）
+        执行设备码认证流程（浏览器自动化，总时限由 DEVICE_CODE_TIMEOUT 控制）
 
         Args:
             email: 微软账号邮箱
@@ -982,84 +1009,111 @@ class MicrosoftMsalAuthenticator:
             auto_code: TOTP Secret Key，用于MFA自动验证码生成
 
         Returns:
-            MicrosoftTokens或None（认证失败时）
+            (MicrosoftTokens, error_code): 成功时 error_code 为 None
         """
-        # 获取设备代码（无需并发控制，多个账号可以同时获取）
+        self._last_device_code_error = None
+        auth_timeout = self._get_device_code_timeout()
+        deadline = time.time() + auth_timeout
+
         oauth_client = MicrosoftOAuthClient()
         device_code_data = await oauth_client.get_device_code()
         if not device_code_data:
-            return None
+            self._last_device_code_error = "DEVICE_CODE_FAILED"
+            return None, "DEVICE_CODE_FAILED"
 
         user_code = device_code_data.get("user_code")
         verification_uri = device_code_data.get("verification_uri")
         device_code = device_code_data.get("device_code")
-        expires_in = device_code_data.get("expires_in", 300)
+        ms_expires_in = device_code_data.get("expires_in", 300)
+        effective_timeout = min(ms_expires_in, auth_timeout)
 
-        # 输出设备码信息
-        logger.info(f"设备代码: {user_code}, 验证URL: {verification_uri}")
-        print(f"\n开始浏览器自动化设备码认证（账号: {email}）...")
-        print(f"设备代码: {user_code}, 有效期: {expires_in}秒\n")
+        logger.info(
+            f"设备代码: {user_code}, 验证URL: {verification_uri}, "
+            f"认证时限: {effective_timeout}秒（上限 {auth_timeout}秒）"
+        )
+        print(f"\n开始设备码认证（账号: {email}）...")
+        print(f"设备代码: {user_code}, 认证时限: {effective_timeout}秒\n")
 
-        # 检查是否有密码用于自动化登录
         if not password:
-            logger.warning("未提供密码，跳过浏览器自动化，使用手动验证模式")
-            print("注意: 未提供密码，将使用传统轮询方式（需要手动验证）")
-            return await oauth_client.poll_for_token(device_code, expires_in)
+            logger.warning("未提供密码，跳过浏览器自动化，使用轮询等待授权")
+            print("注意: 未提供密码，请在验证页面手动完成登录")
+            tokens = await oauth_client.poll_for_token(
+                device_code, self._remaining_seconds(deadline)
+            )
+            if tokens:
+                return tokens, None
+            error_code = (
+                "DEVICE_CODE_TIMEOUT"
+                if self._remaining_seconds(deadline) <= 0
+                else "DEVICE_CODE_FAILED"
+            )
+            self._last_device_code_error = error_code
+            return None, error_code
 
-        # 使用浏览器自动化进行设备码认证
-        # 注意：并发控制应在任务调度器层面处理，不在认证模块内部
         try:
             from .browser_automation import DeviceCodeAuthenticator
 
-            logger.info(f"启动浏览器自动化认证（账号: {email}）...")
-            print(f"启动浏览器自动化认证（账号: {email}）...")
+            remaining = self._remaining_seconds(deadline)
+            if remaining <= 0:
+                self._last_device_code_error = "DEVICE_CODE_TIMEOUT"
+                return None, "DEVICE_CODE_TIMEOUT"
 
-            # 创建浏览器自动化器（隐藏模式）
-            logger.info("创建 DeviceCodeAuthenticator 实例...")
+            logger.info(f"启动浏览器自动化认证（账号: {email}，剩余 {remaining} 秒）...")
+            print(f"启动浏览器自动化认证（账号: {email}，剩余 {remaining} 秒）...")
+
             authenticator = DeviceCodeAuthenticator(headless=True)
-            logger.info("DeviceCodeAuthenticator 实例已创建")
-
-            # 执行自动化认证
-            logger.info("开始执行 authenticate() ...")
-            print("开始执行浏览器自动化...")
             auth_success = await authenticator.authenticate(
                 verification_url=verification_uri,
                 user_code=user_code,
                 email=email,
                 password=password,
                 auto_code=auto_code,
-                timeout=expires_in
+                timeout=remaining
             )
             logger.info(f"authenticate() 执行完成，结果: {auth_success}")
 
-            # 关闭浏览器
-            await authenticator.close()
+            if not auth_success:
+                error_code = (
+                    "DEVICE_CODE_TIMEOUT"
+                    if self._remaining_seconds(deadline) <= 0
+                    else "DEVICE_CODE_FAILED"
+                )
+                logger.error(f"浏览器自动化认证失败: {error_code}")
+                print(f"浏览器自动化认证失败: {error_code}")
+                self._last_device_code_error = error_code
+                return None, error_code
 
-            if auth_success:
-                logger.info(f"浏览器自动化认证成功（账号: {email}），开始获取Token...")
-                print("浏览器自动化认证成功！")
+            remaining = self._remaining_seconds(deadline)
+            if remaining <= 0:
+                self._last_device_code_error = "DEVICE_CODE_TIMEOUT"
+                return None, "DEVICE_CODE_TIMEOUT"
 
-                # 轮询获取Token（设备码认证仍需此步骤）
-                microsoft_tokens = await oauth_client.poll_for_token(device_code, expires_in)
+            logger.info(f"浏览器自动化认证成功（账号: {email}），开始获取Token（剩余 {remaining} 秒）...")
+            print("浏览器自动化认证成功，正在获取 Token...")
 
-                if microsoft_tokens:
-                    logger.info("Token获取成功")
-                    return microsoft_tokens
-                else:
-                    logger.error("Token获取失败")
-                    return None
-            else:
-                logger.error("浏览器自动化认证失败")
-                print("浏览器自动化认证失败，尝试使用传统方式...")
-                # 回退到传统轮询方式
-                return await oauth_client.poll_for_token(device_code, expires_in)
+            microsoft_tokens = await oauth_client.poll_for_token(device_code, remaining)
+            if microsoft_tokens:
+                logger.info("Token获取成功")
+                return microsoft_tokens, None
+
+            error_code = (
+                "DEVICE_CODE_TIMEOUT"
+                if self._remaining_seconds(deadline) <= 0
+                else "DEVICE_CODE_FAILED"
+            )
+            logger.error(f"Token获取失败: {error_code}")
+            self._last_device_code_error = error_code
+            return None, error_code
 
         except Exception as e:
             logger.error(f"浏览器自动化异常: {e}", exc_info=True)
-            print(f"浏览器自动化失败: {e}，回退到传统方式...")
-
-            # 回退到传统轮询方式
-            return await oauth_client.poll_for_token(device_code, expires_in)
+            error_code = (
+                "DEVICE_CODE_TIMEOUT"
+                if self._remaining_seconds(deadline) <= 0
+                else "DEVICE_CODE_FAILED"
+            )
+            self._last_device_code_error = error_code
+            return None, error_code
     
     async def _get_xbox_live_tokens(self) -> Optional[XboxLiveTokens]:
         """

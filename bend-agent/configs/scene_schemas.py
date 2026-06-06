@@ -3,7 +3,7 @@ Scene Template Schemas - Streaming项目场景模板配置
 =================================================
 
 本配置文件定义了Xbox串流场景识别所需的模板配置，
-参考Streaming项目 (D:\auto-xbox\streaming\xsrpst.py) 的设计。
+参考Streaming项目 (D:/auto-xbox/streaming/xsrpst.py) 的设计。
 
 场景模板配置说明：
 - 每个场景包含一个或多个模板

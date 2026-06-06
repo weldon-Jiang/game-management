@@ -191,6 +191,13 @@ class AutomationScheduler:
         decrypted_password = await self._decrypt_streaming_password(streaming_account_password)
         if not decrypted_password:
             self.logger.error(f"任务 {task_id} 流媒体账号密码解密失败")
+            await self._platform_client.report_progress(
+                task_id,
+                "STEP1",
+                "FAILED",
+                "流媒体账号密码解密失败",
+                error_code="PASSWORD_DECRYPT_FAILED",
+            )
             return False
         self.logger.info("流媒体账号密码解密成功")
 
@@ -364,6 +371,12 @@ class AutomationScheduler:
 
         except asyncio.CancelledError:
             self.logger.info(f"任务 {task_id} 被取消")
+            await self._platform_client.report_progress(
+                task_id,
+                "STEP1",
+                "CANCELLED",
+                "任务被取消",
+            )
 
             with self._lock:
                 self._task_results[task_id] = AutomationResult(
@@ -374,6 +387,13 @@ class AutomationScheduler:
 
         except Exception as e:
             self.logger.error(f"任务 {task_id} 执行异常: {e}", exc_info=True)
+            await self._platform_client.report_progress(
+                task_id,
+                "STEP1",
+                "FAILED",
+                f"任务调度异常: {e}",
+                error_code="SCHEDULER_EXCEPTION",
+            )
 
             with self._lock:
                 self._task_results[task_id] = AutomationResult(

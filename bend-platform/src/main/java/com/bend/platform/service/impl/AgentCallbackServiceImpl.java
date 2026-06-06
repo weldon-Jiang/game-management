@@ -53,6 +53,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         String status = (String) data.get("status");
         String message = (String) data.get("message");
         String gameAccountId = (String) data.get("gameAccountId");
+        String accountStatus = (String) data.get("accountStatus");
 
         @SuppressWarnings("unchecked")
         Map<String, Object> metrics = (Map<String, Object>) data.get("metrics");
@@ -70,7 +71,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
 
         switch (status) {
             case "RUNNING":
-                handleRunningStatus(task, taskId, step, message, gameAccountId, metrics, response);
+                handleRunningStatus(task, taskId, step, message, gameAccountId, accountStatus, metrics, response);
                 break;
             case "COMPLETED":
                 handleCompletedStatus(task, taskId, step, message, gameAccountId, metrics, response);
@@ -79,10 +80,10 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
                 handleFailedStatus(task, taskId, step, message, gameAccountId, metrics, error, response);
                 break;
             case "GAME_PREPARING":
-                handleGamePreparingStatus(task, taskId, step, gameAccountId, metrics);
+                handleGamePreparingStatus(task, taskId, step, gameAccountId, accountStatus, metrics);
                 break;
             case "GAMING":
-                handleGamingStatus(task, taskId, step, gameAccountId, metrics);
+                handleGamingStatus(task, taskId, step, gameAccountId, accountStatus, metrics);
                 break;
             case "CANCELLED":
                 handleCancelledStatus(task, taskId, message, response);
@@ -95,7 +96,8 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     }
 
     private void handleRunningStatus(Task task, String taskId, String step, String message,
-                                     String gameAccountId, Map<String, Object> metrics,
+                                     String gameAccountId, String accountStatus,
+                                     Map<String, Object> metrics,
                                      Map<String, Object> response) {
         if ("pending".equals(task.getStatus())) {
             task.setStatus("running");
@@ -111,13 +113,21 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         task.setStepStatus("RUNNING");
 
         if (gameAccountId != null) {
-            statusService.updateStatus(taskId, gameAccountId, "running");
+            String gameAccountStatus = resolveGameAccountStatus(accountStatus, "running");
+            statusService.updateStatus(taskId, gameAccountId, gameAccountStatus);
             updateMetrics(taskId, gameAccountId, metrics);
         }
 
         taskMapper.updateById(task);
         response.put("action", "CONTINUE");
         log.info("任务运行中 - TaskID: {}, Step: {}", taskId, step);
+    }
+
+    private String resolveGameAccountStatus(String accountStatus, String defaultStatus) {
+        if (accountStatus == null || accountStatus.isBlank()) {
+            return defaultStatus;
+        }
+        return accountStatus;
     }
 
     private void handleCompletedStatus(Task task, String taskId, String step, String message,
@@ -188,14 +198,16 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     }
 
     private void handleGamePreparingStatus(Task task, String taskId, String step,
-                                            String gameAccountId, Map<String, Object> metrics) {
+                                            String gameAccountId, String accountStatus,
+                                            Map<String, Object> metrics) {
         if (step != null) {
             task.setCurrentStep(step);
         }
         task.setStepStatus("GAME_PREPARING");
 
         if (gameAccountId != null) {
-            statusService.updateStatus(taskId, gameAccountId, "game_preparing");
+            String gameAccountStatus = resolveGameAccountStatus(accountStatus, "game_preparing");
+            statusService.updateStatus(taskId, gameAccountId, gameAccountStatus);
             updateMetrics(taskId, gameAccountId, metrics);
         }
 
@@ -204,14 +216,16 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     }
 
     private void handleGamingStatus(Task task, String taskId, String step,
-                                     String gameAccountId, Map<String, Object> metrics) {
+                                     String gameAccountId, String accountStatus,
+                                     Map<String, Object> metrics) {
         if (step != null) {
             task.setCurrentStep(step);
         }
         task.setStepStatus("GAMING");
 
         if (gameAccountId != null) {
-            statusService.updateStatus(taskId, gameAccountId, "gaming");
+            String gameAccountStatus = resolveGameAccountStatus(accountStatus, "gaming");
+            statusService.updateStatus(taskId, gameAccountId, gameAccountStatus);
             updateMetrics(taskId, gameAccountId, metrics);
         }
 

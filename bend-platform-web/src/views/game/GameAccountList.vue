@@ -720,7 +720,7 @@ onMounted(() => {
 }
 
 :deep(.el-dialog) {
-  background: rgba(18, 18, 26, 0.95);
+  background: rgb(18, 18, 26);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
 }

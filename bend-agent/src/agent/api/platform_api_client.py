@@ -13,10 +13,54 @@ Platform API客户端 v2.0
 """
 
 import asyncio
+import json
 import time
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 import aiohttp
+
+_DEBUG_LOG_PATH = Path(__file__).resolve().parents[4] / "debug-a2845b.log"
+_DEBUG_SESSION_ID = "a2845b"
+
+
+def _normalize_progress_fields(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Map camelCase callback fields to report_progress keyword arguments."""
+    normalized = dict(kwargs)
+    field_aliases = {
+        "gameAccountId": "game_account_id",
+        "todayCompleted": "today_completed",
+        "dailyLimit": "daily_limit",
+        "errorCode": "error_code",
+        "errorDetails": "error_details",
+    }
+    for source_key, target_key in field_aliases.items():
+        if source_key in normalized and target_key not in normalized:
+            normalized[target_key] = normalized.pop(source_key)
+    return normalized
+
+
+def _write_progress_debug_log(
+    location: str,
+    message: str,
+    data: Dict[str, Any],
+    hypothesis_id: str = "H-progress",
+) -> None:
+    # #region agent log
+    try:
+        payload = {
+            "sessionId": _DEBUG_SESSION_ID,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as log_file:
+            log_file.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
 
 from ..core.logger import get_logger
 from ..core.config import config
@@ -132,8 +176,23 @@ class PlatformApiClient:
         - **kwargs: 其他字段
 
         返回：
-        - dict: 包含 received, action (CONTINUE|STOP|CANCEL) 等
+        - dict: 包含 received, action (CONTINUE|STOP|CANCEL) 等；失败时包含 success=False
         """
+        kwargs = _normalize_progress_fields(kwargs)
+        game_account_id = game_account_id or kwargs.pop("game_account_id", None)
+        today_completed = (
+            today_completed
+            if today_completed is not None
+            else kwargs.pop("today_completed", None)
+        )
+        daily_limit = (
+            daily_limit
+            if daily_limit is not None
+            else kwargs.pop("daily_limit", None)
+        )
+        error_code = error_code or kwargs.pop("error_code", None)
+        error_details = error_details or kwargs.pop("error_details", None)
+
         url = self._get_callback_url('progress')
         headers = await self._get_headers()
 
@@ -166,26 +225,84 @@ class PlatformApiClient:
 
         payload['data'].update(kwargs)
 
-        try:
-            self.logger.info(f"【v2.0】统一进度上报 - URL: {url}, TaskID: {task_id}, Step: {step}, Status: {status}")
-            session = await self._get_session()
-            async with session.post(url, json=payload, headers=headers,
-                                   timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    if result.get('code') == 200:
-                        self.logger.info(f"进度上报成功 - TaskID: {task_id}, Action: {result.get('data', {}).get('action')}")
-                        return result.get('data', {})
+        _write_progress_debug_log(
+            "platform_api_client.py:report_progress",
+            "progress_request",
+            {
+                "taskId": task_id,
+                "step": step,
+                "status": status,
+                "hasMetrics": "metrics" in payload["data"],
+                "hasGameAccountId": game_account_id is not None,
+                "hasError": "error" in payload["data"],
+            },
+            hypothesis_id="H1",
+        )
+
+        last_error: Optional[str] = None
+        for attempt in range(self._retry_count):
+            try:
+                self.logger.info(
+                    f"【v2.0】统一进度上报 - URL: {url}, TaskID: {task_id}, "
+                    f"Step: {step}, Status: {status}, Attempt: {attempt + 1}/{self._retry_count}"
+                )
+                session = await self._get_session()
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        if result.get('code') == 200:
+                            action = result.get('data', {}).get('action')
+                            self.logger.info(
+                                f"进度上报成功 - TaskID: {task_id}, Action: {action}"
+                            )
+                            _write_progress_debug_log(
+                                "platform_api_client.py:report_progress",
+                                "progress_success",
+                                {
+                                    "taskId": task_id,
+                                    "step": step,
+                                    "status": status,
+                                    "action": action,
+                                    "attempt": attempt + 1,
+                                },
+                                hypothesis_id="H1",
+                            )
+                            return result.get('data', {})
+                        last_error = (
+                            f"业务码失败: code={result.get('code')}, "
+                            f"message={result.get('message')}"
+                        )
                     else:
-                        self.logger.warning(f"进度上报失败 - Code: {result.get('code')}, Message: {result.get('message')}")
-                        return {}
-                else:
-                    response_body = await response.text()
-                    self.logger.warning(f"进度上报HTTP错误: {response.status}, 响应: {response_body}")
-                    return {}
-        except Exception as e:
-            self.logger.error(f"进度上报异常: {e}")
-            return {}
+                        response_body = await response.text()
+                        last_error = f"HTTP {response.status}: {response_body[:200]}"
+            except Exception as e:
+                last_error = str(e)
+
+            if attempt < self._retry_count - 1:
+                await asyncio.sleep(self._retry_delay * (attempt + 1))
+
+        self.logger.error(
+            f"进度上报最终失败 - TaskID: {task_id}, Step: {step}, "
+            f"Status: {status}, Error: {last_error}"
+        )
+        _write_progress_debug_log(
+            "platform_api_client.py:report_progress",
+            "progress_failed",
+            {
+                "taskId": task_id,
+                "step": step,
+                "status": status,
+                "error": last_error,
+                "attempts": self._retry_count,
+            },
+            hypothesis_id="H1",
+        )
+        return {"success": False, "error": last_error}
 
     async def get_task_info(self, task_id: str) -> Optional[Dict[str, Any]]:
         """

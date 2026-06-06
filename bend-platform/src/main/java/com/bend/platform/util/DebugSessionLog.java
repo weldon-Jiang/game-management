@@ -14,7 +14,7 @@ import java.util.Map;
  */
 public final class DebugSessionLog {
 
-    private static final String SESSION_ID = "ba0362";
+    private static final String SESSION_ID = "25877d";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private DebugSessionLog() {
@@ -40,8 +40,8 @@ public final class DebugSessionLog {
     private static Path resolveLogPath() {
         Path cwd = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
         if ("bend-platform".equals(cwd.getFileName().toString())) {
-            return cwd.getParent().resolve("debug-ba0362.log");
+            return cwd.getParent().resolve("debug-25877d.log");
         }
-        return cwd.resolve("debug-ba0362.log");
+        return cwd.resolve("debug-25877d.log");
     }
 }

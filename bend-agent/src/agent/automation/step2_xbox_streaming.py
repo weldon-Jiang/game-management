@@ -32,7 +32,9 @@
 """
 
 import asyncio
+import json
 import random
+import time
 from typing import Callable, Optional, Dict, Any, List
 
 from ..core.logger import get_logger
@@ -41,6 +43,38 @@ from ..task.task_context import AgentTaskContext, Step2Result, XboxInfo, TaskSte
 from ..xbox.xbox_host_matcher import XboxHostMatcher, XboxMatchResult
 
 # 注意: XboxMatchResult 现在从 xbox_host_matcher 导入，包含详细的错误信息
+
+_DEBUG_LOG_PATH = r"d:\auto-xbox\team-management\debug-e7595f.log"
+
+
+def _debug_log(hypothesis_id: str, location: str, message: str, data: Dict[str, Any]) -> None:
+    # #region agent log
+    try:
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "sessionId": "e7595f",
+                "hypothesisId": hypothesis_id,
+                "location": location,
+                "message": message,
+                "data": data,
+                "timestamp": int(time.time() * 1000),
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
+
+def _format_xbox_match_message(match_result: XboxMatchResult) -> str:
+    """Format Xbox match failure/success message from XboxMatchResult fields."""
+    reason = match_result.match_reason or "Xbox主机匹配失败"
+    if match_result.error_code:
+        msg = f"[{match_result.error_code}] {reason}"
+    else:
+        msg = reason
+    suggestion = (match_result.error_details or {}).get("suggestion")
+    if suggestion:
+        msg += f"; 解决方案: {suggestion}"
+    return msg
 
 
 async def step2_execute_streaming(
@@ -102,12 +136,24 @@ async def step2_execute_streaming(
         match_result = await _match_xbox_host(context, logger, stream_logger, check_cancel)
 
         if not match_result.success:
-            logger.error(f"Xbox主机匹配失败: {match_result.message}")
-            stream_logger.error(f"Xbox主机匹配失败: {match_result.message}")
-            context.update_step_status("step2", TaskStepStatus.FAILED, match_result.message)
-            await report_progress(context.task_id, "STEP2", "FAILED", match_result.message)
-            return Step2Result(success=False, error_code="XBOX_MATCH_FAILED",
-                             message=match_result.message)
+            fail_msg = _format_xbox_match_message(match_result)
+            # #region agent log
+            _debug_log("C", "step2_xbox_streaming.py:step2_execute_streaming",
+                       "match failed reporting", {
+                           "error_code": match_result.error_code,
+                           "match_reason": match_result.match_reason,
+                           "fail_msg": fail_msg,
+                       })
+            # #endregion
+            logger.error(f"Xbox主机匹配失败: {fail_msg}")
+            stream_logger.error(f"Xbox主机匹配失败: {fail_msg}")
+            context.update_step_status("step2", TaskStepStatus.FAILED, fail_msg)
+            await report_progress(context.task_id, "STEP2", "FAILED", fail_msg)
+            return Step2Result(
+                success=False,
+                error_code=match_result.error_code or "XBOX_MATCH_FAILED",
+                message=fail_msg,
+            )
 
         # 校验Xbox主机是否已被其他任务占用
         xbox_id = match_result.xbox_info.id or match_result.xbox_info.live_id or match_result.xbox_info.mac_address
@@ -125,7 +171,7 @@ async def step2_execute_streaming(
         context.current_xbox = match_result.xbox_info
         logger.info(f"Xbox匹配成功: {match_result.xbox_info.name} "
                    f"({match_result.xbox_info.ip_address}), "
-                   f"匹配方式: {match_result.match_type}")
+                   f"匹配原因: {match_result.match_reason}")
         stream_logger.info(f"Xbox匹配成功: {match_result.xbox_info.name} "
                           f"({match_result.xbox_info.ip_address})")
 
@@ -235,8 +281,8 @@ async def _match_xbox_host(
         return XboxMatchResult(
             success=False,
             xbox_info=None,
-            match_type="no_token",
-            message=error_msg
+            match_reason=error_msg,
+            error_code="NO_TOKEN",
         )
     
     if context.assigned_xbox:
@@ -250,8 +296,7 @@ async def _match_xbox_host(
             return XboxMatchResult(
                 success=True,
                 xbox_info=context.assigned_xbox,
-                match_type="assigned",
-                message="使用指定的Xbox主机"
+                match_reason="使用指定的Xbox主机",
             )
         else:
             logger.warning(f"指定的Xbox主机不在线: {context.assigned_xbox.ip_address}")
@@ -269,8 +314,7 @@ async def _match_xbox_host(
                     return XboxMatchResult(
                         success=True,
                         xbox_info=context.assigned_xbox,
-                        match_type="assigned_wakeup",
-                        message=f"唤醒 Xbox 成功: {context.assigned_xbox.name}"
+                        match_reason=f"唤醒 Xbox 成功: {context.assigned_xbox.name}",
                     )
                 else:
                     error_msg = f"唤醒 Xbox 失败: {wakeup_result.error_message}"
@@ -278,15 +322,15 @@ async def _match_xbox_host(
                     return XboxMatchResult(
                         success=False,
                         xbox_info=None,
-                        match_type="assigned_wakeup_failed",
-                        message=error_msg
+                        match_reason=error_msg,
+                        error_code="ASSIGNED_WAKEUP_FAILED",
                     )
             
             return XboxMatchResult(
                 success=False,
                 xbox_info=None,
-                match_type="assigned",
-                message=f"指定的Xbox主机不在线: {context.assigned_xbox.ip_address}"
+                match_reason=f"指定的Xbox主机不在线: {context.assigned_xbox.ip_address}",
+                error_code="ASSIGNED_OFFLINE",
             )
     
     logger.info("未指定Xbox主机，开始智能匹配...")
@@ -301,34 +345,28 @@ async def _match_xbox_host(
         wakeup_timeout=30
     )
     
-    if match_result and match_result.xbox_info:
+    if match_result and match_result.success and match_result.xbox_info:
         xbox_info = match_result.xbox_info
         stream_logger.info(f"智能匹配成功: {xbox_info.name}")
-        return XboxMatchResult(
-            success=True,
-            xbox_info=xbox_info,
-            match_type="smart_matched",
-            message=f"智能匹配 Xbox: {xbox_info.name}"
-        )
+        if not match_result.match_reason:
+            match_result.match_reason = f"智能匹配 Xbox: {xbox_info.name}"
+        return match_result
     else:
-        # 匹配失败，使用详细的错误信息
-        error_code = match_result.error_code if match_result else "UNKNOWN"
-        error_reason = match_result.match_reason if match_result else "没有找到可用的授权 Xbox 主机"
-        error_details = match_result.error_details if match_result else {}
-        
-        # 生成详细的错误消息
-        detailed_error_msg = f"[{error_code}] {error_reason}"
-        if "suggestion" in error_details:
-            detailed_error_msg += f"; 解决方案: {error_details['suggestion']}"
-        
-        logger.error(f"Xbox 智能匹配失败: {detailed_error_msg}")
-        _print_no_match_help(logger, error_code, error_details)
-        
+        # #region agent log
+        _debug_log("A", "step2_xbox_streaming.py:_match_xbox_host",
+                   "smart match failed branch", {
+                       "has_match_result": match_result is not None,
+                       "error_code": match_result.error_code if match_result else None,
+                       "match_reason": match_result.match_reason if match_result else None,
+                   })
+        # #endregion
+        if match_result:
+            return match_result
         return XboxMatchResult(
             success=False,
             xbox_info=None,
-            match_type="no_match",
-            message=detailed_error_msg
+            match_reason="没有找到可用的授权 Xbox 主机",
+            error_code="UNKNOWN",
         )
 
 

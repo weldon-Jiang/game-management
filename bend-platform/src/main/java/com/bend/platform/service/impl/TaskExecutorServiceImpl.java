@@ -1,5 +1,6 @@
 package com.bend.platform.service.impl;
 
+import com.bend.platform.dto.LoginUserInfo;
 import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.Task;
 import com.bend.platform.entity.TaskGameAccountStatus;
@@ -9,6 +10,7 @@ import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.TaskExecutorService;
 import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.util.DebugSessionLog;
+import com.bend.platform.util.UserContext;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,7 +49,32 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
 
     @Override
     public CompletableFuture<Void> executeTaskAsync(Task task) {
-        return CompletableFuture.runAsync(() -> executeTask(task), taskExecutor);
+        LoginUserInfo userInfo = UserContext.getUserInfo();
+        if (userInfo == null && task.getMerchantId() != null) {
+            userInfo = LoginUserInfo.builder()
+                    .merchantId(task.getMerchantId())
+                    .userId(task.getCreatedBy())
+                    .role("merchant_owner")
+                    .build();
+        }
+        final LoginUserInfo contextUser = userInfo;
+        return CompletableFuture.runAsync(() -> {
+            try {
+                if (contextUser != null) {
+                    UserContext.setUserInfo(contextUser);
+                }
+                // #region agent log
+                DebugSessionLog.log("H1", "TaskExecutorServiceImpl.executeTaskAsync", "async_user_context",
+                        Map.of("taskId", task.getId(),
+                                "hasContext", contextUser != null,
+                                "merchantId", contextUser != null ? String.valueOf(contextUser.getMerchantId()) : "null",
+                                "role", contextUser != null ? String.valueOf(contextUser.getRole()) : "null"));
+                // #endregion
+                executeTask(task);
+            } finally {
+                UserContext.clear();
+            }
+        }, taskExecutor);
     }
 
     @Override

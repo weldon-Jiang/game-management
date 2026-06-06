@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS `streaming_account` (
     KEY `idx_merchant_id` (`merchant_id`),
     KEY `idx_agent_id` (`agent_id`),
     KEY `idx_status` (`status`),
-    KEY `idx_deleted` (`deleted`)
+    KEY `idx_deleted` (`deleted`),
+    CONSTRAINT `chk_streaming_account_status` CHECK (`status` IN ('idle','ready','running','paused','error','busy'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='流媒体账号表';
 
 -- ---------------------------------------------

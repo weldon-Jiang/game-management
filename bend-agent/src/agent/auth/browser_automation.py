@@ -292,14 +292,59 @@ class DeviceCodeAuthenticator:
         - True: 认证成功
         - False: 认证失败
         """
-        # 保存auto_code
         if auto_code:
             self._auto_code = auto_code
-        
-        # 后续保持原有逻辑...
-        return await self._execute_auth_flow(
-            verification_url, user_code, email, password, timeout
+
+        config = AuthConfig(
+            verification_url=verification_url,
+            user_code=user_code,
+            email=email,
+            password=password,
+            timeout=timeout
         )
+
+        total_start_time = time.perf_counter()
+        self._logger.info(f"========== 开始设备码认证流程 (账号: {email}) ==========")
+
+        try:
+            self._state = BrowserState.LAUNCHING
+            self._timer.start("浏览器启动")
+            if not await self._launch_browser():
+                self._logger.error("启动浏览器失败")
+                return False
+            self._timer.end("浏览器启动")
+
+            self._state = BrowserState.AUTHENTICATING
+            self._timer.start("认证流程")
+            success = await self._execute_auth_flow(config)
+            self._timer.end("认证流程")
+
+            if success:
+                self._state = BrowserState.SUCCESS
+                self._logger.info("设备码认证成功")
+            else:
+                self._state = BrowserState.FAILED
+                self._logger.error("认证流程失败")
+
+            self._timer.start("浏览器关闭")
+            await self._close_browser()
+            self._timer.end("浏览器关闭")
+
+            total_duration = time.perf_counter() - total_start_time
+            self._logger.info("========== 认证流程完成 ==========")
+            self._logger.info(f"整体耗时: {total_duration:.2f}秒")
+            for step, duration in self._timer.get_summary().items():
+                self._logger.info(f"  - {step}: {duration:.2f}秒")
+
+            return success
+
+        except Exception as e:
+            self._logger.error(f"认证异常: {e}", exc_info=True)
+            self._state = BrowserState.FAILED
+            total_duration = time.perf_counter() - total_start_time
+            self._logger.error(f"认证失败，总耗时: {total_duration:.2f}秒")
+            await self._close_browser()
+            return False
 
     async def _launch_browser(self) -> bool:
         """
@@ -962,6 +1007,8 @@ class DeviceCodeAuthenticator:
             return False
         except:
             return False
+
+    async def _execute_auth_flow(self, config: AuthConfig) -> bool:
         """
         执行完整的认证流程
 
@@ -971,11 +1018,6 @@ class DeviceCodeAuthenticator:
         返回：
         - True: 认证成功
         - False: 认证失败
-        
-        性能优化：
-        - 使用 page.wait_for_load_state() 替代固定sleep
-        - 优化元素等待策略
-        - 添加每个步骤的计时
         """
         try:
             self._logger.info(f"导航到验证URL: {config.verification_url}")
@@ -1457,7 +1499,7 @@ class DeviceCodeAuthenticator:
                 await self._browser.close()
                 self._browser = None
 
-            if hasattr(self, '_playwright'):
+            if getattr(self, '_playwright', None):
                 await self._playwright.stop()
                 self._playwright = None
 
