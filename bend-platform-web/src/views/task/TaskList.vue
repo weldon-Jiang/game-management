@@ -181,15 +181,6 @@
               显示窗口
             </el-button>
             <el-button
-              v-if="row.status === 'running' && row.targetAgentId"
-              type="info"
-              link
-              size="small"
-              @click="handleHideWindow(row)"
-            >
-              隐藏窗口
-            </el-button>
-            <el-button
               v-if="row.status === 'pending'"
               type="danger"
               link
@@ -616,19 +607,6 @@ const handleShowWindow = async (task) => {
     }
   } catch (error) {
     ElMessage.error('显示窗口失败')
-  }
-}
-
-const handleHideWindow = async (task) => {
-  try {
-    const res = await taskApi.hideWindow(task.id)
-    if (res.code === 0 || res.code === 200) {
-      ElMessage.success('窗口隐藏命令已发送')
-    } else {
-      ElMessage.error(res.message || '隐藏窗口失败')
-    }
-  } catch (error) {
-    ElMessage.error('隐藏窗口失败')
   }
 }
 

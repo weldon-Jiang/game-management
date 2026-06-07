@@ -117,6 +117,6 @@ class XHomeStreamService:
         media.context.frame_capture = None
 
     async def reopen_display(self, media: MediaSession) -> bool:
-        from ..automation.step3_streaming_init import step3_reopen_display
+        from ..automation.step3_streaming_init import step3_ensure_display
 
-        return await step3_reopen_display(media.context)
+        return await step3_ensure_display(media.context)

@@ -1,10 +1,11 @@
 <template>
   <div class="task-control-bar">
-    <el-button-group>
-      <el-button @click="$emit('window', 'show')">打开窗口</el-button>
-      <el-button @click="$emit('window', 'hide')">隐藏窗口</el-button>
-      <el-button @click="$emit('window', 'focus')">置顶</el-button>
-    </el-button-group>
+    <el-button
+      v-if="canShowWindow"
+      @click="$emit('window', 'show')"
+    >
+      显示窗口
+    </el-button>
 
     <span v-if="gameActionType" class="mode-label">自动化: {{ gameActionLabel }}</span>
 
@@ -63,7 +64,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { isTaskTerminal } from '@/utils/constants'
+import { isTaskTerminal, getGameActionTypeText } from '@/utils/constants'
 
 const props = defineProps({
   taskStatus: { type: String, default: '' },
@@ -95,6 +96,12 @@ const canCancel = computed(
 
 const canTerminate = computed(() => !isTerminal.value)
 
+const canShowWindow = computed(() => {
+  if (isTerminal.value) return false
+  const phase = (props.sessionPhase || '').toLowerCase()
+  return phase && phase !== 'opening' && phase !== 'closed' && phase !== 'failed'
+})
+
 const canReconnect = computed(() => {
   if (isTerminal.value) return false
   const phase = (props.sessionPhase || '').toLowerCase()
@@ -103,15 +110,7 @@ const canReconnect = computed(() => {
   ) || phase.startsWith('paused')
 })
 
-const gameActionLabel = computed(() => {
-  const map = {
-    squad_battle: 'SQB',
-    auction_transfer: '转会',
-    transfer_sqb_combo: '转会+SQB',
-    divisions_rivals: 'DR'
-  }
-  return map[props.gameActionType] || props.gameActionType
-})
+const gameActionLabel = computed(() => getGameActionTypeText(props.gameActionType))
 </script>
 
 <style scoped>

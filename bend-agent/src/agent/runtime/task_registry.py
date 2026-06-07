@@ -38,6 +38,14 @@ class StreamingAccountTaskRuntime:
         phase: SessionPhase,
         message: str = "",
     ) -> SessionPhase:
+        if not self.phase_fsm.can_transition(phase):
+            get_logger("task_registry").warning(
+                "Ignored invalid phase transition: %s -> %s (%s)",
+                self.phase_fsm.phase.value,
+                phase.value,
+                message,
+            )
+            return self.phase_fsm.phase
         self.phase_fsm.transition(phase)
         if self.on_phase_change:
             result = self.on_phase_change(phase, message)

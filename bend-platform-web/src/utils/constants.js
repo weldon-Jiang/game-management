@@ -118,7 +118,12 @@ export const GAME_ACTION_TYPE_MAP = {
   squad_battle: { text: 'SQB模式', visible: true },
   transfer_sqb_combo: { text: '转会+SQB组合', visible: true },
   divisions_rivals: { text: 'DR模式', visible: true },
-  weekend_league: { text: '周赛', visible: false }
+  weekend_league: { text: '周赛', visible: false },
+  // 历史/默认类型（后端存量数据）
+  daily_match: { text: '每日比赛', visible: false },
+  training: { text: '训练模式', visible: false },
+  mission: { text: '任务挑战', visible: false },
+  custom: { text: '自定义操作', visible: false }
 }
 
 export const PLATFORM_TYPES = [
@@ -394,11 +399,42 @@ export const GAME_ACCOUNT_PHASE_MAP = {
 }
 
 export const PROVISIONING_PHASE_MAP = {
+  idle: '空闲',
+  detecting: '检测中',
+  adding: '添加账号',
+  verifying: '校验中',
+  ready: '准备完成',
+  failed: '失败',
+  skipped: '已跳过',
   login: '登录游戏',
   navigate: '导航中',
   switch_account: '切换账号',
-  calibrate: '校准位置',
-  ready: '准备完成'
+  calibrate: '校准位置'
+}
+
+/** 任务事件 scope 中文 */
+export const TASK_EVENT_SCOPE_MAP = {
+  task: '任务',
+  session: '会话',
+  game_account: '游戏账号',
+  module: '模块'
+}
+
+/** Agent 上报的英文事件消息 → 中文 */
+export const TASK_EVENT_MESSAGE_MAP = {
+  'Session closed': '会话已关闭',
+  'Closing session': '正在关闭会话',
+  'SESSION_READY': '串流就绪',
+  'Reconnected': '重连成功',
+  'Reconnecting': '正在重连',
+  'Opening stream': '正在打开串流',
+  'Window + decode ready': '窗口与解码就绪',
+  'Authenticating': '正在认证',
+  'Discovering console': '正在发现主机',
+  'Cancelled': '已取消',
+  'Account skipped': '账号已跳过',
+  'Input mode: virtual': '输入模式：虚拟手柄',
+  'Input mode: physical': '输入模式：实体手柄'
 }
 
 export const getSessionPhaseText = (phase) => {
@@ -434,5 +470,36 @@ export const getGameAccountPhaseText = (phase) => {
 
 export const getProvisioningPhaseText = (phase) => {
   if (!phase) return ''
-  return PROVISIONING_PHASE_MAP[phase] || phase
+  const key = String(phase).toLowerCase()
+  return PROVISIONING_PHASE_MAP[key] || phase
+}
+
+export const getTaskEventScopeText = (scope) => {
+  if (!scope) return '任务'
+  const key = String(scope).toLowerCase()
+  return TASK_EVENT_SCOPE_MAP[key] || scope
+}
+
+export const getTaskEventPhaseText = (phase, scope) => {
+  if (!phase) return ''
+  const key = String(phase).toLowerCase()
+  if (scope === 'module') {
+    return PROVISIONING_PHASE_MAP[key] || phase
+  }
+  if (SESSION_PHASE_MAP[key]) return SESSION_PHASE_MAP[key].text
+  if (key.startsWith('paused')) return '已暂停'
+  return PROVISIONING_PHASE_MAP[key] || phase
+}
+
+export const getTaskEventMessageText = (message) => {
+  if (!message) return ''
+  const trimmed = String(message).trim()
+  if (TASK_EVENT_MESSAGE_MAP[trimmed]) return TASK_EVENT_MESSAGE_MAP[trimmed]
+  const inputModeMatch = trimmed.match(/^Input mode:\s*(\w+)$/i)
+  if (inputModeMatch) {
+    const mode = inputModeMatch[1].toLowerCase()
+    const modeText = mode === 'physical' ? '实体手柄' : mode === 'virtual' ? '虚拟手柄' : mode
+    return `输入模式：${modeText}`
+  }
+  return message
 }

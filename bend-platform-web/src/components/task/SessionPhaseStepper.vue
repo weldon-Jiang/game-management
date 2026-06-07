@@ -1,6 +1,6 @@
 <template>
   <el-steps :active="activeIndex" finish-status="success" align-center>
-    <el-step title="认证" description="MS/xHome" />
+    <el-step title="认证" description="微软/xHome" />
     <el-step title="发现主机" />
     <el-step title="串流就绪" />
     <el-step title="选择模式" />

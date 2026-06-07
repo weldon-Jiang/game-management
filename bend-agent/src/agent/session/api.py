@@ -156,9 +156,12 @@ class StreamingSession:
         # step3/SDL already owns pygame — avoid re-init joystick (causes native crash on Windows).
         return "virtual"
 
-    async def close(self) -> None:
-        await self._emit_phase(SessionPhase.CLOSING, "Closing session")
+    async def close(self, emit_phases: bool = True) -> None:
+        """Tear down media; optionally emit CLOSING/CLOSED session phases."""
+        if emit_phases:
+            await self._emit_phase(SessionPhase.CLOSING, "Closing session")
         if self.media:
             await self._stream.close(self.media)
             self.media = None
-        await self._emit_phase(SessionPhase.CLOSED, "Session closed")
+        if emit_phases:
+            await self._emit_phase(SessionPhase.CLOSED, "Session closed")

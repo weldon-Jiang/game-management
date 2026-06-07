@@ -386,14 +386,60 @@ async def step3_close_display(context: AgentTaskContext) -> None:
         context.sdl_window = None
 
 
-async def step3_reopen_display(context: AgentTaskContext) -> bool:
+def _sdl_window_is_active(sdl: Any) -> bool:
+    """True when SDL window object exists and is still running (not user-closed)."""
+    if sdl is None:
+        return False
+    if getattr(sdl, "is_running", False):
+        return True
+    return bool(getattr(sdl, "_running", False))
+
+
+async def step3_ensure_display(context: AgentTaskContext) -> bool:
+    """
+    Ensure SDL display is visible for the task.
+
+    - Active window already present → show + refresh display pump (skip recreate)
+    - User closed / destroyed → recreate from existing stream context
+    """
+    logger = get_logger(f"step3_display_{context.task_id}")
+    stream_logger = get_stream_logger(context.streaming_account_email)
+
+    if not context.enable_window_display:
+        logger.info("窗口显示已禁用，跳过")
+        return False
+
+    if not context.frame_capture and not getattr(context, "_webrtc_frame_controller", None):
+        logger.warning("无法显示窗口：frame_capture / WebRTC 未就绪")
+        return False
+
+    sdl = context.sdl_window
+    if _sdl_window_is_active(sdl):
+        logger.info("任务窗口已存在，跳过创建，仅恢复显示")
+        if hasattr(sdl, "show"):
+            sdl.show()
+        _wire_sdl_close_handler(context)
+        await _start_sdl_display_pump(context, logger)
+        return True
+
+    if sdl is not None:
+        context.sdl_window = None
+
+    return await step3_reopen_display(context, logger=logger, stream_logger=stream_logger)
+
+
+async def step3_reopen_display(
+    context: AgentTaskContext,
+    logger=None,
+    stream_logger=None,
+) -> bool:
     """
     Re-open SDL display using existing WebRTC/frame_capture context.
 
     Skips auth, discovery, and stream negotiation.
     """
-    logger = get_logger(f"step3_display_{context.task_id}")
-    stream_logger = get_stream_logger(context.streaming_account_email)
+    logger = logger or get_logger(f"step3_display_{context.task_id}")
+    stream_logger = stream_logger or get_stream_logger(context.streaming_account_email)
 
     if not context.enable_window_display:
         logger.info("窗口显示已禁用，跳过重新打开")
@@ -403,9 +449,10 @@ async def step3_reopen_display(context: AgentTaskContext) -> bool:
         logger.warning("无法重新打开窗口：frame_capture / WebRTC 未就绪")
         return False
 
-    if context.sdl_window is not None:
+    if _sdl_window_is_active(context.sdl_window):
         if hasattr(context.sdl_window, "show"):
             context.sdl_window.show()
+        _wire_sdl_close_handler(context)
         await _start_sdl_display_pump(context, logger)
         return True
 

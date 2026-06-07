@@ -119,18 +119,15 @@ class TaskControlHandler:
         return {"success": True, "terminated": True}
 
     async def _show_window(self, runtime, data: Dict) -> Dict:
-        runtime.window_visible = True
-        if self._scheduler and hasattr(self._scheduler, "reopen_display_window"):
-            ok = await self._scheduler.reopen_display_window(runtime.task_id)
-            if not ok:
-                wm = runtime.modules.get("window_manager")
-                if wm:
-                    await wm.show_by_task(runtime.task_id)
+        if self._scheduler and hasattr(self._scheduler, "ensure_display_window"):
+            ok = await self._scheduler.ensure_display_window(runtime.task_id)
             return {"success": ok, "windowVisible": ok}
         wm = runtime.modules.get("window_manager")
         if wm:
-            await wm.show_by_task(runtime.task_id)
-        return {"success": True, "windowVisible": True}
+            ok = await wm.show_by_task(runtime.task_id)
+            runtime.window_visible = ok
+            return {"success": ok, "windowVisible": ok}
+        return {"success": False, "windowVisible": False, "error": "No window manager"}
 
     async def _hide_window(self, runtime, data: Dict) -> Dict:
         runtime.window_visible = False

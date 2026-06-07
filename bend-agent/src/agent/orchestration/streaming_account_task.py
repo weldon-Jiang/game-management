@@ -97,6 +97,13 @@ class StreamingAccountTask:
                 self._decode_mode = open_result.media.decode_mode
                 self._sync_media_context(open_result.media.context)
 
+            try:
+                from ..automation.step3_streaming_init import step3_ensure_display
+                if await step3_ensure_display(self.context):
+                    self.runtime.window_visible = True
+            except Exception as exc:
+                self.logger.warning("默认打开显示窗口失败: %s", exc)
+
             provisioning = AccountProvisioningModule(
                 task_id=task_id,
                 scene_detector=getattr(self.context, "_streaming_scene_detector", None),
@@ -116,10 +123,15 @@ class StreamingAccountTask:
 
             self.runtime.set_phase(SessionPhase.AUTOMATING, "Automation running")
             try:
-                from ..automation.step3_streaming_init import _stop_sdl_display_pump
+                from ..automation.step3_streaming_init import (
+                    step3_ensure_display,
+                    _stop_sdl_display_pump,
+                )
+                await step3_ensure_display(self.context)
+                self.runtime.window_visible = True
                 await _stop_sdl_display_pump(self.context)
-            except Exception:
-                pass
+            except Exception as exc:
+                self.logger.warning("自动化开始前恢复显示窗口失败: %s", exc)
             step4_result = await step4_execute_gaming(
                 self.context,
                 check_cancel,
@@ -141,8 +153,9 @@ class StreamingAccountTask:
                     total_matches=step4_result.total_matches,
                 )
 
-            await self._cleanup_session(session, destroy_window=True)
             self.runtime.set_phase(SessionPhase.FAILED, step4_result.message)
+            await self._report_session(SessionPhase.FAILED, step4_result.message)
+            await self._cleanup_session(session, destroy_window=True, emit_session_phases=False)
             return AutomationResult(
                 success=False,
                 failed_step="STEP4",
@@ -156,8 +169,10 @@ class StreamingAccountTask:
             return AutomationResult(success=False, error_code="CANCELLED", message="Cancelled")
         except Exception as exc:
             self.logger.error("StreamingAccountTask failed: %s", exc, exc_info=True)
-            await self._cleanup_session(session, destroy_window=True)
-            self.runtime.set_phase(SessionPhase.FAILED, str(exc))
+            if not self.runtime.phase_fsm.is_terminal():
+                self.runtime.set_phase(SessionPhase.FAILED, str(exc))
+                await self._report_session(SessionPhase.FAILED, str(exc))
+            await self._cleanup_session(session, destroy_window=True, emit_session_phases=False)
             return AutomationResult(success=False, error_code="EXCEPTION", message=str(exc))
         finally:
             focus.pop(task_id)
@@ -214,13 +229,18 @@ class StreamingAccountTask:
             "macAddress": xb.mac_address,
         }
 
-    async def _cleanup_session(self, session: StreamingSession, destroy_window: bool) -> None:
+    async def _cleanup_session(
+        self,
+        session: StreamingSession,
+        destroy_window: bool,
+        emit_session_phases: bool = True,
+    ) -> None:
         try:
             from ..automation.step3_streaming_init import _stop_sdl_display_pump
             await _stop_sdl_display_pump(self.context)
         except Exception:
             pass
-        await session.close()
+        await session.close(emit_phases=emit_session_phases)
         if destroy_window:
             sdl = self.context.sdl_window
             if sdl:

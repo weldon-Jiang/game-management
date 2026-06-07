@@ -58,5 +58,9 @@ class StreamingWindowManager:
         await self._inner.close_all_windows()
         self._visibility.clear()
 
+    async def close_all_windows(self) -> None:
+        """Alias for scheduler/legacy callers."""
+        await self.close_all()
+
     def get_window_id_by_task(self, task_id: str) -> Optional[str]:
         return self._inner.get_window_id_by_task(task_id)

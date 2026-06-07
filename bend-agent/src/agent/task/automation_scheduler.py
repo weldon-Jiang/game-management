@@ -558,24 +558,28 @@ class AutomationScheduler:
         self.logger.info("任务 %s 显示窗口已关闭（自动化继续）", task_id)
         return True
 
-    async def reopen_display_window(self, task_id: str) -> bool:
-        """Recreate SDL window from existing stream context (no re-auth)."""
+    async def ensure_display_window(self, task_id: str) -> bool:
+        """Show existing SDL window or recreate if user closed it."""
         context = self._task_contexts.get(task_id)
         if not context:
-            self.logger.warning("reopen_display_window: no context for %s", task_id)
+            self.logger.warning("ensure_display_window: no context for %s", task_id)
             return False
 
-        from ..automation.step3_streaming_init import step3_reopen_display
+        from ..automation.step3_streaming_init import step3_ensure_display
 
-        ok = await step3_reopen_display(context)
+        ok = await step3_ensure_display(context)
         runtime = self._registry.get(task_id)
-        if runtime and ok:
-            runtime.window_visible = True
+        if runtime:
+            runtime.window_visible = ok
         if ok:
-            self.logger.info("任务 %s 显示窗口已重新打开", task_id)
+            self.logger.info("任务 %s 显示窗口已就绪", task_id)
         else:
-            self.logger.warning("任务 %s 显示窗口重新打开失败", task_id)
+            self.logger.warning("任务 %s 显示窗口失败", task_id)
         return ok
+
+    async def reopen_display_window(self, task_id: str) -> bool:
+        """Alias for ensure_display_window (recreate when closed, skip when active)."""
+        return await self.ensure_display_window(task_id)
 
     async def force_terminate_task(self, task_id: str) -> bool:
         """Cancel task, destroy SDL window, and disconnect stream."""
