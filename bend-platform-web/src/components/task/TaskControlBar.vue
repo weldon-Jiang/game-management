@@ -80,6 +80,7 @@ const selectedMode = ref('squad_battle')
 
 const isTerminal = computed(() => isTaskTerminal(props.taskStatus))
 
+// READY 和 AUTOMATION_FAILED 都保留串流窗口，可在不重跑 Step1-3 的情况下启动或重试 Step4。
 const canStartAutomation = computed(
   () =>
     !isTerminal.value &&
@@ -94,6 +95,7 @@ const isAutomating = computed(
   () => !isTerminal.value && props.sessionPhase === 'automating'
 )
 
+// cancel 保留“按任务语义取消”，terminate 是强制终止；终态任务不再显示控制入口。
 const canCancel = computed(
   () => props.taskStatus === 'pending' || props.taskStatus === 'running'
 )
@@ -103,12 +105,14 @@ const canTerminate = computed(() => !isTerminal.value)
 const canShowWindow = computed(() => {
   if (isTerminal.value) return false
   const phase = (props.sessionPhase || '').toLowerCase()
+  // opening/closed/failed 没有可接管窗口，其余串流阶段允许用户手动显示。
   return phase && phase !== 'opening' && phase !== 'closed' && phase !== 'failed'
 })
 
 const canReconnect = computed(() => {
   if (isTerminal.value) return false
   const phase = (props.sessionPhase || '').toLowerCase()
+  // 只在已有串流或显示初始化上下文时允许重连，避免对未建立会话的任务下发无效控制。
   return ['streaming', 'ready', 'automating', 'automation_failed', 'initializing_display', 'initializing_input'].some(
     (p) => phase.includes(p)
   ) || phase.startsWith('paused')

@@ -12,12 +12,25 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * 任务游戏账号状态服务实现。
+ *
+ * <p>该服务维护任务维度下每个游戏账号的生命周期：创建初始占用记录、更新比赛进度、
+ * 切换账号级状态、取消任务时释放未终态账号。状态变更会影响前端任务详情展示，也会被
+ * 余额预占和账号占用校验读取。
+ */
 @Service
 public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusService {
 
     @Autowired
     private TaskGameAccountStatusMapper statusMapper;
 
+    /**
+     * 为任务批量创建账号状态记录。
+     *
+     * <p>初始状态为 pending，sessionId 绑定当前长寿命串流会话；dailyLimits 与
+     * gameAccountIds 按下标对应，缺省时使用 3 场作为兼容默认值。
+     */
     @Override
     @Transactional
     public void createStatusRecords(String taskId, List<String> gameAccountIds, List<Integer> dailyLimits,
@@ -40,11 +53,13 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         }
     }
 
+    /** 查询任务下所有游戏账号状态，供任务详情和进度统计使用。 */
     @Override
     public List<TaskGameAccountStatus> findByTaskId(String taskId) {
         return statusMapper.findByTaskId(taskId);
     }
 
+    /** 查询任务内指定账号状态，后续状态迁移都以此记录为更新目标。 */
     @Override
     public TaskGameAccountStatus findByTaskIdAndGameAccountId(String taskId, String gameAccountId) {
         LambdaQueryWrapper<TaskGameAccountStatus> wrapper = new LambdaQueryWrapper<>();
@@ -53,6 +68,11 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         return statusMapper.selectOne(wrapper);
     }
 
+    /**
+     * 查询当前商户内仍占用指定游戏账号的运行中记录。
+     *
+     * <p>用于启动前冲突检查，避免同一游戏账号被多个任务并发自动化。
+     */
     @Override
     public List<TaskGameAccountStatus> findActiveOccupancies(String merchantId, List<String> gameAccountIds) {
         if (merchantId == null || gameAccountIds == null || gameAccountIds.isEmpty()) {
@@ -61,6 +81,12 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         return statusMapper.findActiveOccupancies(merchantId, gameAccountIds);
     }
 
+    /**
+     * 累计单场比赛完成结果。
+     *
+     * <p>pending/running 状态会保持为 running；成功与失败分别累加对应计数，
+     * lastMatchTime 表示最近一次比赛尝试结束时间。
+     */
     @Override
     @Transactional
     public void updateMatchComplete(String taskId, String gameAccountId, boolean success) {
@@ -83,6 +109,12 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         }
     }
 
+    /**
+     * 更新账号级主状态。
+     *
+     * <p>进入 running 时补 startedTime；进入 completed 时补 completedTime。
+     * 其他终态如 failed/cancelled/timeout 由专用方法写入更多上下文。
+     */
     @Override
     @Transactional
     public void updateStatus(String taskId, String gameAccountId, String status) {
@@ -98,6 +130,7 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         }
     }
 
+    /** 标记账号正在进行游戏前准备，通常发生在 Step4 切换账号并进入菜单前。 */
     @Override
     @Transactional
     public void updateToGamePreparing(String taskId, String gameAccountId) {
@@ -111,6 +144,7 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         }
     }
 
+    /** 标记账号正在比赛自动化阶段，表示 Step4 已开始对该账号发送游戏操作。 */
     @Override
     @Transactional
     public void updateToGaming(String taskId, String gameAccountId) {
@@ -124,6 +158,7 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         }
     }
 
+    /** 标记账号执行超时，并写入统一错误文案供前端展示。 */
     @Override
     @Transactional
     public void updateToTimeout(String taskId, String gameAccountId) {
@@ -136,6 +171,7 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         }
     }
 
+    /** 当任务内所有账号都进入终态时，任务执行器可据此推进任务终态。 */
     @Override
     public boolean areAllGameAccountsCompleted(String taskId) {
         List<TaskGameAccountStatus> allStatus = findByTaskId(taskId);
@@ -159,6 +195,11 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         return findByTaskId(taskId).size();
     }
 
+    /**
+     * 取消任务下所有仍在运行或等待中的账号。
+     *
+     * <p>已 completed/failed/timeout 的记录不回退，避免覆盖真实执行结果。
+     */
     @Override
     @Transactional
     public void cancelByTaskId(String taskId) {
@@ -173,6 +214,7 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         }
     }
 
+    /** 删除任务下账号状态记录，通常用于清理未真正启动或测试任务数据。 */
     @Override
     @Transactional
     public void deleteByTaskId(String taskId) {
@@ -181,6 +223,7 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         statusMapper.delete(wrapper);
     }
 
+    /** 同步账号当日比赛进度，用于前端展示本账号距 dailyLimit 的剩余额度。 */
     @Override
     @Transactional
     public void updateDailyMatchInfo(String taskId, String gameAccountId, Integer todayCompleted, Integer dailyLimit) {
@@ -196,6 +239,11 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
         }
     }
 
+    /**
+     * 更新账号开通/档案绑定阶段。
+     *
+     * <p>调用方传入已填充 id 的状态对象，避免在开通流程中重复查询并降低并发覆盖风险。
+     */
     @Override
     @Transactional
     public void updateProvisioningStatus(TaskGameAccountStatus status) {

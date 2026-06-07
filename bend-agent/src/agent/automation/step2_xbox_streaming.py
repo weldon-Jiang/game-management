@@ -122,6 +122,7 @@ async def step2_execute_streaming(
         from ..discovery.console_resolver import resolve_console_target
         from ..xhome_stream.session_connect import establish_webrtc_stream
 
+        # 主机解析阶段只做目标选择和占用判断，不建立媒体通道；失败会终止 Step1-3 串行准备流程。
         resolved = await resolve_console_target(context, check_cancel, report_progress)
         if not resolved.success:
             fail_msg = resolved.message
@@ -149,6 +150,7 @@ async def step2_execute_streaming(
                                   f"正在连接{context.current_xbox.name}...")
         stream_logger.info(f"正在连接Xbox: {context.current_xbox.name}")
 
+        # WebRTC 建连会写入 context 的媒体、输入和会话对象，Step3/Step4 后续直接复用这些运行时资源。
         connect_success, connect_details = await establish_webrtc_stream(
             context, check_cancel, report_progress
         )
@@ -182,6 +184,7 @@ async def step2_execute_streaming(
         return Step2Result(success=True, message=success_msg, xbox_info=context.current_xbox)
 
     except asyncio.CancelledError:
+        # CancelledError 只标记本步骤跳过，调度器负责统一释放当前任务资源。
         logger.info("步骤二被取消")
         stream_logger.info("步骤二被取消")
         context.update_step_status("step2", TaskStepStatus.SKIPPED, "任务被取消")

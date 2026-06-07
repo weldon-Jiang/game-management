@@ -255,7 +255,13 @@ async def _match_expected_screen(
     game_logger,
     timeout_sec: float = 25.0,
 ) -> bool:
-    """使用模板匹配或 FC 远程场景识别校验期望画面。"""
+    """
+    Wait until the expected FC/Xbox scene appears before continuing automation.
+
+    The loop exits only on a positive scene match or timeout. A timeout is not a
+    task cancellation by itself; callers decide whether to retry, pause for
+    manual intervention, or skip the current account.
+    """
     scene_ids = EXPECTED_SCREEN_SCENES.get(expected_screen)
     if not scene_ids:
         game_logger.warning(f"[场景: {expected_screen}] 未配置场景ID，跳过模板校验")
@@ -401,7 +407,13 @@ async def _pause_for_manual_fc_launch(
     logger,
     stream_logger,
 ) -> bool:
-    """Pause automation and sync platform task status; wait until user resumes."""
+    """
+    Pause Step4 for manual FC recovery and wait for platform resume.
+
+    This keeps the stream/window alive and marks the session paused so the user
+    can operate the Xbox window. It returns False only when the task is cancelled
+    while waiting.
+    """
     from ..runtime.phase_fsm import SessionPhase
 
     context.pause()
@@ -465,7 +477,13 @@ async def _launch_fc_with_manual_pause(
     logger,
     stream_logger,
 ) -> bool:
-    """Launch FC/UT; on home-screen stuck, pause for manual intervention instead of failing."""
+    """
+    Launch FC/UT and convert recoverable launch blockers into a manual pause.
+
+    ManualInterventionRequired means the stream is healthy but automation cannot
+    advance safely. Pausing avoids closing Step1-3 resources and lets the user
+    correct the screen before Step4 retries.
+    """
     from ..game.account_switcher import ManualInterventionRequired
 
     while True:
@@ -561,7 +579,12 @@ async def _report_step4_failure(
     keep_session_alive: bool,
     logger,
 ) -> None:
-    """Report step4 failure; optionally keep stream/session alive for manual retry."""
+    """
+    Report Step4 failure with either terminal or retryable session semantics.
+
+    keep_session_alive=True is used by the two-phase task: Step4 failure moves
+    the session to automation_failed while preserving stream/window resources.
+    """
     if keep_session_alive:
         logger.error("%s (stream kept alive for retry)", error_msg)
         window_state = "visible" if getattr(context, "sdl_window", None) else "hidden"
@@ -724,6 +747,7 @@ async def step4_execute_gaming(
             global_scene_queue = asyncio.Queue(maxsize=5)
             global_cancel_event = asyncio.Event()
 
+            # Step4 owns these loops while automating; finally must stop all three to avoid orphan frame readers.
             capture_task = asyncio.create_task(
                 _capture_loop(context, global_frame_queue, global_cancel_event, logger)
             )
@@ -793,6 +817,7 @@ async def step4_execute_gaming(
                 continue
 
             if provisioning_module is not None:
+                # 开通/档案绑定必须在账号切换前完成，失败只跳过当前账号，不关闭整条串流。
                 prov = await provisioning_module.ensure(
                     game_account,
                     check_cancel=check_cancel,
@@ -841,6 +866,7 @@ async def step4_execute_gaming(
                 lambda: getattr(context, "xbox_session", None),
                 interval=4.0,
             ):
+                # 账号切换和 FC 启动期间持续保活，避免长时间菜单操作导致云串流空闲断开。
                 switch_result = await switcher.switch_to(game_account.id)
                 if switch_result.success:
                     launch_ok = await _launch_fc_with_manual_pause(
@@ -877,6 +903,7 @@ async def step4_execute_gaming(
                                 and hasattr(engine, "_action_executor")
                                 else None
                             )
+                            # DataChannel 重连后，所有持有旧发送器的组件都必须重新绑定。
                             rebind_stream_bindings(
                                 context,
                                 executor=executor,

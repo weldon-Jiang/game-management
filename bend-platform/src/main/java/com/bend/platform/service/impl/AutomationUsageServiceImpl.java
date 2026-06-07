@@ -27,6 +27,19 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 自动化用量与计费服务实现。
+ *
+ * <p>职责边界：
+ * <ul>
+ *   <li>启动前根据订阅、月度额度、按次价格和运行中任务预占点数计算是否允许启动。</li>
+ *   <li>启动时记录一次资源级用量，兼容窗口/游戏账号/Xbox 主机三类资源。</li>
+ *   <li>Step4 完成可计费单元后写入幂等计费事件，并更新游戏账号统计指标。</li>
+ * </ul>
+ *
+ * <p>计费事件使用 task/session/gameAccount/action/unit/index 生成幂等键，避免 Agent
+ * 重试回调或网络抖动导致重复扣点。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -43,6 +56,12 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
     private final TaskGameAccountStatusService taskGameAccountStatusService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * 校验自动化启动是否需要预留点数。
+     *
+     * <p>分支优先级为包月订阅、月度免费额度、按游戏账号扣点、按主机扣点、按窗口扣点。
+     * 若本次需要扣点，会把其他运行中任务的游戏账号数作为潜在扣点占用一起纳入余额校验。
+     */
     @Override
     public Map<String, Object> validateAndCalculatePoints(String merchantId, String streamingAccountId,
                                                 List<GameAccount> gameAccounts, List<XboxHost> hosts) {
@@ -203,6 +222,12 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         return result;
     }
 
+    /**
+     * 记录启动阶段的资源用量。
+     *
+     * <p>这里保留旧的启动扣点/用量模型；真正按比赛或转会轮次结算的事件由
+     * {@link #recordBillableEvent(Task, Map)} 处理。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deductPointsAndRecordUsage(String merchantId, String userId, String taskId,
@@ -237,6 +262,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         String chargeMode;
         int pointsDeducted;
 
+        // 包月订阅和月度免费额度都记录为 monthly，便于后续同月再次启动时识别免费资格。
         if (chargeType.startsWith("subscription_") || chargeType.startsWith("monthly_")) {
             if (chargeType.contains("window")) {
                 resourceType = "window";
@@ -299,6 +325,12 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
                 merchantId, taskId, resourceType, pointsDeducted, chargeMode);
     }
 
+    /**
+     * 写入 Step4 上报的可计费事件，并按幂等键扣点。
+     *
+     * <p>必填字段为 gameAccountId、billingUnit、unitIndex；sessionId 优先取 Agent
+     * payload，缺省时回退任务当前 sessionId。重复事件只返回 duplicate=true，不再次扣点。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> recordBillableEvent(Task task, Map<String, Object> payload) {
@@ -317,6 +349,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
             throw new BusinessException(400, "gameAccountId、billingUnit、unitIndex不能为空");
         }
 
+        // 幂等键包含 sessionId，保证同一长寿命任务的多轮自动化不会互相吞并计费事件。
         String rawIdempotentKey = String.join(":",
                 task.getId(),
                 sessionId != null ? sessionId : "-",
@@ -349,6 +382,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         try {
             billingEventMapper.insert(event);
         } catch (DuplicateKeyException e) {
+            // Agent 可能因超时重试回调；数据库唯一键兜底确保同一事件最多扣点一次。
             Map<String, Object> duplicate = new HashMap<>();
             duplicate.put("recorded", true);
             duplicate.put("duplicate", true);
@@ -359,6 +393,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
 
         int points = event.getPointsDeducted() != null ? event.getPointsDeducted() : 0;
         if (points > 0) {
+            // 扣点与事件记录在同一事务中，余额不足会回滚事件，避免“记账成功但未扣费”。
             boolean deducted = balanceService.deductPoints(
                     task.getMerchantId(),
                     points,
@@ -393,6 +428,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
     }
 
     private String normalizeBillingUnit(String gameActionType, String billingUnit) {
+        // 每种自动化类型只接受自己的结算单元，防止 Agent 误报造成跨模式扣点。
         if (billingUnit == null || billingUnit.isBlank()) {
             return null;
         }
@@ -436,6 +472,7 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         if (account == null) {
             return;
         }
+        // 只有比赛完成事件推进场次数；转会轮次仅可能更新金币变化。
         if ("match_completed".equals(billingUnit)) {
             account.setTodayMatchCount((account.getTodayMatchCount() != null ? account.getTodayMatchCount() : 0) + 1);
             account.setTotalMatchCount((account.getTotalMatchCount() != null ? account.getTotalMatchCount() : 0) + 1);

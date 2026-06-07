@@ -29,6 +29,13 @@ class TaskControlHandler:
         self._scheduler = scheduler
 
     async def handle(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Dispatch a task_control command to the runtime that owns taskId.
+
+        Control messages are scoped to a single task runtime. This prevents a
+        stale WebSocket command from pausing or terminating another concurrent
+        task that happens to be running on the same Agent process.
+        """
         task_id = data.get("taskId") or data.get("task_id")
         action = (data.get("action") or "").lower()
 
@@ -69,6 +76,13 @@ class TaskControlHandler:
             return {"success": False, "error": str(exc)}
 
     async def _pause(self, runtime, data: Dict) -> Dict:
+        """
+        Pause automation without closing stream resources.
+
+        Immediate pause blocks input through context/InputGate now; after_match
+        records intent so Step4 can finish the current match before entering a
+        paused phase.
+        """
         mode_str = (data.get("mode") or "immediate").lower()
         mode = (
             PauseMode.AFTER_MATCH
@@ -98,6 +112,7 @@ class TaskControlHandler:
         runtime.context.resume()
         prev = runtime.phase_before_pause
         runtime.phase_before_pause = None
+        # READY/AUTOMATION_FAILED resume returns to manual decision state; only an already-started Step4 returns to automating.
         if prev == SessionPhase.READY or prev == SessionPhase.AUTOMATION_FAILED or not runtime.phase_fsm.automation_started:
             phase = runtime.set_phase(SessionPhase.READY, "Resumed")
         else:
@@ -110,6 +125,7 @@ class TaskControlHandler:
         return await self._terminate(runtime, data)
 
     async def _terminate(self, runtime, data: Dict) -> Dict:
+        """Force task shutdown and let the scheduler perform per-task cleanup."""
         runtime.cancel_event.set()
         runtime.set_phase(SessionPhase.CLOSING, "Terminating")
         if self._scheduler and hasattr(self._scheduler, "force_terminate_task"):
@@ -165,6 +181,12 @@ class TaskControlHandler:
         return {"success": False, "error": "No active streaming session"}
 
     async def _start_automation(self, runtime, data: Dict) -> Dict:
+        """
+        Release the two-phase READY gate and start Step4 automation.
+
+        The selected gameActionType is stored on the task context but Step4 is
+        still responsible for applying it after game-account login succeeds.
+        """
         if not runtime.phase_fsm.can_start_automation():
             return {
                 "success": False,

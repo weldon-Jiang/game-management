@@ -16,6 +16,7 @@ const generateRequestKey = (config) => {
   return `${method}_${url}_${JSON.stringify(params)}_${JSON.stringify(data)}`
 }
 
+// 同一个 method/url/params/data 只保留最后一次请求，避免列表刷新或重复点击造成旧响应覆盖新状态。
 const removePendingRequest = (config) => {
   const key = generateRequestKey(config)
   if (pendingRequests.has(key)) {
@@ -40,6 +41,7 @@ const clearAllPendingRequests = () => {
 let isRefreshing = false
 let refreshSubscribers = []
 
+// Token 临近过期时只发起一次刷新，其余请求挂起等待新 Token 后继续发出。
 const subscribeTokenRefresh = (callback) => {
   refreshSubscribers.push(callback)
 }
@@ -55,6 +57,7 @@ request.interceptors.request.use(
 
     const authStore = useAuthStore()
     if (authStore.token) {
+      // 避免并发请求同时刷新 Token：第一个请求负责刷新，其余请求进入订阅队列。
       if (authStore.needsRefresh && !authStore.isRefreshing && !config.url.includes('/auth/refresh')) {
         if (!isRefreshing) {
           isRefreshing = true
@@ -92,6 +95,7 @@ request.interceptors.response.use(
     if (res.code !== 200 && res.code !== 0) {
       console.log('Response with error code:', res.code, res.message)
       if (isAuthError(res.code)) {
+        // 业务响应已判定认证失效时，清理所有挂起请求，避免后续请求继续携带旧 Token。
         console.log('Auth error detected in response interceptor, redirecting to login')
         clearAllPendingRequests()
         localStorage.removeItem('token')
@@ -119,6 +123,7 @@ request.interceptors.response.use(
       console.log('Request error with response:', error.response.status, error.response.data)
       if (error.response.status === 401) {
         if (!error.config.url.includes('/auth/refresh') && !error.config.url.includes('/auth/login')) {
+          // HTTP 401 允许一次刷新后重放原请求；刷新失败再统一登出。
           const refreshed = await authStore.refreshToken()
           if (refreshed) {
             error.config.headers.Authorization = `Bearer ${authStore.token}`

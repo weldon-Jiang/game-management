@@ -102,6 +102,7 @@ async def step3_streaming_init(
         await report_progress(context.task_id, "STEP3", "RUNNING", "正在初始化画面捕获器...")
         stream_logger.info("正在初始化画面捕获器...")
 
+        # frame_capture 是 Step4 场景识别和窗口显示的唯一画面来源，初始化失败必须终止准备流程。
         capture = await _init_frame_capture(context, window, logger, stream_logger)
         if not capture:
             error_msg = "画面捕获器初始化失败"
@@ -117,6 +118,7 @@ async def step3_streaming_init(
         if check_cancel():
             return Step3Result(success=False, error_code="CANCELLED", message="任务被取消")
 
+        # 只建立 ControllerProtocol 通道，不在 Step3 发送自动化按键；Step4 才拥有自动化输入权。
         await _ensure_controller_protocol(context, logger, stream_logger)
 
         sdl_window = None
@@ -172,6 +174,7 @@ async def step3_streaming_init(
             context, logger, stream_logger
         )
         if context.sdl_window:
+            # 就绪等待和手动接管期间仍需持续刷帧，否则 SDL 窗口会停在旧画面。
             await _start_sdl_display_pump(context, logger)
         if not stream_ready:
             error_msg = f"串流就绪检查未通过: {ready_detail}"
@@ -316,6 +319,7 @@ async def _start_sdl_display_pump(context: AgentTaskContext, logger) -> None:
         first_frame_logged = False
         while context.sdl_window and context.sdl_window.is_running:
             try:
+                # 该循环只负责显示，不做场景决策；Step4 启动后会接管独立的捕获/检测循环。
                 if hasattr(context.sdl_window, "process_events"):
                     context.sdl_window.process_events()
 
@@ -348,6 +352,7 @@ async def _start_sdl_display_pump(context: AgentTaskContext, logger) -> None:
 
 
 async def _stop_sdl_display_pump(context: AgentTaskContext) -> None:
+    """Stop the READY-stage display pump before Step4 starts its own display loop."""
     task = getattr(context, "_sdl_display_task", None)
     if task and not task.done():
         task.cancel()

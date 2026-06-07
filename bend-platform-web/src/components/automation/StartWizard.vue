@@ -114,6 +114,7 @@ const form = reactive({
   gameAccountIds: []
 })
 
+// Step1-3 是串流准备阶段，进度只反映会话 phase，不代表 Step4 自动化进度。
 const phaseProgress = {
   opening: 10,
   authenticating: 25,
@@ -130,6 +131,7 @@ const isReady = computed(() => sessionPhase.value === 'ready')
 watch(() => props.modelValue, (v) => {
   visible.value = v
   if (v) {
+    // 默认选中当前未被其他任务占用的游戏账号，避免用户误启动冲突账号。
     form.gameAccountIds = props.gameAccounts
       .filter((ga) => !isGameAccountOccupied(ga))
       .map((ga) => ga.id)
@@ -149,6 +151,7 @@ const stopPoll = () => {
 const pollTaskDetail = async () => {
   if (!taskId.value) return
   try {
+    // 启动串流阶段使用轮询兜底，直到后端会话进入 ready 后再让用户选择自动化。
     const res = await taskApi.getDetail(taskId.value)
     const task = res.data?.task
     const session = res.data?.session
@@ -200,6 +203,7 @@ const startStreaming = async () => {
   }
   submitting.value = true
   try {
+    // 第一阶段只建立长寿命串流任务；Step4 自动化类型在 ready 后单独下发。
     const res = await automationApi.startStreaming(props.account.id, {
       agentId: form.agentId,
       gameAccountIds: form.gameAccountIds
@@ -214,12 +218,14 @@ const startStreaming = async () => {
   } catch (error) {
     const conflict = error?.data
     if (conflict?.conflicts?.length) {
+      // 多账号任一被占用都不能启动，后端返回冲突列表供前端精确提示。
       const names = conflict.conflicts
         .map((item) => item.gameAccountName || item.gameAccountId)
         .join('、')
       ElMessage.error(`以下游戏账号已被其他任务占用：${names}`)
     } else if (conflict?.taskId) {
       try {
+        // 同一串流账号已有长寿命任务时，引导用户进入现有任务而不是重复启动。
         await ElMessageBox.confirm(
           error.message || '该串流账号正在运行任务',
           '无法启动串流',
@@ -250,6 +256,7 @@ const goDetail = () => {
 const startAutomation = async () => {
   submitting.value = true
   try {
+    // 第二阶段只下发 gameActionType，Agent 在 Step4 确认账号登录后才真正应用该模式。
     await taskApi.startAutomation(taskId.value, { gameActionType: form.gameActionType })
     goDetail()
   } finally {

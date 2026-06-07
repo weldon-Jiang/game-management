@@ -58,6 +58,14 @@ class StreamingAccountTask:
             runtime.modules["automation_start_event"].set()
 
     async def execute(self, check_cancel: Callable[[], bool]) -> AutomationResult:
+        """
+        Run the two-phase streaming task lifecycle.
+
+        The method first opens and keeps a stream alive until READY, then waits
+        for the platform to send start_automation. Step4 failures deliberately
+        do not close the stream/window: the task moves to AUTOMATION_FAILED and
+        waits for a retry so users can recover without rerunning Step1-3.
+        """
         task_id = self.runtime.task_id
         focus = InputFocusManager.get_instance()
         focus.push(task_id)
@@ -122,6 +130,7 @@ class StreamingAccountTask:
             total_matches = 0
 
             while True:
+                # Cancellation is the only path that tears down the stream while waiting in READY.
                 if check_cancel():
                     await self._cleanup_session(session, destroy_window=True)
                     self.runtime.set_phase(SessionPhase.CLOSED, "Cancelled")
@@ -147,6 +156,7 @@ class StreamingAccountTask:
                         self.runtime.set_phase(SessionPhase.READY, ready_msg)
                         await self._report_session(SessionPhase.READY, ready_msg)
                     automation_event.clear()
+                    # READY is a long-lived manual handoff point; it only exits on start_automation or cancellation.
                     while not automation_event.is_set():
                         if check_cancel():
                             await self._cleanup_session(session, destroy_window=True)
@@ -163,6 +173,7 @@ class StreamingAccountTask:
 
                 await self._ensure_display_after_stream()
 
+                # Step4 is the only owner of virtual controller input; disable it immediately after Step4 returns.
                 input_gate.set_automation_active(True)
                 step4_result = await step4_execute_gaming(
                     self.context,
@@ -201,6 +212,7 @@ class StreamingAccountTask:
                 automation_event.clear()
                 fail_msg = step4_result.message or "自动化失败"
                 self._last_automation_fail_msg = fail_msg
+                # Keep stream/window resources alive so the user can retry Step4 from the same READY-like session.
                 self.runtime.set_phase(SessionPhase.AUTOMATION_FAILED, fail_msg)
                 await self._report_session(SessionPhase.AUTOMATION_FAILED, fail_msg)
                 self.logger.warning(
@@ -220,6 +232,7 @@ class StreamingAccountTask:
             await self._cleanup_session(session, destroy_window=True, emit_session_phases=False)
             return AutomationResult(success=False, error_code="EXCEPTION", message=str(exc))
         finally:
+            # Final safety net: no task should leave input focus, decode slots, or registry entries behind.
             input_gate.set_automation_active(False)
             focus.pop(task_id)
             release_decode_slot(self._decode_mode)
@@ -294,6 +307,7 @@ class StreamingAccountTask:
         destroy_window: bool,
         emit_session_phases: bool = True,
     ) -> None:
+        """Close stream resources and either destroy or hide the display window."""
         await session.close(emit_phases=emit_session_phases)
         if destroy_window:
             await self.window_manager.destroy_by_task(self.runtime.task_id)

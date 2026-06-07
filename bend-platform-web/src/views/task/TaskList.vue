@@ -369,6 +369,7 @@ const formatStreamingLabel = (account) => {
 }
 
 const getMerchantScope = () => {
+  // 平台管理员必须显式选择商户后才加载商户内 Agent/串流账号，避免跨商户误筛选。
   if (authStore.isPlatformAdmin) {
     return filterMerchantId.value || undefined
   }
@@ -376,6 +377,7 @@ const getMerchantScope = () => {
 }
 
 const handleMerchantChange = async () => {
+  // 商户切换会使 Agent 和串流账号选项失效，必须先清空再重新加载。
   filterAgentId.value = ''
   filterStreamingAccountId.value = ''
   await loadFilterOptions()
@@ -396,6 +398,7 @@ const loadData = async () => {
       pageSize: pagination.pageSize
     }
     const merchantId = getMerchantScope()
+    // 查询参数只传有意义的过滤条件，交由后端按角色和 merchantId 做最终隔离。
     if (merchantId) {
       params.merchantId = merchantId
     }
@@ -435,6 +438,7 @@ const loadMerchants = async () => {
 const loadFilterOptions = async () => {
   const merchantId = getMerchantScope()
   if (authStore.isPlatformAdmin && !merchantId) {
+    // 未选商户时不展示全平台 Agent/账号，避免用户误以为可以跨商户分配任务。
     agentOptions.value = []
     streamingAccountOptions.value = []
     return
@@ -478,6 +482,7 @@ const loadOnlineAgents = async () => {
 }
 
 const initFromRoute = async () => {
+  // 支持从 Agent/串流账号页面跳转时带入筛选条件，减少用户手动定位任务。
   if (route.query.status) {
     filterStatus.value = route.query.status
   }
@@ -489,6 +494,7 @@ const initFromRoute = async () => {
     filterAgentId.value = route.query.agentId
     if (authStore.isPlatformAdmin) {
       try {
+        // 平台管理员从 agentId 反查 merchantId 后，才能加载该商户下的筛选项。
         const res = await agentApi.getById(route.query.agentId)
         if ((res.code === 0 || res.code === 200) && res.data?.merchantId) {
           filterMerchantId.value = res.data.merchantId
@@ -505,6 +511,7 @@ const applyDefaultAgentFilter = () => {
     return
   }
   const saved = localStorage.getItem(TASK_LIST_AGENT_KEY)
+  // 记住上次使用的 Agent，便于运维反复观察同一台 Agent 的任务列表。
   if (saved && agentOptions.value.some((agent) => agent.agentId === saved)) {
     filterAgentId.value = saved
     return
@@ -519,6 +526,7 @@ const applyDefaultAgentFilter = () => {
 
 watch(filterAgentId, (value) => {
   if (value) {
+    // 只保存有效选择，不在用户清空筛选时覆盖默认值。
     localStorage.setItem(TASK_LIST_AGENT_KEY, value)
   }
 })
@@ -542,6 +550,7 @@ const handleCreate = async () => {
     let params = {}
     if (createForm.paramsJson) {
       try {
+        // 自定义任务参数直接透传后端，前端只负责保证 JSON 格式合法。
         params = JSON.parse(createForm.paramsJson)
       } catch (e) {
         ElMessage.error('任务参数JSON格式错误')
@@ -613,6 +622,7 @@ const handleRetry = async (task) => {
 
 const handleCancel = async (task) => {
   try {
+    // 列表页的取消走任务语义取消；强制终止和会话控制集中在详情页操作。
     const res = await taskApi.cancel(task.id)
     if (res.code === 0 || res.code === 200) {
       ElMessage.success('任务已取消')
@@ -627,6 +637,7 @@ const handleCancel = async (task) => {
 
 const handleShowWindow = async (task) => {
   try {
+    // 仅下发显示窗口控制，不改变任务执行阶段或自动化状态。
     const res = await taskApi.showWindow(task.id)
     if (res.code === 0 || res.code === 200) {
       ElMessage.success('窗口显示命令已发送')

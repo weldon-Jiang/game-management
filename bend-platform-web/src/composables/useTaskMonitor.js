@@ -2,6 +2,12 @@ import { ref, onUnmounted, unref, watch } from 'vue'
 import { taskApi } from '@/api/task'
 import { subscribeToTopic } from '@/utils/stompClient'
 
+/**
+ * Monitor a task detail page with WebSocket push plus polling fallback.
+ *
+ * WebSocket progress updates are fast but not guaranteed during reconnects, so
+ * polling remains the source of truth and also reloads the event timeline.
+ */
 export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
   const detail = ref(null)
   const events = ref([])
@@ -16,6 +22,7 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
     try {
       const sessionId = unref(sessionIdRef)
       const eventParams = { limit: 50 }
+      // Session filter lets the detail page inspect old automation rounds without mixing event timelines.
       if (sessionId) eventParams.sessionId = sessionId
       const [detailRes, eventsRes] = await Promise.all([
         taskApi.getDetail(id),
@@ -33,6 +40,7 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
     const id = unref(taskIdRef)
     if (payload.taskId !== id) return
 
+    // Patch only volatile fields immediately; full detail is reloaded right after to avoid stale derived state.
     if (payload.sessionPhase || payload.phase) {
       detail.value.task.sessionPhase = payload.sessionPhase || payload.phase
     }
@@ -66,6 +74,7 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
   }
 
   const startPolling = (intervalMs = 8000) => {
+    // Start with an immediate refresh so the page has data before the first interval tick.
     refresh()
     pollTimer = setInterval(refresh, intervalMs)
   }
@@ -90,6 +99,7 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
   watch(
     () => unref(taskIdRef),
     (id) => {
+      // Route changes can reuse the same component instance; restart subscriptions for the new taskId.
       stopMonitor()
       if (id) startMonitor()
     }
@@ -98,6 +108,7 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
   if (sessionIdRef) {
     watch(
       () => unref(sessionIdRef),
+      // Session switch only needs a reload; the WS topic remains task-scoped.
       () => refresh()
     )
   }
