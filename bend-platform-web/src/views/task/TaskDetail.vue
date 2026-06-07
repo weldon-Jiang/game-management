@@ -28,16 +28,16 @@
             </div>
             <div class="overview-item">
               <span class="label">游戏操作</span>
-              <span class="value">{{ task.gameActionType ? getGameActionTypeText(task.gameActionType) : '-' }}</span>
+              <span class="value">{{ displayGameActionType ? getGameActionTypeText(displayGameActionType) : '-' }}</span>
             </div>
             <div class="overview-item">
               <span class="label">会话阶段</span>
               <el-tag
-                v-if="task.sessionPhase || session?.phase"
+                v-if="displaySessionPhase"
                 size="small"
-                :type="getSessionPhaseType(task.sessionPhase || session?.phase)"
+                :type="getSessionPhaseType(displaySessionPhase)"
               >
-                {{ getSessionPhaseText(task.sessionPhase || session?.phase) }}
+                {{ getSessionPhaseText(displaySessionPhase) }}
               </el-tag>
               <span v-else class="value">-</span>
             </div>
@@ -57,18 +57,38 @@
             <span v-if="task.errorMessage" class="alert-item error">
               任务错误：{{ task.errorMessage }}
             </span>
-            <span v-if="session?.errorMessage" class="alert-item error">
-              会话错误：{{ getTaskEventMessageText(session.errorMessage) }}
+            <span v-if="displaySession?.errorMessage" class="alert-item error">
+              会话错误：{{ getTaskEventMessageText(displaySession.errorMessage) }}
             </span>
           </div>
+        </div>
+
+        <div v-if="sessions.length" class="session-switcher">
+          <span class="label">查看会话轮次：</span>
+          <el-select
+            v-model="selectedSessionId"
+            size="small"
+            style="min-width: 280px"
+          >
+            <el-option
+              v-for="(s, idx) in sessions"
+              :key="s.id"
+              :label="formatSessionLabel(s, sessions.length - idx)"
+              :value="s.id"
+            />
+          </el-select>
+          <el-tag v-if="!isCurrentSession" type="info" size="small" class="history-tag">
+            历史会话（只读）
+          </el-tag>
         </div>
 
         <div class="phase-control-row">
           <SessionPhaseStepper
             class="phase-stepper"
-            :phase="task.sessionPhase || session?.phase || 'opening'"
+            :phase="displaySessionPhase || 'opening'"
           />
           <TaskControlBar
+            v-if="isCurrentSession"
             class="control-bar"
             :task-status="task.status"
             :session-phase="task.sessionPhase || session?.phase"
@@ -86,16 +106,29 @@
         </div>
 
         <el-alert
-          v-if="task.windowVisible === false"
+          v-if="isCurrentSession && task.windowVisible === false"
           type="info"
           :closable="false"
           title="窗口已隐藏，任务仍在后台运行"
           class="window-hint"
         />
 
+        <el-alert
+          v-if="isCurrentSession && (task.sessionPhase || session?.phase) === 'automation_failed'"
+          type="warning"
+          :closable="false"
+          title="自动化未完成，串流窗口仍保持连接，可重新选择模式后重试"
+          class="window-hint"
+        />
+
         <section class="account-section">
           <h3>游戏账号</h3>
-          <GameAccountRunTable :rows="gameAccountStatuses" @skip="handleSkip" />
+          <GameAccountRunTable
+            :rows="gameAccountStatuses"
+            :show-match-progress="showMatchProgress"
+            :readonly="!isCurrentSession"
+            @skip="handleSkip"
+          />
         </section>
       </div>
 
@@ -107,7 +140,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTaskMonitor } from '@/composables/useTaskMonitor'
@@ -127,16 +160,91 @@ import TaskEventTimeline from '@/components/task/TaskEventTimeline.vue'
 
 const route = useRoute()
 const taskId = computed(() => route.params.id)
-const { detail, events, loading, startMonitor } = useTaskMonitor(taskId)
+const sessions = ref([])
+const selectedSessionId = ref('')
+
+const { detail, events, loading, startMonitor } = useTaskMonitor(taskId, selectedSessionId)
 
 const task = computed(() => detail.value?.task)
 const session = computed(() => detail.value?.session)
 const gameAccountStatuses = computed(() => detail.value?.gameAccountStatuses || [])
 const lastProgressMessage = computed(() => detail.value?.lastProgressMessage)
 
+const currentSessionId = computed(() => task.value?.sessionId || session.value?.id || '')
+
+const isCurrentSession = computed(() => {
+  if (!selectedSessionId.value) return true
+  return selectedSessionId.value === currentSessionId.value
+})
+
+const displaySession = computed(() => {
+  if (isCurrentSession.value) return session.value
+  return sessions.value.find(s => s.id === selectedSessionId.value) || null
+})
+
+const displaySessionPhase = computed(() => {
+  if (isCurrentSession.value) return task.value?.sessionPhase || session.value?.phase || ''
+  return displaySession.value?.phase || ''
+})
+
+const displayGameActionType = computed(() => {
+  if (isCurrentSession.value) return task.value?.gameActionType
+  return displaySession.value?.gameActionType || ''
+})
+
 const hasAlerts = computed(
-  () => lastProgressMessage.value || task.value?.errorMessage || session.value?.errorMessage
+  () =>
+    lastProgressMessage.value ||
+    task.value?.errorMessage ||
+    displaySession.value?.errorMessage
 )
+
+// 会话列表兜底刷新间隔（detail 轮询的约 3 倍，降低 /sessions 请求量）
+const SESSIONS_REFRESH_INTERVAL = 12000
+let sessionsTimer = null
+
+/**
+ * 拉取任务的全部串流会话轮次。
+ *
+ * <p>容错要点：① 失败时**不清空**已有 sessions，避免成功结果被后续瞬时失败覆盖导致切换器消失；
+ * ② 失败后短延迟自动重试一次，降低首屏请求抖动（含 request.js 同 URL 去重取消）造成的永久空列表；
+ * ③ 仅在 sessions 为空时回退重试，已有数据则交给周期兜底刷新自愈。</p>
+ *
+ * @param retry 是否允许失败后重试一次（默认 true）
+ */
+const loadSessions = async (retry = true) => {
+  if (!taskId.value) return
+  try {
+    const res = await taskApi.listSessions(taskId.value)
+    sessions.value = res.data || []
+    if (!selectedSessionId.value && currentSessionId.value) {
+      selectedSessionId.value = currentSessionId.value
+    } else if (!selectedSessionId.value && sessions.value.length) {
+      selectedSessionId.value = sessions.value[0].id
+    }
+  } catch (e) {
+    console.warn('Failed to load sessions:', e)
+    // 保留已有 sessions，不覆盖为空；仅在列表仍为空时重试一次
+    if (retry && !sessions.value.length) {
+      setTimeout(() => loadSessions(false), 800)
+    }
+  }
+}
+
+watch(currentSessionId, (id) => {
+  if (id && !selectedSessionId.value) {
+    selectedSessionId.value = id
+  }
+  loadSessions()
+})
+
+const formatSessionLabel = (s, ordinal) => {
+  const start = s.startedTime ? String(s.startedTime).replace('T', ' ').slice(0, 16) : '--'
+  const phase = s.phase ? getSessionPhaseText(s.phase) : '-'
+  const isCurrent = s.id === currentSessionId.value
+  const marker = isCurrent ? '当前' : `#${ordinal}`
+  return `${marker} · ${start} · ${phase}`
+}
 
 const accountProgress = computed(() => {
   const rows = gameAccountStatuses.value
@@ -147,12 +255,29 @@ const accountProgress = computed(() => {
   return `${completed}/${rows.length}`
 })
 
+const showMatchProgress = computed(() => {
+  const type = task.value?.gameActionType
+  return !type || type === 'squad_battle' || type === 'transfer_sqb_combo'
+})
+
 const formatTime = (t) => {
   if (!t) return '-'
   return String(t).replace('T', ' ').slice(0, 19)
 }
 
-onMounted(() => startMonitor(4000))
+onMounted(async () => {
+  startMonitor(4000)
+  await loadSessions()
+  // 周期兜底刷新：即使首屏请求被取消/失败，下一拍也能自愈，保证会话切换器最终可见
+  sessionsTimer = setInterval(() => loadSessions(false), SESSIONS_REFRESH_INTERVAL)
+})
+
+onUnmounted(() => {
+  if (sessionsTimer) {
+    clearInterval(sessionsTimer)
+    sessionsTimer = null
+  }
+})
 
 const handleWindow = async () => {
   await taskApi.showWindow(taskId.value)
@@ -298,6 +423,26 @@ const handleReconnect = async () => {
 
 .window-hint {
   margin-bottom: 12px;
+}
+
+.session-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.session-switcher .label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.session-switcher .history-tag {
+  margin-left: 4px;
 }
 
 .account-section h3 {
