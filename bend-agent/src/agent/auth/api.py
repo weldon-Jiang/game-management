@@ -72,8 +72,8 @@ class AuthService:
         )
 
         async def _noop_report(*_args, **_kwargs):
-            if report_progress:
-                await report_progress(*_args, **_kwargs)
+            """Internal auth has no platform task; do not report auth_* progress."""
+            return None
 
         result = await step1_execute_login(
             context,

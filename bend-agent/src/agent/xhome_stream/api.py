@@ -80,13 +80,19 @@ class XHomeStreamService:
             if report_progress:
                 await report_progress(*args, **kwargs)
 
-        result = await step3_streaming_init(
-            context,
-            check_cancel or (lambda: False),
-            _report,
-        )
-        if not result.success:
-            raise RuntimeError(result.message or "Stream init failed")
+        try:
+            result = await step3_streaming_init(
+                context,
+                check_cancel or (lambda: False),
+                _report,
+            )
+            if not result.success:
+                raise RuntimeError(result.message or "Stream init failed")
+        except Exception:
+            from .cleanup import close_media_context
+
+            await close_media_context(context, self.logger)
+            raise
 
         return MediaSession(
             task_id=task_id,
@@ -111,10 +117,12 @@ class XHomeStreamService:
             return False
 
     async def close(self, media: MediaSession) -> None:
-        from ..automation.step3_streaming_init import step3_close_display
+        await self.close_context(media.context)
 
-        await step3_close_display(media.context)
-        media.context.frame_capture = None
+    async def close_context(self, context: AgentTaskContext) -> None:
+        from .cleanup import close_media_context
+
+        await close_media_context(context, self.logger)
 
     async def reopen_display(self, media: MediaSession) -> bool:
         from ..automation.step3_streaming_init import step3_ensure_display

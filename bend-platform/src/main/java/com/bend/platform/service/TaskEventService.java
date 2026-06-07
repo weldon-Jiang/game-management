@@ -20,4 +20,7 @@ public interface TaskEventService {
 
     /** 按任务 ID + 串流会话过滤查询事件（仅返回指定会话内的事件）。 */
     List<TaskEvent> listByTaskIdAndSession(String taskId, String merchantId, String sessionId, int limit);
+
+    /** 记录 Agent 上报的任务事件，写入前由调用方完成 task/session 归属校验。 */
+    void record(TaskEvent event);
 }

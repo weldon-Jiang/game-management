@@ -524,6 +524,31 @@ async def _report_step4_failure(
     await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
 
 
+async def _report_input_channel_event(
+    context: AgentTaskContext,
+    report_progress: Callable,
+    status: str,
+    message: str,
+    phase: str,
+    logger,
+) -> None:
+    """Report input channel recovery without changing task terminal state."""
+    try:
+        await report_progress(
+            context.task_id,
+            "INPUT_CHANNEL",
+            status,
+            message,
+            {
+                "scope": "session",
+                "module": "input_channel",
+                "phase": phase,
+            },
+        )
+    except Exception as exc:
+        logger.warning("上报 DataChannel 恢复事件失败: %s", exc)
+
+
 async def step4_execute_gaming(
     context: AgentTaskContext,
     check_cancel: Callable[[], bool],
@@ -780,6 +805,14 @@ async def step4_execute_gaming(
                             rebind_stream_bindings,
                         )
 
+                        await _report_input_channel_event(
+                            context,
+                            report_progress,
+                            "RUNNING",
+                            "Input DataChannel 已关闭，正在重连",
+                            "input_reconnecting",
+                            logger,
+                        )
                         if await reconnect_input_channel(context, logger):
                             executor = (
                                 engine._action_executor
@@ -793,6 +826,14 @@ async def step4_execute_gaming(
                                 switcher=switcher,
                                 engine=engine,
                             )
+                            await _report_input_channel_event(
+                                context,
+                                report_progress,
+                                "RUNNING",
+                                "Input DataChannel 已恢复",
+                                "input_restored",
+                                logger,
+                            )
                             launch_ok = await _launch_fc_with_manual_pause(
                                 switcher,
                                 context,
@@ -802,6 +843,15 @@ async def step4_execute_gaming(
                                 set_session_phase,
                                 logger,
                                 stream_logger,
+                            )
+                        else:
+                            await _report_input_channel_event(
+                                context,
+                                report_progress,
+                                "FAILED",
+                                "Input DataChannel 重连失败",
+                                "input_reconnect_failed",
+                                logger,
                             )
 
                     if not launch_ok:
@@ -887,6 +937,8 @@ async def step4_execute_gaming(
 
             await asyncio.sleep(2.0)
 
+            consecutive_failures = 0
+            max_match_failures = 3
             while context.matches_completed_today[game_account.id] < game_account.target_matches:
                 if check_cancel():
                     return Step4Result(success=False, error_code="CANCELLED",
@@ -933,6 +985,7 @@ async def step4_execute_gaming(
                     await context.wait_if_paused()
 
                 if match_success:
+                    consecutive_failures = 0
                     context.matches_completed_today[game_account.id] += 1
                     completed_matches += 1
                     new_completed = context.matches_completed_today[game_account.id]
@@ -959,6 +1012,7 @@ async def step4_execute_gaming(
                         }
                     )
                 else:
+                    consecutive_failures += 1
                     logger.warning(f"账号 {game_account.gamertag} 第{current_count}场比赛失败: {match_error_msg}")
                     game_logger.warning(f"第{current_count}场比赛失败: {match_error_msg}")
                     stream_logger.warning(f"游戏账号 {game_account.gamertag} 第{current_count}场比赛失败: {match_error_msg}")
@@ -977,6 +1031,26 @@ async def step4_execute_gaming(
                             "matchErrorMessage": match_error_msg
                         }
                     )
+                    if consecutive_failures >= max_match_failures:
+                        error_msg = (
+                            f"账号 {game_account.gamertag} 连续 {consecutive_failures} 次比赛失败，"
+                            "停止该轮自动化以保留串流供重试"
+                        )
+                        logger.error(error_msg)
+                        game_logger.error(error_msg)
+                        stream_logger.error(error_msg)
+                        context.update_step_status("step4", TaskStepStatus.FAILED, error_msg)
+                        await _report_step4_failure(
+                            context, report_progress, error_msg, keep_session_alive, logger
+                        )
+                        if not keep_session_alive:
+                            await _close_task_window(window_manager, context.task_id, "match_fail_bound", logger)
+                        return Step4Result(
+                            success=False,
+                            error_code="NO_MATCHES_COMPLETED",
+                            message=error_msg,
+                            total_matches=completed_matches,
+                        )
                     await asyncio.sleep(5)
 
             logger.info(f"游戏账号 {game_account.gamertag} 今日已完成 "
@@ -1188,6 +1262,14 @@ async def _init_game_automation(
         async def _reconnect_input_and_rebind() -> bool:
             from ..xbox.stream_recovery import reconnect_input_channel, rebind_stream_bindings
 
+            await _report_input_channel_event(
+                context,
+                report_progress,
+                "RUNNING",
+                "Input DataChannel 已关闭，正在重连",
+                "input_reconnecting",
+                logger,
+            )
             ok = await reconnect_input_channel(context, logger)
             if ok:
                 rebind_stream_bindings(
@@ -1195,6 +1277,23 @@ async def _init_game_automation(
                     executor=executor,
                     switcher=switcher,
                     engine=engine,
+                )
+                await _report_input_channel_event(
+                    context,
+                    report_progress,
+                    "RUNNING",
+                    "Input DataChannel 已恢复",
+                    "input_restored",
+                    logger,
+                )
+            else:
+                await _report_input_channel_event(
+                    context,
+                    report_progress,
+                    "FAILED",
+                    "Input DataChannel 重连失败",
+                    "input_reconnect_failed",
+                    logger,
                 )
             return ok
 

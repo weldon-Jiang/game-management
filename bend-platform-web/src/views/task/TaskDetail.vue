@@ -114,10 +114,10 @@
         />
 
         <el-alert
-          v-if="isCurrentSession && (task.sessionPhase || session?.phase) === 'automation_failed'"
-          type="warning"
+          v-if="isCurrentSession && sessionPhaseHint"
+          :type="sessionPhaseAlertType"
           :closable="false"
-          title="自动化未完成，串流窗口仍保持连接，可重新选择模式后重试"
+          :title="sessionPhaseHint"
           class="window-hint"
         />
 
@@ -151,6 +151,7 @@ import {
   getGameActionTypeText,
   getSessionPhaseText,
   getSessionPhaseType,
+  getSessionPhaseHint,
   getTaskEventMessageText
 } from '@/utils/constants'
 import SessionPhaseStepper from '@/components/task/SessionPhaseStepper.vue'
@@ -190,6 +191,19 @@ const displaySessionPhase = computed(() => {
 const displayGameActionType = computed(() => {
   if (isCurrentSession.value) return task.value?.gameActionType
   return displaySession.value?.gameActionType || ''
+})
+
+const sessionPhaseHint = computed(() =>
+  getSessionPhaseHint(displaySessionPhase.value, displaySession.value?.errorMessage || task.value?.errorMessage || '')
+)
+
+const sessionPhaseAlertType = computed(() => {
+  const phase = String(displaySessionPhase.value || '').toLowerCase()
+  if (phase === 'failed') return 'error'
+  if (phase === 'automation_failed' || phase === 'initializing_input' || phase === 'initializing_display') {
+    return 'warning'
+  }
+  return 'success'
 })
 
 const hasAlerts = computed(

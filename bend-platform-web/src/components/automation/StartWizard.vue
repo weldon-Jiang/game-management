@@ -88,7 +88,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { automationApi } from '@/api/automation'
 import { taskApi } from '@/api/task'
 import SessionPhaseStepper from '@/components/task/SessionPhaseStepper.vue'
-import { getAgentDisplayName } from '@/utils/constants'
+import {
+  getAgentDisplayName,
+  getSessionPhaseHint,
+  getTaskEventMessageText
+} from '@/utils/constants'
 
 const props = defineProps({
   modelValue: Boolean,
@@ -152,7 +156,9 @@ const pollTaskDetail = async () => {
     const task = res.data?.task
     const session = res.data?.session
     sessionPhase.value = task?.sessionPhase || session?.phase || 'opening'
-    statusMessage.value = session?.errorMessage || task?.sessionPhase || '串流建立中...'
+    statusMessage.value =
+      getSessionPhaseHint(sessionPhase.value, session?.errorMessage || task?.errorMessage || '') ||
+      getTaskEventMessageText(session?.errorMessage || task?.sessionPhase || '串流建立中...')
     if (isReady.value) {
       stopPoll()
     }

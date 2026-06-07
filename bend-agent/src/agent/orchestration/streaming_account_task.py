@@ -91,6 +91,7 @@ class StreamingAccountTask:
                 report_progress=self._report_progress,
             )
             if not open_result.success:
+                await self._cleanup_session(session, destroy_window=True)
                 return AutomationResult(
                     success=False,
                     failed_step="SESSION",
@@ -256,6 +257,7 @@ class StreamingAccountTask:
         "_cloud_stream_session",
         "_webrtc_handler",
         "_webrtc_frame_controller",
+        "_xhome_requires_webrtc",
         "_video_capture_mode",
         "_video_mode",
         "_rtp_available",
@@ -292,23 +294,8 @@ class StreamingAccountTask:
         destroy_window: bool,
         emit_session_phases: bool = True,
     ) -> None:
-        try:
-            from ..automation.step3_streaming_init import _stop_sdl_display_pump
-            await _stop_sdl_display_pump(self.context)
-        except Exception:
-            pass
         await session.close(emit_phases=emit_session_phases)
         if destroy_window:
-            sdl = self.context.sdl_window
-            if sdl:
-                try:
-                    if hasattr(sdl, "destroy"):
-                        await sdl.destroy()
-                    elif hasattr(sdl, "close"):
-                        sdl.close()
-                except Exception:
-                    pass
-                self.context.sdl_window = None
             await self.window_manager.destroy_by_task(self.runtime.task_id)
         elif self.context.sdl_window and hasattr(self.context.sdl_window, "hide"):
             try:

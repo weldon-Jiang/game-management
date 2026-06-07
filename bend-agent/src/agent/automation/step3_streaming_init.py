@@ -264,6 +264,12 @@ async def _init_stream_window(
     try:
         from ..windows.stream_window import StreamWindow
 
+        if getattr(context, "_xhome_requires_webrtc", False):
+            window = StreamWindow(window_title="Bend WebRTC")
+            logger.info("xHome WebRTC 模式跳过本机 Xbox 窗口查找")
+            stream_logger.info("xHome WebRTC 模式跳过本机 Xbox 窗口查找")
+            return window
+
         window = StreamWindow(window_title="Xbox")
 
         if context.window_id:
@@ -526,7 +532,7 @@ async def _init_sdl_window(
         config = SDLWindowConfig(
             width=win_w,
             height=win_h,
-            title=f"Bend Agent - {account}",
+            title=f"Bend Agent - {account} - {context.task_id[:8]}",
             vsync=True,
             double_buffer=True,
             resizable=False,
@@ -594,8 +600,15 @@ async def _init_frame_capture(
         video_stream_controller = getattr(context, '_video_stream_controller', None)
         webrtc_frame_controller = getattr(context, '_webrtc_frame_controller', None)
         direct_capture = getattr(context, '_direct_capture', None)
+        requires_webrtc = bool(getattr(context, "_xhome_requires_webrtc", False))
 
-        if video_capture_mode in ('fallback', 'window') and webrtc_frame_controller:
+        if requires_webrtc:
+            if not webrtc_frame_controller:
+                logger.error("xHome WebRTC 模式缺少 WebRTC 帧控制器，拒绝降级到窗口截图")
+                stream_logger.error("xHome WebRTC 模式缺少 WebRTC 帧控制器")
+                return None
+            video_capture_mode = "webrtc"
+        elif video_capture_mode in ('fallback', 'window') and webrtc_frame_controller:
             video_capture_mode = 'webrtc'
 
         capture = VideoFrameCapture(window)
@@ -625,11 +638,16 @@ async def _init_frame_capture(
 
         frame = await capture.capture_frame()
         if frame:
-            logger.info(f"画面捕获器初始化成功，分辨率: {frame.width}x{frame.height}{fps_info}")
-            stream_logger.info(f"画面捕获器初始化成功，分辨率: {frame.width}x{frame.height}{fps_info}")
+            prefix = "WebRTC 首帧" if video_capture_mode == "webrtc" else "画面首帧"
+            logger.info(f"{prefix}捕获成功，分辨率: {frame.width}x{frame.height}{fps_info}")
+            stream_logger.info(f"{prefix}捕获成功，分辨率: {frame.width}x{frame.height}{fps_info}")
         else:
             logger.warning("画面捕获器初始化成功，但无法捕获首帧")
             stream_logger.warning("画面捕获器初始化成功，但无法捕获首帧")
+            if requires_webrtc:
+                logger.error("WebRTC 首帧 FAILED: xHome 模式拒绝使用窗口截图兜底")
+                stream_logger.error("WebRTC 首帧 FAILED: xHome 模式拒绝使用窗口截图兜底")
+                return None
 
         return capture
 
@@ -677,7 +695,8 @@ async def _validate_stream_readiness(
             await asyncio.sleep(1.0)
         if len(set(sizes)) > 1:
             return False, f"帧分辨率不稳定: {sizes}"
-        return True, f"首帧稳定 {sizes[0][0]}x{sizes[0][1]}"
+        prefix = "WebRTC 首帧" if getattr(context, "_video_capture_mode", "") == "webrtc" else "首帧"
+        return True, f"{prefix}稳定 {sizes[0][0]}x{sizes[0][1]}"
 
     async def _check_input() -> tuple:
         session = getattr(context, "xbox_session", None)
@@ -688,18 +707,19 @@ async def _validate_stream_readiness(
         ok1 = await send_keepalive(session)
         ok2 = await send_keepalive(session)
         if not (ok1 and ok2):
-            return False, "input keepalive 发送失败"
-        return True, "input channel ready"
+            return False, "input DataChannel keepalive 发送失败"
+        state = getattr(session, "input_channel_state", None) or "open"
+        return True, f"input DataChannel ready ({state})"
 
     frames_ok, frames_msg = await _check_frames()
     input_ok, input_msg = await _check_input()
     if frames_ok and input_ok:
-        logger.info("串流就绪: %s; %s", frames_msg, input_msg)
-        stream_logger.info("串流就绪: %s; %s", frames_msg, input_msg)
+        logger.info("STEP3 串流就绪: %s; %s", frames_msg, input_msg)
+        stream_logger.info("STEP3 串流就绪: %s; %s", frames_msg, input_msg)
         return True, f"{frames_msg}; {input_msg}"
 
     logger.warning(
-        "串流就绪检查失败 (%s; %s)，尝试重连 input 通道",
+        "STEP3 串流就绪检查 FAILED (%s; %s)，尝试重连 input DataChannel",
         frames_msg,
         input_msg,
     )
@@ -710,7 +730,7 @@ async def _validate_stream_readiness(
         frames_ok, frames_msg = await _check_frames()
         input_ok, input_msg = await _check_input()
         if frames_ok and input_ok:
-            logger.info("重连后串流就绪: %s; %s", frames_msg, input_msg)
+            logger.info("STEP3 重连后串流就绪: %s; %s", frames_msg, input_msg)
             return True, f"{frames_msg}; {input_msg}"
 
     session = getattr(context, "xbox_session", None)

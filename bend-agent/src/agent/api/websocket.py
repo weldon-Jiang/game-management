@@ -304,7 +304,7 @@ class WSClient:
                     self._ws = ws
                     self._connection_state = ConnectionState.CONNECTED
 
-                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+                await self._ensure_heartbeat_task()
                 return True
 
             except Exception as e:
@@ -352,8 +352,15 @@ class WSClient:
             self.logger.warning(f"Failed to send message: {e}")
             # 触发重连
             if self._running:
-                asyncio.create_task(self._trigger_reconnect())
+                self._schedule_reconnect()
             return False
+
+    def _schedule_reconnect(self) -> asyncio.Task:
+        """Schedule one background reconnect task at most."""
+        if self._reconnect_task and not self._reconnect_task.done():
+            return self._reconnect_task
+        self._reconnect_task = asyncio.create_task(self._trigger_reconnect())
+        return self._reconnect_task
 
     async def _trigger_reconnect(self):
         """触发异步重连（用于send失败时）"""
@@ -361,6 +368,25 @@ class WSClient:
             await self.reconnect()
         except Exception as e:
             self.logger.error(f"Background reconnection failed: {e}")
+        finally:
+            current = asyncio.current_task()
+            if self._reconnect_task is current:
+                self._reconnect_task = None
+
+    async def _ensure_heartbeat_task(self):
+        """Keep exactly one heartbeat loop alive."""
+        current = asyncio.current_task()
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            if self._heartbeat_task is current:
+                return
+            self._heartbeat_task.cancel()
+            try:
+                await asyncio.wait_for(self._heartbeat_task, timeout=2.0)
+            except asyncio.CancelledError:
+                pass
+            except asyncio.TimeoutError:
+                self.logger.warning("旧WebSocket心跳任务取消超时")
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def send_heartbeat(self):
         """
@@ -486,7 +512,7 @@ class WSClient:
             self.logger.error("Failed to connect to WebSocket server")
             return
 
-        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+        await self._ensure_heartbeat_task()
 
         while self._running:
             async with self._connection_lock:
@@ -505,7 +531,7 @@ class WSClient:
             except websockets.exceptions.ConnectionClosed:
                 self.logger.warning("WebSocket connection closed")
                 if self._running:
-                    await self.reconnect()
+                    await self._schedule_reconnect()
             except Exception as e:
                 self.logger.error(f"WebSocket error: {e}")
                 if self._running:

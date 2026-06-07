@@ -6,7 +6,7 @@ package com.bend.platform.enums;
  * 状态流转：
  * pending -> running -> game_preparing -> gaming -> completed
  *                                   ↓
- *                              failed/cancelled/timeout
+ *                              failed/cancelled/timeout/skipped
  */
 public enum TaskGameAccountStatusEnum {
     
@@ -50,7 +50,12 @@ public enum TaskGameAccountStatusEnum {
     /**
      * 超时 - 执行超时
      */
-    TIMEOUT("timeout", "超时");
+    TIMEOUT("timeout", "超时"),
+
+    /**
+     * 已跳过 - 用户或调度逻辑跳过该账号，视为终态
+     */
+    SKIPPED("skipped", "已跳过");
     
     private final String code;
     private final String description;
@@ -81,8 +86,8 @@ public enum TaskGameAccountStatusEnum {
      * 判断是否为终态
      */
     public boolean isFinalStatus() {
-        return this == COMPLETED || this == FAILED || 
-               this == CANCELLED || this == TIMEOUT;
+        return this == COMPLETED || this == FAILED ||
+               this == CANCELLED || this == TIMEOUT || this == SKIPPED;
     }
     
     /**
@@ -103,10 +108,10 @@ public enum TaskGameAccountStatusEnum {
     
     /**
      * 判断是否为空闲状态（游戏账号可被分配新任务）
-     * 空闲状态：COMPLETED、FAILED、CANCELLED、TIMEOUT
+     * 空闲状态：COMPLETED、FAILED、CANCELLED、TIMEOUT、SKIPPED
      */
     public boolean isIdle() {
-        return this == COMPLETED || this == FAILED || 
-               this == CANCELLED || this == TIMEOUT;
+        return this == COMPLETED || this == FAILED ||
+               this == CANCELLED || this == TIMEOUT || this == SKIPPED;
     }
 }

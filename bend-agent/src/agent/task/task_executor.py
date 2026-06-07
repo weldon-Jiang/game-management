@@ -787,6 +787,15 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
         if not success:
             raise Exception("启动自动化任务失败")
 
+        if two_phase and not game_action_type:
+            return {
+                'success': True,
+                'message': 'long-lived streaming session started; waiting for automation',
+                'sessionPhase': 'opening',
+                'totalMatches': 0,
+                'errorCode': None
+            }
+
         # 等待任务完成（最多等待3600秒）
         timeout = 3600
         start_time = time.time()

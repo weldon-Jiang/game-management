@@ -168,6 +168,7 @@ async def step2_execute_streaming(
                     "xboxServerId": context.current_xbox.id,
                     "xboxName": context.current_xbox.name,
                     "errorCode": error_code,
+                    "diagnosticCategory": connect_details.get("diagnosticCategory"),
                 }
             )
             return Step2Result(success=False, error_code=error_code, message=error_msg)
@@ -474,13 +475,26 @@ async def _connect_to_xbox(context: AgentTaskContext, logger, stream_logger) -> 
         connect_details["mediaChannelEnabled"] = media_ok
         context._media_channel_enabled = media_ok
 
-        if media_ok:
-            video_ok = await _start_cloud_video_receiver(context, logger, stream_logger)
-            connect_details["videoReceiverEnabled"] = video_ok
-        else:
+        if not media_ok:
             connect_details["videoReceiverEnabled"] = False
-            logger.warning("云端媒体通道未建立，步骤三将尝试降级捕获模式")
+            connect_details["errorCode"] = "MEDIA_CHANNEL_FAILED"
+            connect_details["diagnosticCategory"] = "webrtc_input"
+            connect_details["errorMessage"] = "WebRTC DataChannel/媒体通道未建立，无法确认真实主机串流"
+            logger.error(connect_details["errorMessage"])
+            stream_logger.error(connect_details["errorMessage"])
+            return False, connect_details
 
+        video_ok = await _start_cloud_video_receiver(context, logger, stream_logger)
+        connect_details["videoReceiverEnabled"] = video_ok
+        if not video_ok:
+            connect_details["errorCode"] = "FIRST_FRAME_FAILED"
+            connect_details["diagnosticCategory"] = "webrtc_first_frame"
+            connect_details["errorMessage"] = "WebRTC 首帧未到达，无法确认真实主机画面"
+            logger.error(connect_details["errorMessage"])
+            stream_logger.error(connect_details["errorMessage"])
+            return False, connect_details
+
+        context._xhome_requires_webrtc = True
         logger.info(f"✓ Xbox 云端串流连接成功: {xbox_info.name}")
         stream_logger.info(f"Xbox 云端串流连接成功: {xbox_info.name}")
         return True, connect_details
@@ -733,23 +747,39 @@ async def _establish_cloud_media_session(context: AgentTaskContext, logger, stre
             await asyncio.sleep(0.2)
 
         if hasattr(cloud_session, "wait_for_input_channel"):
-            await cloud_session.wait_for_input_channel(timeout=10.0)
+            input_ok = await cloud_session.wait_for_input_channel(timeout=10.0)
+            if not input_ok:
+                logger.error("input DataChannel FAILED: 未打开，云端媒体会话不可用")
+                if stream_logger:
+                    stream_logger.error("input DataChannel FAILED: 未打开")
+                return False
 
         if hasattr(cloud_session, "send_keepalive"):
             for _ in range(3):
-                await cloud_session.send_keepalive()
+                if not await cloud_session.send_keepalive():
+                    logger.error("input DataChannel FAILED: keepalive 发送失败")
+                    if stream_logger:
+                        stream_logger.error("input DataChannel FAILED: keepalive 发送失败")
+                    return False
                 await asyncio.sleep(0.2)
 
         cloud_session.attach_existing_tracks()
-        logger.info("云端 WebRTC 媒体会话已建立（video + input DataChannel）")
+        input_state = getattr(cloud_session, "input_channel_state", None)
+        logger.info(
+            "云端 WebRTC 媒体会话已建立（video + input DataChannel=%s）",
+            input_state or "unknown",
+        )
         if stream_logger:
-            stream_logger.info("云端 WebRTC 媒体会话已建立")
+            stream_logger.info(
+                "云端 WebRTC 媒体会话已建立（input DataChannel=%s）",
+                input_state or "unknown",
+            )
         return True
 
     except Exception as exc:
-        logger.warning(f"建立云端媒体会话失败: {exc}")
+        logger.warning(f"建立云端媒体会话 FAILED: {exc}")
         if stream_logger:
-            stream_logger.warning(f"建立云端媒体会话失败: {exc}")
+            stream_logger.warning(f"建立云端媒体会话 FAILED: {exc}")
         return False
 
 
@@ -891,9 +921,10 @@ async def _start_cloud_video_receiver(context: AgentTaskContext, logger, stream_
             if stream_logger:
                 stream_logger.info("WebRTC 首帧已就绪")
         else:
-            logger.warning("WebRTC 首帧未在超时内到达，步骤四将依赖后续重试")
+            logger.error("WebRTC 首帧 FAILED: 未在超时内到达")
             if stream_logger:
-                stream_logger.warning("WebRTC 首帧未在超时内到达")
+                stream_logger.error("WebRTC 首帧 FAILED: 未在超时内到达")
+            return False
 
         logger.info("WebRTC 视频帧控制器已就绪")
         if stream_logger:
@@ -901,9 +932,9 @@ async def _start_cloud_video_receiver(context: AgentTaskContext, logger, stream_
         return True
 
     except Exception as exc:
-        logger.warning(f"启动云端视频接收失败: {exc}")
+        logger.warning(f"启动云端视频接收 FAILED: {exc}")
         if stream_logger:
-            stream_logger.warning(f"启动云端视频接收失败: {exc}")
+            stream_logger.warning(f"启动云端视频接收 FAILED: {exc}")
         context._video_capture_mode = "fallback"
         return False
 
@@ -1115,7 +1146,10 @@ async def _check_xbox_availability(context: AgentTaskContext, xbox_host_id: str)
         from ..api.platform_api_client import PlatformApiClient
 
         api_client = PlatformApiClient()
-        status = await api_client.get_xbox_host_status(xbox_host_id)
+        try:
+            status = await api_client.get_xbox_host_status(xbox_host_id)
+        finally:
+            await api_client.close()
 
         # 如果主机在数据库中不存在，说明还没注册，返回可用
         if status is None:
@@ -1146,7 +1180,10 @@ async def _check_xbox_availability(context: AgentTaskContext, xbox_host_id: str)
         from ..api.platform_api_client import PlatformApiClient
 
         api_client = PlatformApiClient()
-        locked = await api_client.lock_xbox_host(xbox_host_id)
+        try:
+            locked = await api_client.lock_xbox_host(xbox_host_id)
+        finally:
+            await api_client.close()
 
         if not locked:
             logger.warning(f"平台锁定Xbox主机 {xbox_host_id} 失败（主机可能不存在或已被其他Agent锁定）")
@@ -1159,10 +1196,10 @@ async def _check_xbox_availability(context: AgentTaskContext, xbox_host_id: str)
 
     # 步骤3: 更新本地调度器状态
     try:
-        from ..task.task_executor import task_executor
+        from ..task.automation_scheduler import get_active_scheduler
 
-        if task_executor and hasattr(task_executor, 'scheduler'):
-            scheduler = task_executor.scheduler
+        scheduler = get_active_scheduler()
+        if scheduler:
             await scheduler.acquire_xbox_host(xbox_host_id, context.task_id)
     except Exception as e:
         logger.debug(f"更新本地调度器状态失败: {e}")
@@ -1191,7 +1228,10 @@ async def _is_xbox_occupied(xbox_host_id: str, context: AgentTaskContext, logger
         from ..api.platform_api_client import PlatformApiClient
 
         api_client = PlatformApiClient()
-        status = await api_client.get_xbox_host_status(xbox_host_id)
+        try:
+            status = await api_client.get_xbox_host_status(xbox_host_id)
+        finally:
+            await api_client.close()
     except Exception as e:
         logger.warning(f"占用检测：无法连接平台（{xbox_host_id}）: {e}")
         return False
@@ -1238,17 +1278,23 @@ async def _release_xbox_host(context: AgentTaskContext):
                 from ..api.platform_api_client import PlatformApiClient
                 
                 api_client = PlatformApiClient()
-                await api_client.unlock_xbox_host(xbox_host_id)
-                logger.info(f"成功通过平台解锁Xbox主机: {xbox_host_id}")
+                try:
+                    unlocked = await api_client.unlock_xbox_host(xbox_host_id)
+                finally:
+                    await api_client.close()
+                if unlocked:
+                    logger.info(f"成功通过平台解锁Xbox主机: {xbox_host_id}")
+                else:
+                    logger.info(f"平台未登记或已释放Xbox主机，跳过解锁确认: {xbox_host_id}")
             except Exception as e:
                 logger.warning(f"通过平台解锁主机失败: {e}")
             
             # 步骤2: 更新本地调度器状态
             try:
-                from ..task.task_executor import task_executor
-                
-                if task_executor and hasattr(task_executor, 'scheduler'):
-                    scheduler = task_executor.scheduler
+                from ..task.automation_scheduler import get_active_scheduler
+
+                scheduler = get_active_scheduler()
+                if scheduler:
                     await scheduler.release_xbox_host(xbox_host_id, context.task_id)
             except Exception as e:
                 logger.debug(f"更新本地调度器状态失败: {e}")

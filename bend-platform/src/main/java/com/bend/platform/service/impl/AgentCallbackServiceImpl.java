@@ -7,19 +7,20 @@ import com.bend.platform.entity.TaskGameAccountStatus;
 import com.bend.platform.entity.XboxHost;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
-import com.bend.platform.repository.TaskEventMapper;
 import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.service.AgentCallbackService;
 import com.bend.platform.service.AgentLoadControlService;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.service.StreamingSessionService;
+import com.bend.platform.service.TaskEventService;
 import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.service.TaskService;
 import com.bend.platform.service.XboxHostService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -51,7 +52,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     private final StreamingAccountService streamingAccountService;
     private final XboxHostService xboxHostService;
     private final StreamingSessionService streamingSessionService;
-    private final TaskEventMapper taskEventMapper;
+    private final TaskEventService taskEventService;
 
     /**
      * 统一进度上报入口。
@@ -185,6 +186,17 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             updateMetrics(taskId, gameAccountId, metrics);
         }
 
+        if (isLongLivedStreamingTask(task) && isStreamingPreparationStep(step)) {
+            if (!"running".equals(task.getStatus())) {
+                task.setStatus("running");
+            }
+            task.setCompletedTime(null);
+            response.put("action", "CONTINUE");
+            taskMapper.updateById(task);
+            log.info("串流准备步骤完成，任务保持长寿命运行 - TaskID: {}, Step: {}", taskId, step);
+            return;
+        }
+
         boolean allCompleted = statusService.areAllGameAccountsCompleted(taskId);
 
         if (allCompleted) {
@@ -206,6 +218,32 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     private void handleFailedStatus(Task task, String taskId, String step, String message,
                                      String gameAccountId, Map<String, Object> metrics,
                                      Map<String, Object> error, Map<String, Object> response) {
+        if (isLongLivedStreamingTask(task) && "STEP4".equals(step)) {
+            task.setStatus("running");
+            task.setStepStatus("FAILED");
+            task.setSessionPhase("automation_failed");
+            task.setGameActionPending(true);
+            task.setCompletedTime(null);
+            if (step != null) {
+                task.setCurrentStep(step);
+            }
+            if (message != null) {
+                task.setProgressMessage(message);
+                task.setErrorMessage(message);
+            }
+            if (gameAccountId != null) {
+                statusService.updateStatus(taskId, gameAccountId, "failed");
+                updateMetrics(taskId, gameAccountId, metrics);
+            }
+            taskMapper.updateById(task);
+            if (task.getSessionId() != null) {
+                streamingSessionService.updatePhase(task.getSessionId(), "automation_failed", message);
+            }
+            response.put("action", "CONTINUE");
+            log.info("Step4 失败但串流会话保留 - TaskID: {}, Message: {}", taskId, message);
+            return;
+        }
+
         task.setStatus("failed");
         task.setStepStatus("FAILED");
 
@@ -661,23 +699,23 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     private void recordTaskEvent(
             Task task, String taskId, Map<String, Object> data,
             String status, String message, String scope) {
-        try {
-            TaskEvent event = new TaskEvent();
-            event.setTaskId(taskId);
-            event.setMerchantId(task.getMerchantId());
-            event.setScope(scope != null ? scope : "task");
-            event.setPhase((String) data.get("phase"));
-            event.setStatus(status);
-            event.setMessage(message);
-            event.setGameAccountId((String) data.get("gameAccountId"));
-            event.setModule((String) data.get("module"));
-            if (task.getSessionId() != null) {
-                event.setSessionId(task.getSessionId());
-            }
-            taskEventMapper.insert(event);
-        } catch (Exception e) {
-            log.debug("task_event insert skipped: {}", e.getMessage());
+        TaskEvent event = new TaskEvent();
+        event.setTaskId(taskId);
+        event.setMerchantId(task.getMerchantId());
+        event.setScope(scope != null ? scope : "task");
+        event.setPhase((String) data.get("phase"));
+        event.setStatus(status);
+        event.setMessage(message);
+        event.setGameAccountId((String) data.get("gameAccountId"));
+        event.setModule((String) data.get("module"));
+
+        String payloadSessionId = getPayloadSessionId(data);
+        if (StringUtils.hasText(payloadSessionId)) {
+            event.setSessionId(payloadSessionId);
+        } else if (task.getSessionId() != null) {
+            event.setSessionId(task.getSessionId());
         }
+        taskEventService.record(event);
     }
 
     private Map<String, Object> handleGameAccountScope(
@@ -710,9 +748,19 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     private Map<String, Object> handleSessionScope(
             Task task, String taskId, Map<String, Object> data,
             String status, String message) {
+        String sessionId = getPayloadSessionId(data);
+        if (StringUtils.hasText(sessionId)
+                && StringUtils.hasText(task.getSessionId())
+                && !task.getSessionId().equals(sessionId)) {
+            throw new BusinessException(409, "回调会话已过期，忽略旧会话状态");
+        }
         String phase = (String) data.get("phase");
         if (phase != null) {
             task.setSessionPhase(phase);
+            if (isLongLivedStreamingTask(task) && isRunningSessionPhase(phase)) {
+                task.setStatus("running");
+                task.setCompletedTime(null);
+            }
             if ("ready".equals(phase) || "automation_failed".equals(phase)) {
                 task.setGameActionPending(true);
                 if ("running".equals(task.getStatus())
@@ -754,6 +802,28 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         response.put("action", "CONTINUE");
         log.info("Session progress - TaskID: {}, phase: {}", taskId, phase);
         return response;
+    }
+
+    private boolean isLongLivedStreamingTask(Task task) {
+        return task != null
+                && StringUtils.hasText(task.getSessionId())
+                && StringUtils.hasText(task.getStreamingAccountId());
+    }
+
+    private boolean isStreamingPreparationStep(String step) {
+        return "STEP1".equals(step) || "STEP2".equals(step) || "STEP3".equals(step);
+    }
+
+    private boolean isRunningSessionPhase(String phase) {
+        return !"closed".equals(phase) && !"failed".equals(phase);
+    }
+
+    private String getPayloadSessionId(Map<String, Object> data) {
+        Object sessionId = data.get("sessionId");
+        if (sessionId == null) {
+            sessionId = data.get("session_id");
+        }
+        return sessionId == null ? null : String.valueOf(sessionId);
     }
 
     @SuppressWarnings("unchecked")

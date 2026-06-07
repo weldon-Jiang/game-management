@@ -250,11 +250,17 @@ async def _validate_account_info(
     if "@" not in context.streaming_account_email:
         return {"is_valid": False, "error_msg": "串流账号邮箱格式无效"}
 
-    # 打印账号信息供确认
+    # 只记录凭据是否存在，禁止输出明文密码。
     logger.info(f"账号验证 - 邮箱: {context.streaming_account_email}")
-    logger.info(f"账号验证 - 密码: {context.streaming_account_password}")
+    logger.info(
+        "账号验证 - 密码已提供: %s",
+        bool(context.streaming_account_password),
+    )
     stream_logger.info(f"账号验证 - 邮箱: {context.streaming_account_email}")
-    stream_logger.info(f"账号验证 - 密码: {context.streaming_account_password}")
+    stream_logger.info(
+        "账号验证 - 密码已提供: %s",
+        bool(context.streaming_account_password),
+    )
 
     return {"is_valid": True, "error_msg": ""}
 

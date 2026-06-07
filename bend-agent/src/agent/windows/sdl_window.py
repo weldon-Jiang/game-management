@@ -136,8 +136,13 @@ class SDLStreamWindow:
             self._running = True
             self._state = SDLWindowState.READY
             self.logger.info(
-                f"SDL窗口初始化成功: {self._config.width}x{self._config.height} "
-                f"(windowed, fixed-size, draggable)"
+                "SDL窗口初始化成功: %sx%s title=%s hwnd=%s rect=%s "
+                "(windowed, fixed-size, draggable)",
+                self._config.width,
+                self._config.height,
+                self._config.title,
+                self._get_hwnd(),
+                self._get_window_rect(),
             )
 
             return True
@@ -160,7 +165,12 @@ class SDLStreamWindow:
                 self._running = True
                 self._state = SDLWindowState.READY
                 self.logger.info(
-                    f"SDL窗口初始化成功: {self._config.width}x{self._config.height}"
+                    "SDL窗口初始化成功: %sx%s title=%s hwnd=%s rect=%s",
+                    self._config.width,
+                    self._config.height,
+                    self._config.title,
+                    self._get_hwnd(),
+                    self._get_window_rect(),
                 )
                 return True
             except Exception as e:
@@ -183,6 +193,55 @@ class SDLStreamWindow:
         except Exception:
             self._hwnd = None
         return self._hwnd
+
+    def _get_window_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        if sys.platform != 'win32':
+            return None
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            hwnd = self._get_hwnd()
+            if not hwnd:
+                return None
+            rect = wintypes.RECT()
+            if ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                return rect.left, rect.top, rect.right, rect.bottom
+        except Exception:
+            return None
+        return None
+
+    def _bring_to_front(self):
+        """Best-effort foreground request for the visible SDL task window."""
+        if sys.platform != 'win32':
+            return
+        try:
+            import ctypes
+
+            hwnd = self._get_hwnd()
+            if not hwnd:
+                return
+
+            user32 = ctypes.windll.user32
+            SW_RESTORE = 9
+            HWND_TOPMOST = -1
+            HWND_NOTOPMOST = -2
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_SHOWWINDOW = 0x0040
+
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            user32.SetWindowPos(
+                hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            )
+            user32.SetForegroundWindow(hwnd)
+            user32.SetWindowPos(
+                hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            )
+        except Exception as e:
+            self.logger.warning(f"前置窗口失败: {e}")
 
     def set_close_callback(self, callback: Optional[Callable[[], None]]) -> None:
         """Invoked when user clicks the title-bar close button."""
@@ -390,14 +449,20 @@ class SDLStreamWindow:
                 import ctypes
                 hwnd = self._get_hwnd()
                 if hwnd:
-                    ctypes.windll.user32.ShowWindow(hwnd, 5)  # SW_SHOW
+                    ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
             except Exception as e:
                 self.logger.warning(f"显示窗口失败: {e}")
         self._apply_window_constraints()
+        self._bring_to_front()
         self._visible = True
         if self._running:
             self._state = SDLWindowState.RUNNING
-        self.logger.info("SDL窗口已显示")
+        self.logger.info(
+            "SDL窗口已显示: title=%s hwnd=%s rect=%s",
+            self._config.title,
+            self._get_hwnd(),
+            self._get_window_rect(),
+        )
 
     @property
     def is_visible(self) -> bool:

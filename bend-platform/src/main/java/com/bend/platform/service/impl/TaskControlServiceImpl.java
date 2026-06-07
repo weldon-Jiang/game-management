@@ -230,16 +230,16 @@ public class TaskControlServiceImpl implements TaskControlService {
     }
 
     /**
-     * 阶段二实现：仅当任务处于 ready / automation_failed 或仍待选择任务类型时允许启动；
-     * 写入 gameActionType、切换 phase=automating，锁定会话任务类型并向 Agent 下发开始指令。
+     * 阶段二实现：仅当任务明确处于 ready / automation_failed 时允许启动；
+     * gameActionPending 只表示 UI 上“待选择模式”，不能绕过串流会话就绪检查。通过后写入
+     * gameActionType、切换 phase=automating，锁定会话任务类型并向 Agent 下发开始指令。
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> startAutomation(String taskId, StartTaskAutomationRequest request, String merchantId) {
         Task task = requireTask(taskId, merchantId);
         if (!"ready".equalsIgnoreCase(task.getSessionPhase())
-                && !"automation_failed".equalsIgnoreCase(task.getSessionPhase())
-                && !Boolean.TRUE.equals(task.getGameActionPending())) {
+                && !"automation_failed".equalsIgnoreCase(task.getSessionPhase())) {
             throw new BusinessException(400, "任务尚未就绪，无法开始自动化");
         }
 

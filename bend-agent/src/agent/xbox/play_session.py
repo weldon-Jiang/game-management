@@ -27,7 +27,9 @@ API端点：
 """
 
 import asyncio
+import contextlib
 import json
+import uuid
 
 import aiohttp
 from dataclasses import dataclass, field
@@ -36,6 +38,7 @@ from enum import Enum
 
 from ..core.logger import get_logger
 from ..gssv.base_uri import DEFAULT_GSSV_BASE_URI, normalize_gssv_base_uri
+from ..gssv.device_info import build_x_ms_device_info
 
 
 class SessionState(Enum):
@@ -131,6 +134,7 @@ class XboxPlaySessionManager:
         self._access_token: Optional[str] = None
         self._aiohttp_session: Optional[Any] = None
         self._last_sdp_error_code: Optional[str] = None
+        self._keepalive_task: Optional[asyncio.Task] = None
 
     @property
     def base_url(self) -> str:
@@ -148,8 +152,22 @@ class XboxPlaySessionManager:
 
     async def close(self):
         """关闭HTTP会话"""
+        if self._current_session:
+            await self.close_session()
         if self._aiohttp_session and not self._aiohttp_session.closed:
             await self._aiohttp_session.close()
+
+    def _build_headers(self, content_type: bool = False) -> Dict[str, str]:
+        """Build xHome headers with the browser device identity."""
+        headers = {
+            'Authorization': f'Bearer {self._access_token}',
+            'Accept': 'application/json',
+            'x-xbl-contract-version': '1',
+            'X-MS-Device-Info': build_x_ms_device_info(),
+        }
+        if content_type:
+            headers['Content-Type'] = 'application/json'
+        return headers
 
     def set_access_token(self, token: str):
         """
@@ -253,15 +271,12 @@ class XboxPlaySessionManager:
         try:
             import aiohttp
             session = await self._get_http_session()
-            headers = {
-                'Authorization': f'Bearer {self._access_token}',
-                'Content-Type': 'application/json',
-                'x-xbl-contract-version': '1'
-            }
+            headers = self._build_headers(content_type=True)
 
             url = f"{self._base_url}/{play_path}"
+            client_session_id = config.client_session_id or str(uuid.uuid4())
             data = {
-                "clientSessionId": config.client_session_id or "",
+                "clientSessionId": client_session_id,
                 "titleId": config.title_id or "",
                 "systemUpdateGroup": "",
                 "settings": {
@@ -275,7 +290,7 @@ class XboxPlaySessionManager:
                     "useIceConnection": config.use_ice_connection,
                 },
                 "serverId": server_id,
-                "fallbackRegionNames": [None]
+                "fallbackRegionNames": []
             }
 
             self.logger.info(f"Creating PlaySession for server {server_id}...")
@@ -307,15 +322,19 @@ class XboxPlaySessionManager:
                     if state == "Provisioned":
                         self.logger.info("Session already provisioned")
                         self._current_session.state = SessionState.WAITING_SDP
+                        await self.get_configuration()
+                        await self.send_keepalive()
                         return self._current_session
 
-                    provisioned = await self._wait_for_provision(
+                    ready = await self._wait_for_provision(
                         session_path, headers, session
                     )
 
-                    if provisioned:
+                    if ready:
                         self._current_session.state = SessionState.WAITING_SDP
-                        self.logger.info("Session provisioned successfully")
+                        self.logger.info("Session ready for SDP exchange")
+                        await self.get_configuration()
+                        await self.send_keepalive()
                         return self._current_session
                     else:
                         self.logger.error("Session provisioning timeout or failed")
@@ -376,22 +395,8 @@ class XboxPlaySessionManager:
                         self.logger.debug(f"Provisioning attempt {attempt + 1}: state={state}")
 
                         if state == "ReadyToConnect":
-                            lpt = state_data.get("lpt") or state_data.get("lastProvisioningToken")
-                            if lpt:
-                                connect_url = f"{self._base_url}/{session_path}/connect"
-                                try:
-                                    async with http_session.post(
-                                        connect_url,
-                                        json={"lpt": lpt},
-                                        headers=headers,
-                                        timeout=aiohttp.ClientTimeout(total=10),
-                                    ) as connect_resp:
-                                        self.logger.info(
-                                            "ReadyToConnect -> connect: %s",
-                                            connect_resp.status,
-                                        )
-                                except Exception as connect_err:
-                                    self.logger.warning("connect POST failed: %s", connect_err)
+                            self.logger.info("Session ReadyToConnect; xHome can proceed to SDP")
+                            return True
 
                         if state == "Provisioned":
                             return True
@@ -453,11 +458,7 @@ class XboxPlaySessionManager:
         try:
             import aiohttp
             http_session = await self._get_http_session()
-            headers = {
-                'Authorization': f'Bearer {self._access_token}',
-                'Content-Type': 'application/json',
-                'x-xbl-contract-version': '1'
-            }
+            headers = self._build_headers(content_type=True)
 
             url = f"{self._base_url}/{use_session.session_path}/sdp"
             data = {
@@ -510,6 +511,7 @@ class XboxPlaySessionManager:
                             use_session.sdp_offer = actual_sdp_offer
                             use_session.sdp_answer = sdp_answer
                             use_session.state = SessionState.CONNECTED
+                        self.start_keepalive_loop()
                         return sdp_answer
                     else:
                         self.logger.error("Failed to extract SDP from response")
@@ -538,6 +540,7 @@ class XboxPlaySessionManager:
                             use_session.sdp_offer = actual_sdp_offer
                             use_session.sdp_answer = sdp_answer
                             use_session.state = SessionState.CONNECTED
+                        self.start_keepalive_loop()
                         return sdp_answer
                     else:
                         self.logger.error("Failed to get SDP answer after polling")
@@ -693,6 +696,88 @@ class XboxPlaySessionManager:
         )
         return None
 
+    async def get_configuration(self) -> Optional[Dict[str, Any]]:
+        """Fetch session configuration for xHome diagnostics and parity with browser clients."""
+        session = self._current_session
+        if not session or not session.session_path:
+            return None
+
+        try:
+            http_session = await self._get_http_session()
+            headers = self._build_headers()
+            url = f"{self._base_url}/{session.session_path}/configuration"
+            async with http_session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    self.logger.info("Session configuration fetched")
+                    return data
+                body = await resp.text()
+                self.logger.warning(
+                    "Session configuration returned %s body=%s",
+                    resp.status,
+                    body[:200],
+                )
+        except Exception as exc:
+            self.logger.warning("Session configuration fetch failed: %s", exc)
+        return None
+
+    async def send_keepalive(self) -> bool:
+        """Send xHome session keepalive to keep the cloud session active."""
+        session = self._current_session
+        if not session or not session.session_path:
+            return False
+
+        try:
+            http_session = await self._get_http_session()
+            headers = self._build_headers(content_type=True)
+            url = f"{self._base_url}/{session.session_path}/keepalive"
+            async with http_session.post(
+                url,
+                json={},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status in (200, 202, 204):
+                    self.logger.debug("Session keepalive ok: %s", resp.status)
+                    return True
+                body = await resp.text()
+                self.logger.warning(
+                    "Session keepalive returned %s body=%s",
+                    resp.status,
+                    body[:200],
+                )
+        except Exception as exc:
+            self.logger.warning("Session keepalive failed: %s", exc)
+        return False
+
+    def start_keepalive_loop(self, interval: float = 30.0) -> None:
+        """Start a best-effort xHome keepalive loop for the active PlaySession."""
+        if self._keepalive_task and not self._keepalive_task.done():
+            return
+
+        async def _loop():
+            while self._current_session and self._current_session.state in (
+                SessionState.WAITING_SDP,
+                SessionState.CONNECTED,
+                SessionState.STREAMING,
+            ):
+                await asyncio.sleep(interval)
+                await self.send_keepalive()
+
+        self._keepalive_task = asyncio.create_task(_loop())
+
+    async def _stop_keepalive_loop(self) -> None:
+        task = self._keepalive_task
+        if task and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._keepalive_task = None
+
     async def close_session(self, session_id: str = None) -> bool:
         """
         关闭播放会话
@@ -707,16 +792,18 @@ class XboxPlaySessionManager:
         if not sid:
             self.logger.warning("No session to close")
             return False
+        session_path = self._current_session.session_path if self._current_session else ""
 
         try:
+            await self._stop_keepalive_loop()
             import aiohttp
             session = await self._get_http_session()
-            headers = {
-                'Authorization': f'Bearer {self._access_token}',
-                'x-xbl-contract-version': '1'
-            }
+            headers = self._build_headers()
 
-            url = f"{self._base_url}/v6/servers/home"
+            if not session_path:
+                self.logger.warning("No session path to close")
+                return False
+            url = f"{self._base_url}/{session_path}"
             async with session.delete(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status in (200, 204):
                     self.logger.info(f"Session closed: {sid}")

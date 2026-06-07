@@ -255,7 +255,8 @@ class VideoFrameCapture:
         """使用 WebRTC video track 捕获帧。"""
         try:
             if not self._webrtc_controller:
-                return await self._capture_window_frame()
+                self.logger.warning("WebRTC 控制器不可用")
+                return None
 
             frame_data = await self._webrtc_controller.get_frame(timeout=0.5)
             if frame_data is not None and isinstance(frame_data, np.ndarray):
@@ -273,11 +274,11 @@ class VideoFrameCapture:
                 self._last_frame = frame
                 return frame
 
-            self.logger.warning("WebRTC 帧为空，降级到窗口截图")
-            return await self._capture_window_frame()
+            self.logger.warning("WebRTC 帧为空")
+            return None
         except Exception as e:
-            self.logger.error(f"WebRTC 帧捕获失败，回退到窗口截图: {e}")
-            return await self._capture_window_frame()
+            self.logger.error(f"WebRTC 帧捕获失败: {e}")
+            return None
 
     async def _capture_rtp_frame(self) -> Optional[Frame]:
         """使用RTP视频流捕获帧（最高性能）"""

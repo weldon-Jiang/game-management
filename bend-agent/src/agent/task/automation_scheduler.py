@@ -495,7 +495,6 @@ class AutomationScheduler:
                 self._task_objects.pop(task_id, None)
                 self._cancel_events.pop(task_id, None)
                 self._task_contexts.pop(task_id, None)
-                self._task_results.pop(task_id, None)
             self._registry.unregister(task_id)
 
             self._semaphore.release()
@@ -590,8 +589,6 @@ class AutomationScheduler:
 
     async def force_terminate_task(self, task_id: str) -> bool:
         """Cancel task, destroy SDL window, and disconnect stream."""
-        await self._cleanup_task_resources(task_id)
-
         cancel_event = self._cancel_events.get(task_id)
         if cancel_event:
             cancel_event.set()
@@ -599,11 +596,16 @@ class AutomationScheduler:
         asyncio_task = self._running_tasks.get(task_id)
         if asyncio_task and not asyncio_task.done():
             asyncio_task.cancel()
+            await self._wait_task_coroutine_done(self, task_id, timeout=5.0)
+
+        if task_id in self._running_tasks:
+            await self._cleanup_task_resources(task_id)
 
         if cancel_event or asyncio_task:
             self.logger.info("任务 %s 已终止（窗口与串流资源已清理）", task_id)
             return True
 
+        await self._cleanup_task_resources(task_id)
         self.logger.warning("任务 %s 未在运行，仅执行资源清理", task_id)
         return False
 
@@ -611,38 +613,11 @@ class AutomationScheduler:
         context = self._task_contexts.get(task_id)
         if context:
             try:
-                from ..automation.step3_streaming_init import _stop_sdl_display_pump
+                from ..xhome_stream.cleanup import close_media_context
 
-                await _stop_sdl_display_pump(context)
+                await close_media_context(context, self.logger)
             except Exception as exc:
-                self.logger.debug("stop sdl pump: %s", exc)
-
-            sdl = getattr(context, "sdl_window", None)
-            if sdl:
-                try:
-                    if hasattr(sdl, "destroy"):
-                        await sdl.destroy()
-                    elif hasattr(sdl, "close"):
-                        sdl.close()
-                except Exception as exc:
-                    self.logger.debug("destroy sdl window: %s", exc)
-                context.sdl_window = None
-
-            cloud = getattr(context, "_cloud_stream_session", None) or getattr(
-                context, "xbox_session", None
-            )
-            if cloud and hasattr(cloud, "disconnect"):
-                try:
-                    await cloud.disconnect()
-                except Exception as exc:
-                    self.logger.debug("disconnect cloud session: %s", exc)
-
-            play_mgr = getattr(context, "_play_session_manager", None)
-            if play_mgr and hasattr(play_mgr, "close"):
-                try:
-                    await play_mgr.close()
-                except Exception as exc:
-                    self.logger.debug("close play session: %s", exc)
+                self.logger.debug("close media context: %s", exc)
 
         try:
             await self._window_manager.destroy_by_task(task_id)

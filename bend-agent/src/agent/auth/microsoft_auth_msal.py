@@ -100,6 +100,8 @@ class XboxLiveTokens:
     xsts_token: str   # XSTS令牌（用于主机认证）
     user_hash: str    # 用户哈希（UHS）
     gs_token: Optional[str] = None  # GSSV Token (Xbox Live Gaming Service Token) - Xbox Live API 需要这个
+    gssv_base_uri: Optional[str] = None  # xHome 返回的默认区域 baseUri，后续发现/串流必须复用
+    xhome_token_response: Optional[Dict[str, Any]] = None  # 保留 xHome 原始响应，便于真实主机联调排查
 
 
 @dataclass
@@ -190,7 +192,7 @@ class TokenStorage:
         """
         try:
             tokens_file = cls._get_tokens_file()
-            logger.debug(f"尝试从 {tokens_file} 加载token")
+            logger.debug(f"尝试从 {tokens_file} 加载认证缓存")
             
             if tokens_file.exists():
                 with open(tokens_file, 'r', encoding='utf-8') as f:
@@ -198,11 +200,11 @@ class TokenStorage:
                     if isinstance(tokens, dict):
                         cls._cache.clear()
                         cls._cache.update(tokens)
-                        logger.info(f"已从文件加载 {len(tokens)} 个账号的Refresh Token")
+                        logger.info(f"已从文件加载 {len(tokens)} 个账号的认证缓存")
             else:
-                logger.info(f"未找到token文件: {tokens_file}，首次使用需要手动登录")
+                logger.info(f"未找到认证缓存文件: {tokens_file}，首次使用需要手动登录")
         except Exception as e:
-            logger.error(f"加载token文件失败: {e}")
+            logger.error(f"加载认证缓存文件失败: {e}")
     
     @classmethod
     async def save_all_tokens_async(cls):
@@ -241,9 +243,9 @@ class TokenStorage:
                 with open(tokens_file, 'w', encoding='utf-8') as f:
                     json.dump(cls._cache, f, indent=2)
                     
-                logger.debug(f"已保存 {len(cls._cache)} 个账号的Refresh Token（带锁）")
+                logger.debug(f"已保存 {len(cls._cache)} 个账号的认证缓存（带锁）")
             except Exception as e:
-                logger.error(f"保存token文件失败: {e}")
+                logger.error(f"保存认证缓存文件失败: {e}")
     
     @classmethod
     def get_token(cls, email: str) -> Optional[str]:
@@ -281,7 +283,7 @@ class TokenStorage:
         """
         cls._cache[email] = refresh_token
         await cls.save_all_tokens_async()
-        logger.info(f"已保存账号 {email} 的Refresh Token（异步带锁）")
+        logger.info(f"已保存账号 {email} 的认证缓存（异步带锁）")
     
     @classmethod
     def remove_token(cls, email: str):
@@ -294,7 +296,7 @@ class TokenStorage:
         if email in cls._cache:
             del cls._cache[email]
             cls.save_all_tokens()
-            logger.info(f"已删除账号 {email} 的Refresh Token")
+            logger.info(f"已删除账号 {email} 的认证缓存")
     
     @classmethod
     async def remove_token_async(cls, email: str):
@@ -307,7 +309,7 @@ class TokenStorage:
         if email in cls._cache:
             del cls._cache[email]
             await cls.save_all_tokens_async()
-            logger.info(f"已删除账号 {email} 的Refresh Token（异步带锁）")
+            logger.info(f"已删除账号 {email} 的认证缓存（异步带锁）")
     
     @classmethod
     def get_all_accounts(cls) -> list:
@@ -432,7 +434,7 @@ class MicrosoftOAuthClient:
                         
                         if resp.status == 200:
                             expires_at = time.time() + result.get("expires_in", 3600)
-                            logger.info(f"Token获取成功，有效期: {result.get('expires_in', 3600)}秒")
+                            logger.info(f"OAuth 授权成功，有效期: {result.get('expires_in', 3600)}秒")
                             return MicrosoftTokens(
                                 access_token=result["access_token"],
                                 refresh_token=result.get("refresh_token", ""),
@@ -458,7 +460,7 @@ class MicrosoftOAuthClient:
                             return None
                             
             except Exception as e:
-                logger.error(f"轮询Token异常: {e}")
+                logger.error(f"轮询授权结果异常: {e}")
                 continue
         
         logger.warning("设备代码认证超时")
@@ -499,11 +501,11 @@ class MicrosoftOAuthClient:
                             token_type=result.get("token_type", "Bearer")
                         )
                     else:
-                        text = await resp.text()
-                        logger.error(f"Refresh Token刷新失败: {resp.status}, {text}")
+                        await resp.text()
+                        logger.error(f"刷新认证缓存失败: HTTP {resp.status}")
                         return None
         except Exception as e:
-            logger.error(f"Refresh Token刷新异常: {e}")
+            logger.error(f"刷新认证缓存异常: {e}")
             return None
 
 
@@ -549,7 +551,7 @@ class XboxLiveClient:
             if not xsts_token or not user_hash:
                 return None
             
-            logger.info(f"获取Xbox Live Tokens成功，用户哈希: {user_hash}")
+            logger.info(f"Xbox Live 认证成功，用户哈希: {user_hash}")
             
             return XboxLiveTokens(
                 user_token=user_token,
@@ -558,7 +560,7 @@ class XboxLiveClient:
             )
             
         except Exception as e:
-            logger.error(f"获取Xbox Live Tokens异常: {e}", exc_info=True)
+            logger.error(f"Xbox Live 认证异常: {e}", exc_info=True)
             return None
     
     async def _get_xbox_user_token(self, access_token: str) -> Optional[str]:
@@ -591,18 +593,18 @@ class XboxLiveClient:
                 headers={"x-xbl-contract-version": "1"}
             ) as resp:
                 if resp.status != 200:
-                    text = await resp.text()
-                    logger.error(f"获取Xbox User Token失败: {resp.status}, {text}")
+                    await resp.text()
+                    logger.error(f"Xbox User 认证失败: HTTP {resp.status}")
                     return None
                 
                 data = await resp.json()
                 token = data.get("Token")
                 
                 if not token:
-                    logger.error("获取Xbox User Token数据不完整")
+                    logger.error("Xbox User 认证数据不完整")
                     return None
                 
-                logger.info("获取Xbox User Token成功")
+                logger.info("Xbox User 认证成功")
                 return token
     
     async def _get_xsts_token(self, user_token: str) -> tuple:
@@ -635,8 +637,8 @@ class XboxLiveClient:
                 headers={"x-xbl-contract-version": "1"}
             ) as resp:
                 if resp.status != 200:
-                    text = await resp.text()
-                    logger.error(f"获取XSTS Token失败: {resp.status}, {text}")
+                    await resp.text()
+                    logger.error(f"XSTS 认证失败: HTTP {resp.status}")
                     return None, None
                 
                 data = await resp.json()
@@ -644,10 +646,10 @@ class XboxLiveClient:
                 user_hash = data.get("DisplayClaims", {}).get("xui", [{}])[0].get("uhs")
                 
                 if not xsts_token:
-                    logger.error("获取XSTS Token数据不完整")
+                    logger.error("XSTS 认证数据不完整")
                     return None, None
                 
-                logger.info("获取XSTS Token成功")
+                logger.info("XSTS 认证成功")
                 return xsts_token, user_hash
     
     async def _get_gssv_token(self, xsts_token: str) -> Optional[str]:
@@ -693,25 +695,42 @@ class XboxLiveClient:
                     headers=headers
                 ) as resp:
                     if resp.status != 200:
-                        text = await resp.text()
-                        logger.error(f"获取GSSV Token失败: {resp.status}, {text}")
+                        await resp.text()
+                        logger.error(f"GSSV 认证失败: HTTP {resp.status}")
                         return None
                     
                     data = await resp.json()
                     gssv_token = data.get("Token")
                     
                     if not gssv_token:
-                        logger.error("获取GSSV Token数据不完整")
+                        logger.error("GSSV 认证数据不完整")
                         return None
                     
-                    logger.info("获取GSSV Token成功")
+                    logger.info("GSSV 认证成功")
                     return gssv_token
                     
         except Exception as e:
-            logger.error(f"获取GSSV Token异常: {e}", exc_info=True)
+            logger.error(f"GSSV 认证异常: {e}", exc_info=True)
             return None
     
-    async def _get_xhome_token(self, gssv_token: str) -> Optional[str]:
+    def _select_xhome_base_uri(self, data: Dict[str, Any]) -> Optional[str]:
+        """从 xHome token 响应里选择默认区域 baseUri。"""
+        server_details = data.get("serverDetails") or {}
+        regions = server_details.get("regions") or data.get("regions") or []
+        if not isinstance(regions, list):
+            return None
+
+        for region in regions:
+            if isinstance(region, dict) and region.get("isDefault") and region.get("baseUri"):
+                return str(region["baseUri"]).rstrip("/")
+
+        for region in regions:
+            if isinstance(region, dict) and region.get("baseUri"):
+                return str(region["baseUri"]).rstrip("/")
+
+        return None
+
+    async def _get_xhome_token(self, gssv_token: str) -> Optional[Tuple[str, Optional[str], Dict[str, Any]]]:
         """
         获取 xHome Token (gsToken)
         
@@ -722,7 +741,7 @@ class XboxLiveClient:
             gssv_token: GSSV Token
         
         Returns:
-            xHome Token (gsToken) 字符串或 None
+            (gsToken, 默认 baseUri, 原始响应) 或 None
         """
         import aiohttp
         
@@ -749,8 +768,8 @@ class XboxLiveClient:
                     headers=headers
                 ) as resp:
                     if resp.status != 200:
-                        text = await resp.text()
-                        logger.error(f"获取xHome Token失败: {resp.status}, {text}")
+                        await resp.text()
+                        logger.error(f"xHome 认证失败: HTTP {resp.status}")
                         return None
                     
                     data = await resp.json()
@@ -759,14 +778,18 @@ class XboxLiveClient:
                     gs_token = data.get("gsToken") or data.get("Token")
                     
                     if not gs_token:
-                        logger.error(f"获取xHome Token数据不完整，响应: {data}")
+                        logger.error("xHome 认证数据不完整")
                         return None
                     
-                    logger.info("获取xHome Token成功")
-                    return gs_token
+                    base_uri = self._select_xhome_base_uri(data)
+                    if base_uri:
+                        logger.info(f"xHome 认证成功，默认区域: {base_uri}")
+                    else:
+                        logger.warning("xHome 认证成功，但响应中未找到默认区域 baseUri，将使用默认 GSSV 地址")
+                    return gs_token, base_uri, data
                     
         except Exception as e:
-            logger.error(f"获取xHome Token异常: {e}", exc_info=True)
+            logger.error(f"xHome 认证异常: {e}", exc_info=True)
             return None
 
     async def get_xbox_tokens_with_gssv(self, access_token: str) -> Optional[XboxLiveTokens]:
@@ -808,22 +831,25 @@ class XboxLiveClient:
                 return None
             
             # Step 4: 获取 xHome Token (gsToken)
-            gs_token = await self._get_xhome_token(gssv_token)
-            if not gs_token:
+            xhome_token = await self._get_xhome_token(gssv_token)
+            if not xhome_token:
                 logger.error("Step 4 失败：无法获取 xHome Token")
                 return None
+            gs_token, gssv_base_uri, xhome_response = xhome_token
             
-            logger.info(f"获取完整的 Xbox Live Tokens 成功，用户哈希: {user_hash}")
+            logger.info(f"完整 Xbox Live 认证成功，用户哈希: {user_hash}")
             
             return XboxLiveTokens(
                 user_token=user_token,
                 xsts_token=xsts_token,
                 user_hash=user_hash,
-                gs_token=gs_token
+                gs_token=gs_token,
+                gssv_base_uri=gssv_base_uri,
+                xhome_token_response=xhome_response,
             )
             
         except Exception as e:
-            logger.error(f"获取 Xbox Live Tokens 异常: {e}", exc_info=True)
+            logger.error(f"完整 Xbox Live 认证异常: {e}", exc_info=True)
             return None
 
 
@@ -917,7 +943,7 @@ class MicrosoftMsalAuthenticator:
             microsoft_tokens = await self._try_refresh_token(email)
             if microsoft_tokens:
                 self._microsoft_tokens = microsoft_tokens
-                logger.info(f"使用Refresh Token刷新成功")
+                logger.info("使用认证缓存刷新成功")
             else:
                 # Step 2: Refresh Token不可用，使用设备码认证（浏览器自动化）
                 microsoft_tokens, device_code_error = await self._try_device_code_auth(
@@ -941,7 +967,7 @@ class MicrosoftMsalAuthenticator:
             # Step 3: 保存Refresh Token（使用异步带锁版本，防止并发冲突）
             if self._microsoft_tokens.refresh_token:
                 await TokenStorage.set_token_async(email, self._microsoft_tokens.refresh_token)
-                logger.info("Refresh Token已保存（异步带锁）")
+                logger.info("认证缓存已保存（异步带锁）")
             
             # Step 4: 获取Xbox Live Tokens
             xbox_tokens = await self._get_xbox_live_tokens()
@@ -987,10 +1013,10 @@ class MicrosoftMsalAuthenticator:
         """
         refresh_token = TokenStorage.get_token(email)
         if not refresh_token:
-            logger.info("未找到缓存的Refresh Token")
+            logger.info("未找到缓存的认证凭据")
             return None
         
-        logger.info("尝试使用Refresh Token刷新...")
+        logger.info("尝试使用认证缓存刷新...")
         oauth_client = MicrosoftOAuthClient()
         return await oauth_client.refresh_token(refresh_token)
     
@@ -1088,12 +1114,12 @@ class MicrosoftMsalAuthenticator:
                 self._last_device_code_error = "DEVICE_CODE_TIMEOUT"
                 return None, "DEVICE_CODE_TIMEOUT"
 
-            logger.info(f"浏览器自动化认证成功（账号: {email}），开始获取Token（剩余 {remaining} 秒）...")
+            logger.info(f"浏览器自动化认证成功（账号: {email}），开始获取授权结果（剩余 {remaining} 秒）...")
             print("浏览器自动化认证成功，正在获取 Token...")
 
             microsoft_tokens = await oauth_client.poll_for_token(device_code, remaining)
             if microsoft_tokens:
-                logger.info("Token获取成功")
+                logger.info("授权结果获取成功")
                 return microsoft_tokens, None
 
             error_code = (
@@ -1101,7 +1127,7 @@ class MicrosoftMsalAuthenticator:
                 if self._remaining_seconds(deadline) <= 0
                 else "DEVICE_CODE_FAILED"
             )
-            logger.error(f"Token获取失败: {error_code}")
+            logger.error(f"授权结果获取失败: {error_code}")
             self._last_device_code_error = error_code
             return None, error_code
 

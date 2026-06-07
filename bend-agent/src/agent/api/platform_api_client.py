@@ -459,10 +459,20 @@ class PlatformApiClient:
                         if unlocked:
                             self.logger.info(f"成功解锁Xbox主机: {xbox_host_id}")
                         else:
-                            self.logger.warning(f"解锁Xbox主机失败: {xbox_host_id}")
+                            self.logger.info(
+                                "平台未解锁Xbox主机 %s，可能未登记或已释放",
+                                xbox_host_id,
+                            )
                         return unlocked
                     else:
-                        self.logger.warning(f"解锁Xbox主机失败: {result.get('message')}")
+                        message = result.get('message') or ''
+                        if '不存在' in message or 'not found' in message.lower():
+                            self.logger.info(
+                                "平台未登记Xbox主机 %s，跳过平台解锁",
+                                xbox_host_id,
+                            )
+                        else:
+                            self.logger.warning(f"解锁Xbox主机失败: {message}")
                         return False
                 else:
                     self.logger.warning(f"解锁Xbox主机HTTP错误: {response.status}")
@@ -494,7 +504,14 @@ class PlatformApiClient:
                     if result.get('code') == 200:
                         return result.get('data')
                     else:
-                        self.logger.warning(f"获取主机状态失败: {result.get('message')}")
+                        message = result.get('message') or ''
+                        if '不存在' in message or 'not found' in message.lower():
+                            self.logger.info(
+                                "平台未登记Xbox主机 %s，允许使用云端发现结果",
+                                xbox_host_id,
+                            )
+                        else:
+                            self.logger.warning(f"获取主机状态失败: {message}")
                         return None
                 else:
                     self.logger.warning(f"获取主机状态HTTP错误: {response.status}")

@@ -67,6 +67,7 @@ class StreamingSession:
     ) -> SessionOpenResult:
         try:
             if check_cancel and check_cancel():
+                await self._close_partial_media()
                 return SessionOpenResult(success=False, error_code="CANCELLED", message="Cancelled")
 
             if skip_auth and existing_credentials:
@@ -101,6 +102,7 @@ class StreamingSession:
                 self._stream_context = resolved.context
 
             if check_cancel and check_cancel():
+                await self._close_partial_media()
                 return SessionOpenResult(success=False, error_code="CANCELLED", message="Cancelled")
 
             await self._emit_phase(SessionPhase.STREAMING, "Opening stream")
@@ -132,6 +134,7 @@ class StreamingSession:
             )
         except Exception as exc:
             self.logger.error("Session open failed: %s", exc, exc_info=True)
+            await self._close_partial_media()
             await self._emit_phase(SessionPhase.FAILED, str(exc))
             return SessionOpenResult(
                 success=False,
@@ -163,5 +166,21 @@ class StreamingSession:
         if self.media:
             await self._stream.close(self.media)
             self.media = None
+            self._stream_context = None
+        elif self._stream_context:
+            await self._stream.close_context(self._stream_context)
+            self._stream_context = None
         if emit_phases:
             await self._emit_phase(SessionPhase.CLOSED, "Session closed")
+
+    async def _close_partial_media(self) -> None:
+        """Best-effort cleanup for failures after Step2 but before READY."""
+        try:
+            if self.media:
+                await self._stream.close(self.media)
+                self.media = None
+            elif self._stream_context:
+                await self._stream.close_context(self._stream_context)
+                self._stream_context = None
+        except Exception as cleanup_exc:
+            self.logger.warning("Partial session cleanup failed: %s", cleanup_exc)

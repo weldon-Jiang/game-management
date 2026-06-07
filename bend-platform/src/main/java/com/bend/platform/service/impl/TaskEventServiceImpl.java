@@ -53,4 +53,9 @@ public class TaskEventServiceImpl implements TaskEventService {
                 .last("LIMIT " + safeLimit);
         return taskEventMapper.selectList(wrapper);
     }
+
+    @Override
+    public void record(TaskEvent event) {
+        taskEventMapper.insert(event);
+    }
 }

@@ -32,6 +32,7 @@ import aiohttp
 
 from ..core.logger import get_logger
 from ..gssv.base_uri import DEFAULT_GSSV_BASE_URI, normalize_gssv_base_uri
+from ..gssv.device_info import build_x_ms_device_info
 from .xbox_discovery import XboxDiscovery, XboxInfo as DiscoveredXboxInfo
 
 
@@ -122,7 +123,8 @@ class XboxHostMatcher:
                 'Authorization': f'Bearer {self._gs_token}',
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
-                'x-xbl-contract-version': '1'
+                'x-xbl-contract-version': '1',
+                'X-MS-Device-Info': build_x_ms_device_info(),
             }
 
             url = f"{self._gssv_base_uri}/v6/servers/home"

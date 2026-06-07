@@ -1307,7 +1307,7 @@ class DeviceCodeAuthenticator:
                     input_found = True
                     break
                 except Exception as e:
-                    self._logger.debug(f"密码选择器 {selector} 失败: {e}")
+                    self._logger.debug(f"凭证输入选择器 {selector} 失败: {e}")
                     continue
 
             if not input_found:
@@ -1321,7 +1321,7 @@ class DeviceCodeAuthenticator:
             return True
 
         except Exception as e:
-            self._logger.error(f"密码步骤异常: {e}")
+            self._logger.error(f"凭证输入步骤异常: {e}")
             return False
 
     async def _click_login_button(self):

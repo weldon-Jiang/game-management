@@ -14,6 +14,7 @@ from datetime import datetime
 
 from ..core.logger import get_logger
 from ..gssv.base_uri import DEFAULT_GSSV_BASE_URI, normalize_gssv_base_uri
+from ..gssv.device_info import build_x_ms_device_info
 from ..gssv.network_util import is_blocked_scan_ip, pick_local_lan_ip
 
 
@@ -134,7 +135,8 @@ class XboxDiscovery:
                 'Authorization': f'Bearer {self._access_token}',
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
-                'x-xbl-contract-version': '1'
+                'x-xbl-contract-version': '1',
+                'X-MS-Device-Info': build_x_ms_device_info(),
             }
 
             url = f"{self._api_base}/v6/servers/home"

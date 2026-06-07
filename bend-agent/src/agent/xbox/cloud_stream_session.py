@@ -127,6 +127,10 @@ class CloudStreamSession:
             RTCIceServer(urls=["stun:stun1.l.google.com:19302"]),
         ]
         pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers))
+        get_logger("cloud_stream_session").info(
+            "WebRTC ICE configuration: stun_servers=%s, dataChannels=chat/control/input/message",
+            len(ice_servers),
+        )
 
         pc.createDataChannel("chat", ordered=False, protocol="chatV1")
         pc.createDataChannel("control", ordered=False, protocol="controlV1")
@@ -274,13 +278,13 @@ class CloudStreamSession:
         @channel.on("open")
         def on_input_open():
             self._input_channel_closed = False
-            self.logger.info("input DataChannel opened")
+            self.logger.info("input DataChannel opened (state=open)")
 
         @channel.on("close")
         def on_input_close():
             self._input_channel_closed = True
             state = getattr(channel, "readyState", "closed")
-            self.logger.warning("input DataChannel closed (state=%s)", state)
+            self.logger.warning("input DataChannel FAILED: closed (state=%s)", state)
             for callback in list(self._on_input_channel_close_callbacks):
                 try:
                     callback()
@@ -296,7 +300,8 @@ class CloudStreamSession:
                 return True
             await asyncio.sleep(0.1)
         self.logger.warning(
-            f"input DataChannel not open after {timeout}s (state={self._input_channel.readyState})"
+            f"input DataChannel FAILED: not open after {timeout}s "
+            f"(state={self._input_channel.readyState})"
         )
         return False
 

@@ -168,9 +168,24 @@ public class AgentWebSocketEndpoint {
     }
 
     @OnClose
-    public void onClose(Session session, @PathParam("agentId") String agentId) {
-        AGENT_SESSIONS.remove(agentId);
-        log.info("Agent连接关闭 - AgentID: {}, 当前连接数: {}", agentId, AGENT_SESSIONS.size());
+    public void onClose(Session session, @PathParam("agentId") String agentId, CloseReason closeReason) {
+        Session currentSession = AGENT_SESSIONS.get(agentId);
+        if (currentSession != null && !currentSession.getId().equals(session.getId())) {
+            log.info("忽略旧Agent连接关闭 - AgentID: {}, ClosedSessionID: {}, CurrentSessionID: {}, Reason: {}",
+                    agentId, session.getId(), currentSession.getId(),
+                    closeReason != null ? closeReason.getReasonPhrase() : "");
+            return;
+        }
+
+        AGENT_SESSIONS.remove(agentId, session);
+        String reason = closeReason != null ? closeReason.getReasonPhrase() : "";
+        log.info("Agent连接关闭 - AgentID: {}, Reason: {}, 当前连接数: {}",
+                agentId, reason, AGENT_SESSIONS.size());
+
+        if ("Replaced by new connection".equals(reason)) {
+            log.info("Agent连接被新连接替换，跳过离线清理 - AgentID: {}", agentId);
+            return;
+        }
 
         // 清理该Agent关联的流媒体账号
         try {
