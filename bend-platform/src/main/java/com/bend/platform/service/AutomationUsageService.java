@@ -1,6 +1,7 @@
 package com.bend.platform.service;
 
 import com.bend.platform.entity.GameAccount;
+import com.bend.platform.entity.Task;
 import com.bend.platform.entity.XboxHost;
 
 import java.util.List;
@@ -35,4 +36,9 @@ public interface AutomationUsageService {
     void deductPointsAndRecordUsage(String merchantId, String userId, String taskId,
                                    String streamingAccountId, String streamingAccountName,
                                    int gameAccountsCount, int hostsCount, Map<String, Object> validationResult);
+
+    /**
+     * 记录 Step4 可计费事件并按幂等键扣点。
+     */
+    Map<String, Object> recordBillableEvent(Task task, Map<String, Object> payload);
 }

@@ -31,7 +31,6 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/agents/status",
                         "/api/agent-callback/**",
                         "/api/v1/agent-callback/**",
-                        "/api/monitoring/**",
                         "/api/registration-codes/validate/**",
                         "/api/registration-codes/check/**",
                         "/api/registration-codes/activate/**",

@@ -23,6 +23,9 @@ public interface TaskGameAccountStatusService {
     /** 查询任务内某个游戏账号的状态记录。 */
     TaskGameAccountStatus findByTaskIdAndGameAccountId(String taskId, String gameAccountId);
 
+    /** 查询指定游戏账号在当前商户活跃串流任务中的占用记录。 */
+    List<TaskGameAccountStatus> findActiveOccupancies(String merchantId, List<String> gameAccountIds);
+
     /** 记录一场比赛完成结果（成功/失败），用于累加完成或失败计数。 */
     void updateMatchComplete(String taskId, String gameAccountId, boolean success);
 

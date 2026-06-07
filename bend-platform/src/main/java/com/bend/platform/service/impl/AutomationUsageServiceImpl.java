@@ -3,7 +3,9 @@ package com.bend.platform.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bend.platform.entity.*;
 import com.bend.platform.exception.BusinessException;
+import com.bend.platform.repository.AutomationBillingEventMapper;
 import com.bend.platform.repository.AutomationUsageMapper;
+import com.bend.platform.repository.GameAccountMapper;
 import com.bend.platform.repository.MerchantGroupMapper;
 import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.AutomationUsageService;
@@ -11,11 +13,14 @@ import com.bend.platform.service.MerchantBalanceService;
 import com.bend.platform.service.SubscriptionService;
 import com.bend.platform.service.TaskService;
 import com.bend.platform.service.TaskGameAccountStatusService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.HashMap;
@@ -31,9 +36,12 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
     private final MerchantBalanceService balanceService;
     private final MerchantGroupMapper merchantGroupMapper;
     private final AutomationUsageMapper automationUsageMapper;
+    private final AutomationBillingEventMapper billingEventMapper;
     private final MerchantMapper merchantMapper;
+    private final GameAccountMapper gameAccountMapper;
     private final TaskService taskService;
     private final TaskGameAccountStatusService taskGameAccountStatusService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
     public Map<String, Object> validateAndCalculatePoints(String merchantId, String streamingAccountId,
@@ -289,6 +297,157 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
 
         log.info("记录自动化使用 - merchantId: {}, taskId: {}, resourceType: {}, points: {}, chargeMode: {}",
                 merchantId, taskId, resourceType, pointsDeducted, chargeMode);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> recordBillableEvent(Task task, Map<String, Object> payload) {
+        String gameAccountId = stringValue(payload.get("gameAccountId"));
+        String sessionId = stringValue(payload.get("sessionId"));
+        if (sessionId == null) {
+            sessionId = task.getSessionId();
+        }
+        String gameActionType = normalizeGameActionType(
+                stringValue(payload.get("gameActionType")) != null
+                        ? stringValue(payload.get("gameActionType"))
+                        : task.getGameActionType());
+        String billingUnit = normalizeBillingUnit(gameActionType, stringValue(payload.get("billingUnit")));
+        Integer unitIndex = intValue(payload.get("unitIndex"));
+        if (gameAccountId == null || billingUnit == null || unitIndex == null) {
+            throw new BusinessException(400, "gameAccountId、billingUnit、unitIndex不能为空");
+        }
+
+        String rawIdempotentKey = String.join(":",
+                task.getId(),
+                sessionId != null ? sessionId : "-",
+                gameAccountId,
+                gameActionType,
+                billingUnit,
+                String.valueOf(unitIndex));
+        String idempotentKey = "bill:" + java.util.UUID.nameUUIDFromBytes(
+                rawIdempotentKey.getBytes(StandardCharsets.UTF_8));
+
+        AutomationBillingEvent event = new AutomationBillingEvent();
+        event.setMerchantId(task.getMerchantId());
+        event.setTaskId(task.getId());
+        event.setSessionId(sessionId);
+        event.setStreamingAccountId(task.getStreamingAccountId());
+        event.setGameAccountId(gameAccountId);
+        event.setGameActionType(gameActionType);
+        event.setBillingUnit(billingUnit);
+        event.setUnitIndex(unitIndex);
+        event.setIdempotentKey(idempotentKey);
+        event.setPointsDeducted(resolveEventPoints(gameActionType, billingUnit));
+        event.setCoinsDelta(intValue(payload.get("coinsDelta")) != null ? intValue(payload.get("coinsDelta")) : 0);
+        event.setStatus("recorded");
+        try {
+            event.setPayload(objectMapper.writeValueAsString(payload));
+        } catch (Exception e) {
+            event.setPayload("{}");
+        }
+
+        try {
+            billingEventMapper.insert(event);
+        } catch (DuplicateKeyException e) {
+            Map<String, Object> duplicate = new HashMap<>();
+            duplicate.put("recorded", true);
+            duplicate.put("duplicate", true);
+            duplicate.put("idempotentKey", idempotentKey);
+            duplicate.put("pointsDeducted", 0);
+            return duplicate;
+        }
+
+        int points = event.getPointsDeducted() != null ? event.getPointsDeducted() : 0;
+        if (points > 0) {
+            boolean deducted = balanceService.deductPoints(
+                    task.getMerchantId(),
+                    points,
+                    task.getCreatedBy(),
+                    "automation_billing",
+                    idempotentKey,
+                    "自动化计费事件: " + gameActionType + "/" + billingUnit);
+            if (!deducted) {
+                throw new BusinessException(400, "余额不足，无法结算本次计费事件");
+            }
+        }
+
+        updateGameAccountMetrics(gameAccountId, billingUnit, event.getCoinsDelta());
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("recorded", true);
+        result.put("duplicate", false);
+        result.put("idempotentKey", idempotentKey);
+        result.put("pointsDeducted", points);
+        return result;
+    }
+
+    private String normalizeGameActionType(String value) {
+        if (value == null || value.isBlank()) {
+            return "squad_battle";
+        }
+        return switch (value) {
+            case "auction_transfer", "squad_battle", "transfer_sqb_combo",
+                    "divisions_rivals", "weekend_league" -> value;
+            default -> "squad_battle";
+        };
+    }
+
+    private String normalizeBillingUnit(String gameActionType, String billingUnit) {
+        if (billingUnit == null || billingUnit.isBlank()) {
+            return null;
+        }
+        return switch (gameActionType) {
+            case "auction_transfer" -> "transfer_round".equals(billingUnit) ? billingUnit : null;
+            case "transfer_sqb_combo" ->
+                    ("transfer_round".equals(billingUnit) || "match_completed".equals(billingUnit))
+                            ? billingUnit : null;
+            case "squad_battle", "divisions_rivals", "weekend_league" ->
+                    "match_completed".equals(billingUnit) ? billingUnit : null;
+            default -> null;
+        };
+    }
+
+    private int resolveEventPoints(String gameActionType, String billingUnit) {
+        if (normalizeBillingUnit(gameActionType, billingUnit) == null) {
+            throw new BusinessException(400, "当前任务类型不支持该计费单元");
+        }
+        return 1;
+    }
+
+    private Integer intValue(Object raw) {
+        if (raw instanceof Number number) {
+            return number.intValue();
+        }
+        if (raw != null && !String.valueOf(raw).isBlank()) {
+            return Integer.parseInt(String.valueOf(raw));
+        }
+        return null;
+    }
+
+    private String stringValue(Object raw) {
+        if (raw == null || String.valueOf(raw).isBlank()) {
+            return null;
+        }
+        return String.valueOf(raw);
+    }
+
+    private void updateGameAccountMetrics(String gameAccountId, String billingUnit, Integer coinsDelta) {
+        GameAccount account = gameAccountMapper.selectById(gameAccountId);
+        if (account == null) {
+            return;
+        }
+        if ("match_completed".equals(billingUnit)) {
+            account.setTodayMatchCount((account.getTodayMatchCount() != null ? account.getTodayMatchCount() : 0) + 1);
+            account.setTotalMatchCount((account.getTotalMatchCount() != null ? account.getTotalMatchCount() : 0) + 1);
+        }
+        int delta = coinsDelta != null ? coinsDelta : 0;
+        if (delta != 0) {
+            account.setTodayCoins((account.getTodayCoins() != null ? account.getTodayCoins() : 0) + delta);
+            account.setTotalCoins((account.getTotalCoins() != null ? account.getTotalCoins() : 0) + delta);
+        }
+        account.setTodayLastCompletedTime(LocalDateTime.now());
+        account.setLastUsedTime(LocalDateTime.now());
+        gameAccountMapper.updateById(account);
     }
 
     private boolean checkSubscription(List<Subscription> subscriptions, String type, String targetId) {

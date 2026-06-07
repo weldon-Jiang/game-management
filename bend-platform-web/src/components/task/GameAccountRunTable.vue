@@ -18,10 +18,31 @@
         {{ getGameAccountPhaseText(row.phase) }}
       </template>
     </el-table-column>
-    <el-table-column v-if="showMatchProgress" label="场次" width="108" align="center">
+    <el-table-column v-if="showMatchProgress" label="本次场次" width="108" align="center">
       <template #default="{ row }">
         {{ row.completedCount || 0 }}/{{ row.totalMatches || 0 }}
         <span v-if="row.failedCount" class="text-danger"> (失败{{ row.failedCount }})</span>
+      </template>
+    </el-table-column>
+    <el-table-column label="今日场次" width="96" align="center">
+      <template #default="{ row }">
+        {{ row.todayMatchCount ?? row.completedCount ?? 0 }}/{{ row.dailyMatchLimit ?? row.totalMatches ?? 0 }}
+      </template>
+    </el-table-column>
+    <el-table-column label="金币" width="120" align="center">
+      <template #default="{ row }">
+        <span>{{ row.todayCoins ?? 0 }}</span>
+        <span class="text-muted"> / {{ row.totalCoins ?? 0 }}</span>
+      </template>
+    </el-table-column>
+    <el-table-column label="DR" width="90" align="center">
+      <template #default="{ row }">
+        {{ row.drLevel || '-' }}
+      </template>
+    </el-table-column>
+    <el-table-column label="冷却" width="80" align="center">
+      <template #default="{ row }">
+        {{ row.cooldownHours ?? 23 }}小时
       </template>
     </el-table-column>
     <el-table-column label="状态" width="108" align="center">

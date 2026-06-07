@@ -333,6 +333,63 @@ def _apply_task_type(context: AgentTaskContext, game_account: GameAccountInfo, l
     return game_action_type
 
 
+def _resolve_billing_unit(game_action_type: str, completed_before: int) -> str:
+    """Resolve billable unit for the current Step4 action."""
+    action_type = _normalize_game_action_type(game_action_type)
+    if action_type == 'auction_transfer':
+        return 'transfer_round'
+    if action_type == 'transfer_sqb_combo' and completed_before % 2 == 0:
+        return 'transfer_round'
+    return 'match_completed'
+
+
+async def _report_billable_event(
+    context: AgentTaskContext,
+    platform_client: Optional[Any],
+    game_account: GameAccountInfo,
+    game_action_type: str,
+    billing_unit: str,
+    unit_index: int,
+    logger,
+) -> None:
+    """Report billable events without blocking Step4 execution on callback errors."""
+    if platform_client is None:
+        return
+    reporter = getattr(platform_client, 'report_billing_event', None)
+    if reporter is None:
+        return
+    try:
+        result = await reporter(
+            context.task_id,
+            game_account.id,
+            game_action_type,
+            billing_unit,
+            unit_index,
+            session_id=getattr(context, 'session_id', None),
+            metadata={
+                "gameAccountName": game_account.gamertag,
+            },
+        )
+        if result.get("success") is False:
+            logger.warning(
+                "计费事件上报失败 - task=%s account=%s unit=%s index=%s error=%s",
+                context.task_id,
+                game_account.id,
+                billing_unit,
+                unit_index,
+                result.get("error"),
+            )
+    except Exception as exc:
+        logger.warning(
+            "计费事件上报异常 - task=%s account=%s unit=%s index=%s error=%s",
+            context.task_id,
+            game_account.id,
+            billing_unit,
+            unit_index,
+            exc,
+        )
+
+
 async def _pause_for_manual_fc_launch(
     context: AgentTaskContext,
     game_account: GameAccountInfo,
@@ -929,10 +986,10 @@ async def step4_execute_gaming(
                 )
                 continue
 
-            _apply_task_type(context, game_account, logger)
+            game_action_type = _apply_task_type(context, game_account, logger)
             stream_logger.info(
                 f"账号 {game_account.gamertag} 登录已确认，应用游戏操作类型: "
-                f"{_normalize_game_action_type(context.game_action_type)}"
+                f"{game_action_type}"
             )
 
             await asyncio.sleep(2.0)
@@ -996,6 +1053,17 @@ async def step4_execute_gaming(
                     stream_logger.info(f"游戏账号 {game_account.gamertag} 完成第{current_count}场比赛 (今日: {new_completed}/{target})")
 
                     is_account_completed = new_completed >= target
+                    billing_unit = _resolve_billing_unit(game_action_type, current_total)
+
+                    await _report_billable_event(
+                        context,
+                        platform_client,
+                        game_account,
+                        game_action_type,
+                        billing_unit,
+                        current_count,
+                        logger,
+                    )
 
                     await report_progress(
                         context.task_id, "STEP4", "COMPLETED" if is_account_completed else "RUNNING",

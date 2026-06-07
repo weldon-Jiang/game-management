@@ -254,7 +254,11 @@ class AutomationScheduler:
                 profile_bound=bool(ga.get("profileBound", ga.get("profile_bound", False))),
                 is_primary=ga.get("isPrimary", False),
                 target_matches=ga.get("dailyMatchLimit", ga.get("targetMatches", 3)),
-                today_match_count=ga.get("todayMatchCount", 0)
+                today_match_count=ga.get("todayMatchCount", 0),
+                cooldown_hours=ga.get("cooldownHours", 23),
+                total_coins=ga.get("totalCoins", 0),
+                today_coins=ga.get("todayCoins", 0),
+                dr_level=ga.get("drLevel", "") or ""
             ))
 
         context.game_accounts = game_accounts_with_passwords

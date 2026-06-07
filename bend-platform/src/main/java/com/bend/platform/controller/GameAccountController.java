@@ -129,7 +129,9 @@ public class GameAccountController {
      */
     @GetMapping("/template")
     public ApiResponse<String> downloadTemplate() {
-        String template = "游戏昵称,邮箱,密码,平台类型\n,player1@email.com,password1,xbox\n,player2@email.com,password2,playstation";
+        String template = "游戏昵称,邮箱,密码,平台类型,每日最大场次,自动化间隔小时\n"
+                + ",player1@email.com,password1,xbox,3,23\n"
+                + ",player2@email.com,password2,playstation,3,23";
         return ApiResponse.success(template);
     }
 

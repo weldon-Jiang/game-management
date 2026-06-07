@@ -55,4 +55,25 @@ public class TaskGameAccountStatus {
 
     @TableField(exist = false)
     private String streamingAccountName;
+
+    @TableField(exist = false)
+    private Integer dailyMatchLimit;
+
+    @TableField(exist = false)
+    private Integer todayMatchCount;
+
+    @TableField(exist = false)
+    private Integer totalCoins;
+
+    @TableField(exist = false)
+    private Integer todayCoins;
+
+    @TableField(exist = false)
+    private String drLevel;
+
+    @TableField(exist = false)
+    private Integer cooldownHours;
+
+    @TableField(exist = false)
+    private LocalDateTime todayLastCompletedTime;
 }

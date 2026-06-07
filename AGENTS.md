@@ -1,6 +1,6 @@
 # Bend Platform - Agent 全局技能文档
 
-**版本** 3.3 · **更新** 2026-06-07 · **范围** 后端 (Spring Boot 3.2.5/Java 17) · 网关 (Spring Cloud Gateway 4.1.x) · 前端 (Vue 3.5/Vite 8) · Agent (Python 3.9/asyncio)
+**版本** 3.4 · **更新** 2026-06-07 · **范围** 后端 (Spring Boot 3.2.5/Java 17) · 网关 (Spring Cloud Gateway 4.1.x) · 前端 (Vue 3.5/Vite 8) · Agent (Python 3.9/asyncio)
 
 ---
 
@@ -13,6 +13,7 @@
 | 双向适配     | 改后端检查前端，反之亦然                   |
 | 部署验证     | 代码改动后必须经 Docker Compose 重新部署验证 |
 | 架构红线     | 新增控制接口/自动化入口必须遵循下方「架构红线」       |
+| 注释清晰     | 前端、后端、Agent 的接口、方法、字段、步骤与核心逻辑必须写清楚注释 |
 | 聚焦验证（P1） | 仅验证改动模块，不做全流程验证                |
 
 
@@ -83,8 +84,9 @@ docker compose -f docker/docker-compose.yml logs -f backend
 **新增迁移流程**：
 
 1. 在 `bend-platform/db/migration/` 新增 `V20260607_005_xxx.sql`
-2. **同步**更新 `bend-platform/db/schema.sql` + `bend-platform/db/migration/MIGRATION_INDEX.md`
-3. 已运行环境：`.\docker\run-migration.ps1`（Windows） 或 `./docker/run-migration.sh <file>`
+2. SQL 脚本开头必须与 `schema.sql` 一致声明 `SET NAMES utf8mb4;`、`SET CHARACTER SET utf8mb4;`、`SET collation_connection = 'utf8mb4_unicode_ci';`，避免中文 COMMENT 乱码
+3. **同步**更新 `bend-platform/db/schema.sql` + `bend-platform/db/migration/MIGRATION_INDEX.md`
+4. 已运行环境：`.\docker\run-migration.ps1`（Windows） 或 `./docker/run-migration.sh <file>`
 
 ---
 
@@ -147,7 +149,7 @@ headers['X-Agent-Secret'] = base64.b64encode(agent_secret.encode()).decode()
 
 | 规则   | 说明                                                                                                                                               |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 注释   | 新增 Controller / Service 接口/实现必须含**类级 + 公共方法级 Javadoc**；任务字段（`sessionPhase`/`pauseMode`/`gameActionPending`/`windowVisible`）的状态机迁移在方法 Javadoc 中说明 |
+| 注释   | Controller / Service / Entity / DTO / Mapper 等新增或改动类必须补充类级 Javadoc；后端接口、公共方法、关键私有方法、重要字段、状态字段、复杂业务分支必须写清楚用途、入参约束、状态迁移与异常语义 |
 | 命名   | 类 PascalCase；方法/变量 camelCase；避免魔法值（用 `enums/`）                                                                                                   |
 | API  | 统一 `ApiResponse<T>` 包装；异常经 `GlobalExceptionHandler` 转 `BusinessException(ResultCode)`                                                            |
 | DAO  | MyBatis-Plus `BaseMapper`，避免手写 SQL；`@Transactional(rollbackFor = Exception.class)`                                                               |
@@ -165,6 +167,7 @@ headers['X-Agent-Secret'] = base64.b64encode(agent_secret.encode()).decode()
 | 规则     | 说明                                                                                                                                             |
 | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | 组件     | PascalCase；`<script setup>` Composition API                                                                                                    |
+| 注释     | 复杂函数、核心业务逻辑、关键状态计算、权限/计费/任务控制分支必须补充注释；禁止给简单赋值、显而易见表达式堆砌低价值注释                                                                 |
 | API 调用 | 用封装的 `request`（`utils/request.js`），禁直接 axios                                                                                                   |
 | 状态     | Pinia                                                                                                                                          |
 | 样式     | scoped；**禁硬编码颜色/间距**，统一 `var(--*)` 令牌；表格/弹窗/页头用 `reset.css` 工具类（`.page-container`/`.content-card`/`.toolbar`/`.pagination-wrap`），不在 scoped 内重复 |
@@ -179,6 +182,7 @@ headers['X-Agent-Secret'] = base64.b64encode(agent_secret.encode()).decode()
 | 规则     | 说明                                                                                                                |
 | ------ | ----------------------------------------------------------------------------------------------------------------- |
 | 代码风格   | PEP 8 + type hints                                                                                                |
+| 注释     | 自动化 Step1-4 每个步骤、任务状态流转、资源清理、异常保留/失败分支、输入控制、场景识别等核心环节必须写清楚注释；复杂 async 流程需说明等待条件与退出条件 |
 | API 调用 | 用 `PlatformApiClient`（`/api/v1/agent-callback/`*）/ `ApiClient`（`/api/*`），禁直接 aiohttp/requests                     |
 | 异步     | `async/await` + `asyncio.sleep`（非 `time.sleep`）                                                                   |
 | 日志     | 主日志 `logs/agent.log` **JSON**；账号 `logs/stream_log/stream_{name}.log` + `logs/game_log/game_{name}_{date}.log` 纯文本 |
@@ -412,12 +416,14 @@ task:
     {"id": "R009", "name": "任务控制面收敛", "priority": "P0", "check": "新接口加在 TaskControlController；旧 TaskController 不得新增 pause/resume/stop", "location": ["bend-platform/src/main/java/com/bend/platform/controller/TaskControlController.java"]},
     {"id": "R010", "name": "Agent 并发隔离", "priority": "P0", "check": "step4 严禁模块级全局；引擎/切换器挂 context._xxx；单任务 finally 严禁 scheduler.close()", "location": ["bend-agent/src/agent/automation/step4_game_automation.py", "bend-agent/src/agent/task/task_executor.py"]},
     {"id": "R011", "name": "调度器获取方式", "priority": "P0", "check": "用 get_active_scheduler()；不得通过 task_executor.scheduler 取（属性不存在）", "location": ["bend-agent/src/agent/task/automation_scheduler.py"]},
-    {"id": "R012", "name": "数据库迁移规范", "priority": "P0", "check": "新增 V{YYYYMMDD}_{NNN}_*.sql 必须同步更新 schema.sql 与 MIGRATION_INDEX.md；通过 run-migration 脚本手动应用", "location": ["bend-platform/db/migration/", "bend-platform/db/schema.sql"]},
+    {"id": "R012", "name": "数据库迁移规范", "priority": "P0", "check": "新增 V{YYYYMMDD}_{NNN}_*.sql 必须声明 utf8mb4 字符集，避免中文 COMMENT 乱码；并同步更新 schema.sql 与 MIGRATION_INDEX.md；通过 run-migration 脚本手动应用", "location": ["bend-platform/db/migration/", "bend-platform/db/schema.sql"]},
     {"id": "R013", "name": "Docker 启动规范", "priority": "P0", "check": "docker compose 必须带 --env-file docker/.env.{env}；优先用 docker/start-{env}.ps1", "location": ["docker/docker-compose.yml", "docker/start-dev.ps1"]},
     {"id": "R014", "name": "商户隔离强校验", "priority": "P0", "check": "商户写操作必须经 UserContext.getMerchantId() 显式传参 + DataSecurityUtil.validateMerchantAccess 校验", "location": ["bend-platform/src/main/java/com/bend/platform/util/UserContext.java", "bend-platform/src/main/java/com/bend/platform/util/DataSecurityUtil.java"]},
     {"id": "R015", "name": "前端单文件大小约束", "priority": "P1", "check": "单 .vue 不超过 800 行；超过应拆子组件 + composable；scoped 样式禁硬编码颜色（用 var(--*)）", "location": ["bend-platform-web/src/views/"]},
-    {"id": "R016", "name": "后端注释规范", "priority": "P0", "check": "新增 Controller / Service 接口/实现必须含类级 + 公共方法级 Javadoc；任务状态字段（sessionPhase/pauseMode/gameActionPending）的状态机迁移在方法 Javadoc 中说明", "location": ["bend-platform/src/main/java/com/bend/platform/controller/", "bend-platform/src/main/java/com/bend/platform/service/"]},
-    {"id": "R017", "name": "Git 红线", "priority": "P0", "check": "禁止提交 target/、__pycache__/、logs/、tokens/、docker/.env.*；调试埋点不得入库", "location": [".gitignore"]}
+    {"id": "R016", "name": "后端注释规范", "priority": "P0", "check": "Controller / Service / Entity / DTO / Mapper 等新增或改动类必须补充类级 Javadoc；接口、公共方法、关键私有方法、重要字段、状态字段、复杂业务分支必须写清楚用途、约束、状态迁移与异常语义", "location": ["bend-platform/src/main/java/com/bend/platform/"]},
+    {"id": "R017", "name": "前端注释规范", "priority": "P0", "check": "复杂函数、核心业务逻辑、关键状态计算、权限/计费/任务控制分支必须补充注释；禁止给简单赋值、显而易见表达式堆砌低价值注释", "location": ["bend-platform-web/src/"]},
+    {"id": "R018", "name": "Agent 注释规范", "priority": "P0", "check": "自动化 Step1-4 每个步骤、任务状态流转、资源清理、异常保留/失败分支、输入控制、场景识别等核心环节必须写清楚注释；复杂 async 流程需说明等待条件与退出条件", "location": ["bend-agent/src/agent/automation/", "bend-agent/src/agent/runtime/", "bend-agent/src/agent/task/"]},
+    {"id": "R019", "name": "Git 红线", "priority": "P0", "check": "禁止提交 target/、__pycache__/、logs/、tokens/、docker/.env.*；调试埋点不得入库", "location": [".gitignore"]}
   ]
 }
 ```
@@ -435,5 +441,6 @@ task:
 | 3.1 | 2026-06-02              | Streaming 场景模板匹配规范                                                        |
 | 3.2 | 2026-06-07              | 全系统盘点修订；架构红线 + 并发反模式禁忌；WS 协议矩阵；Docker 4 profile + `--env-file`；精简至约 350 行 |
 | 3.3 | 2026-06-07              | 串流任务长寿命化（任务复用 + `streaming_session` 多轮）；Step4 失败保留串流（`automation_failed`）；`InputGate` 统一收敛自动化按键；新增 Step1–3 vs Step4 边界表 |
+| 3.4 | 2026-06-07              | 强化前端、后端、Agent 注释规范；要求接口、方法、字段、逻辑分支、自动化步骤与核心环节写清楚注释 |
 
 

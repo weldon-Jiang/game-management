@@ -3,7 +3,6 @@
     <el-steps :active="step" finish-status="success" align-center class="wizard-steps">
       <el-step title="账号" />
       <el-step title="Agent" />
-      <el-step title="主机" />
       <el-step title="就绪" />
       <el-step title="自动化" />
     </el-steps>
@@ -17,10 +16,14 @@
           :key="ga.id"
           :label="ga.id"
           :value="ga.id"
+          :disabled="isGameAccountOccupied(ga)"
         >
           {{ ga.gameName || ga.email }}
           <span v-if="ga.positionIndex != null && ga.positionIndex >= 0" class="meta">
             位置 {{ ga.positionIndex }}
+          </span>
+          <span v-if="isGameAccountOccupied(ga)" class="meta warning">
+            已被 {{ ga.agentName || ga.agentId || '其他任务' }} 占用
           </span>
         </el-checkbox>
       </el-checkbox-group>
@@ -35,12 +38,6 @@
     </div>
 
     <div v-else-if="step === 2" class="step-body">
-      <el-select v-model="form.xboxHostId" placeholder="可选：指定主机" clearable style="width: 100%">
-        <el-option v-for="h in hosts" :key="h.id" :label="h.name" :value="h.id" />
-      </el-select>
-    </div>
-
-    <div v-else-if="step === 3" class="step-body">
       <p v-if="taskId">任务 ID: <code>{{ taskId }}</code></p>
       <SessionPhaseStepper :phase="sessionPhase" class="phase-stepper" />
       <p class="status-line">{{ statusMessage }}</p>
@@ -69,13 +66,13 @@
     </div>
 
     <template #footer>
-      <el-button v-if="step > 0 && step < 3" @click="step--">上一步</el-button>
-      <el-button v-if="step < 2" type="primary" @click="nextFromAccount">下一步</el-button>
-      <el-button v-else-if="step === 2" type="primary" :loading="submitting" @click="startStreaming">
+      <el-button v-if="step > 0 && step < 2" @click="step--">上一步</el-button>
+      <el-button v-if="step === 0" type="primary" @click="nextFromAccount">下一步</el-button>
+      <el-button v-else-if="step === 1" type="primary" :loading="submitting" @click="startStreaming">
         启动串流
       </el-button>
-      <el-button v-else-if="step === 3 && isReady" type="primary" @click="step = 4">选择自动化</el-button>
-      <el-button v-else-if="step === 3" @click="goDetail">进入任务详情</el-button>
+      <el-button v-else-if="step === 2 && isReady" type="primary" @click="step = 3">选择自动化</el-button>
+      <el-button v-else-if="step === 2" @click="goDetail">进入任务详情</el-button>
       <el-button v-else type="primary" :loading="submitting" @click="startAutomation">开始自动化</el-button>
     </template>
   </el-dialog>
@@ -98,7 +95,6 @@ const props = defineProps({
   modelValue: Boolean,
   account: Object,
   agents: { type: Array, default: () => [] },
-  hosts: { type: Array, default: () => [] },
   gameAccounts: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['update:modelValue', 'started'])
@@ -114,7 +110,6 @@ let pollTimer = null
 
 const form = reactive({
   agentId: '',
-  xboxHostId: '',
   gameActionType: 'squad_battle',
   gameAccountIds: []
 })
@@ -135,7 +130,9 @@ const isReady = computed(() => sessionPhase.value === 'ready')
 watch(() => props.modelValue, (v) => {
   visible.value = v
   if (v) {
-    form.gameAccountIds = props.gameAccounts.map((ga) => ga.id)
+    form.gameAccountIds = props.gameAccounts
+      .filter((ga) => !isGameAccountOccupied(ga))
+      .map((ga) => ga.id)
     const boundAgent = props.agents.find((a) => a.agentId === props.account?.agentId)
     form.agentId = boundAgent?.agentId || (props.agents.length === 1 ? props.agents[0].agentId : '')
   }
@@ -180,7 +177,6 @@ const reset = () => {
   sessionPhase.value = 'opening'
   statusMessage.value = '等待启动...'
   form.agentId = ''
-  form.xboxHostId = ''
   form.gameAccountIds = []
 }
 
@@ -188,11 +184,14 @@ onUnmounted(stopPoll)
 
 const nextFromAccount = () => {
   if (!form.gameAccountIds.length) {
-    ElMessage.warning('请至少选择一个游戏账号')
+    ElMessage.warning('请至少选择一个未被占用的游戏账号')
     return
   }
   step.value++
 }
+
+const isGameAccountOccupied = (gameAccount) =>
+  gameAccount?.status === 'busy' || Boolean(gameAccount?.agentId)
 
 const startStreaming = async () => {
   if (!form.agentId) {
@@ -203,11 +202,10 @@ const startStreaming = async () => {
   try {
     const res = await automationApi.startStreaming(props.account.id, {
       agentId: form.agentId,
-      xboxHostId: form.xboxHostId || undefined,
       gameAccountIds: form.gameAccountIds
     })
     taskId.value = res.data?.taskId
-    step.value = 3
+    step.value = 2
     sessionPhase.value = 'opening'
     statusMessage.value = '正在认证与发现主机...'
     startPoll()
@@ -215,7 +213,12 @@ const startStreaming = async () => {
     ElMessage.success(res.data?.reused ? '已复用任务并启动串流' : '串流已启动')
   } catch (error) {
     const conflict = error?.data
-    if (conflict?.taskId) {
+    if (conflict?.conflicts?.length) {
+      const names = conflict.conflicts
+        .map((item) => item.gameAccountName || item.gameAccountId)
+        .join('、')
+      ElMessage.error(`以下游戏账号已被其他任务占用：${names}`)
+    } else if (conflict?.taskId) {
       try {
         await ElMessageBox.confirm(
           error.message || '该串流账号正在运行任务',
@@ -262,6 +265,7 @@ const startAutomation = async () => {
 .label { font-size: 13px; margin-bottom: 8px; color: var(--el-text-color-regular); }
 .ga-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
 .meta { color: var(--el-text-color-secondary); font-size: 12px; margin-left: 6px; }
+.meta.warning { color: var(--el-color-warning); }
 .phase-stepper { margin: 12px 0; }
 .status-line { font-size: 13px; color: var(--el-text-color-secondary); margin-bottom: 8px; }
 .mb-8 { margin-bottom: 8px; }

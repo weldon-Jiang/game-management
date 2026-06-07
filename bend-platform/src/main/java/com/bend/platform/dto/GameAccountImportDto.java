@@ -18,4 +18,8 @@ public class GameAccountImportDto {
     private String password;
 
     private String platform;
+
+    private Integer dailyMatchLimit;
+
+    private Integer cooldownHours;
 }

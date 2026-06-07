@@ -14,7 +14,9 @@ import java.net.InetAddress;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -40,7 +42,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequiredArgsConstructor
 public class SystemMonitorService {
 
+    private static final long OVERVIEW_CACHE_MILLIS = 60_000L;
+    private static final int OVERVIEW_TREND_HOURS = 1;
+    private static final int OVERVIEW_TREND_LIMIT = 60;
+    private static final int MAX_TREND_HOURS = 24;
+    private static final int MAX_TREND_LIMIT = 60;
+
     private final SystemMetricsMapper metricsMapper;
+
+    private volatile OverviewInfo cachedOverview;
+    private volatile long overviewCacheExpiresAt;
 
     // 累计请求数
     private static final AtomicInteger totalRequests = new AtomicInteger(0);
@@ -163,6 +174,41 @@ public class SystemMonitorService {
     }
 
     /**
+     * 获取监控总览。
+     *
+     * 返回值：包含 JVM、系统、业务统计和最近趋势点的轻量快照
+     *
+     * <p>性能说明：总览结果缓存 60 秒，避免管理员页面刷新时重复查询历史指标。
+     */
+    public synchronized OverviewInfo getOverview() {
+        long now = System.currentTimeMillis();
+        if (cachedOverview != null && now < overviewCacheExpiresAt) {
+            return cachedOverview;
+        }
+
+        Map<String, List<TrendPoint>> trends = new LinkedHashMap<>();
+        trends.put("jvm_memory_usage_percent",
+                buildTrend("jvm", "memory_usage_percent", OVERVIEW_TREND_HOURS, OVERVIEW_TREND_LIMIT));
+        trends.put("system_cpu_usage_percent",
+                buildTrend("system", "cpu_usage_percent", OVERVIEW_TREND_HOURS, OVERVIEW_TREND_LIMIT));
+        trends.put("system_memory_usage_percent",
+                buildTrend("system", "memory_usage_percent", OVERVIEW_TREND_HOURS, OVERVIEW_TREND_LIMIT));
+
+        OverviewInfo overview = OverviewInfo.builder()
+                .collectedTime(LocalDateTime.now())
+                .jvm(getJvmInfo())
+                .system(getSystemInfo())
+                .business(getBusinessStats())
+                .trends(trends)
+                .cacheSeconds(OVERVIEW_CACHE_MILLIS / 1000)
+                .build();
+
+        cachedOverview = overview;
+        overviewCacheExpiresAt = now + OVERVIEW_CACHE_MILLIS;
+        return overview;
+    }
+
+    /**
      * 定时任务：采集JVM和系统指标
      *
      * 执行频率：每分钟
@@ -235,6 +281,41 @@ public class SystemMonitorService {
     public List<SystemMetrics> getMetricsTrend(int hours, String metricName) {
         LocalDateTime startTime = LocalDateTime.now().minusHours(hours);
         return metricsMapper.selectTrend(metricName, startTime);
+    }
+
+    /**
+     * 限量获取指标趋势。
+     *
+     * 参数说明：
+     * - hours: 查询小时数，最大 24 小时
+     * - metricName: 指标名称
+     * - limit: 返回点数，最大 60
+     *
+     * 返回值：指标历史列表
+     */
+    public List<SystemMetrics> getMetricsTrendLimited(int hours, String metricName, int limit) {
+        int safeHours = Math.max(1, Math.min(hours, MAX_TREND_HOURS));
+        int safeLimit = Math.max(1, Math.min(limit, MAX_TREND_LIMIT));
+        LocalDateTime startTime = LocalDateTime.now().minusHours(safeHours);
+        return metricsMapper.selectTrendLimited(metricName, startTime, safeLimit);
+    }
+
+    private List<TrendPoint> buildTrend(String metricType, String metricName, int hours, int limit) {
+        int safeHours = Math.max(1, Math.min(hours, MAX_TREND_HOURS));
+        int safeLimit = Math.max(1, Math.min(limit, MAX_TREND_LIMIT));
+        LocalDateTime startTime = LocalDateTime.now().minusHours(safeHours);
+        List<SystemMetrics> metrics = metricsMapper.selectTrendLimitedByType(
+                metricType, metricName, startTime, safeLimit);
+        List<TrendPoint> result = new ArrayList<>();
+        for (SystemMetrics metric : metrics) {
+            result.add(TrendPoint.builder()
+                    .time(metric.getRecordedTime())
+                    .value(metric.getValue())
+                    .unit(metric.getUnit())
+                    .description(metric.getDescription())
+                    .build());
+        }
+        return result;
     }
 
     /**
@@ -321,5 +402,31 @@ public class SystemMonitorService {
         private int successRequests;
         private int failedRequests;
         private double successRate;
+    }
+
+    /**
+     * 监控总览信息。
+     */
+    @lombok.Data
+    @lombok.Builder
+    public static class OverviewInfo {
+        private LocalDateTime collectedTime;
+        private JvmInfo jvm;
+        private SystemInfo system;
+        private BusinessStats business;
+        private Map<String, List<TrendPoint>> trends;
+        private long cacheSeconds;
+    }
+
+    /**
+     * 轻量趋势点。
+     */
+    @lombok.Data
+    @lombok.Builder
+    public static class TrendPoint {
+        private LocalDateTime time;
+        private Double value;
+        private String unit;
+        private String description;
     }
 }

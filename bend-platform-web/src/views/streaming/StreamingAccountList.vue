@@ -224,7 +224,6 @@
       v-model="wizardVisible"
       :account="selectedAccount"
       :agents="onlineAgents"
-      :hosts="boundHosts"
       :game-accounts="wizardGameAccounts"
       @started="onWizardStarted"
     />
@@ -870,7 +869,6 @@ const showStartAutomationDialog = async (row) => {
     ElMessage.warning('当前没有在线的 Agent，请确保 Agent 服务已启动并连接')
     return
   }
-  await loadBoundHosts(row.id)
   wizardVisible.value = true
 }
 

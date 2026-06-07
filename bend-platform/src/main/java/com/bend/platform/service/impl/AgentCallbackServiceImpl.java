@@ -10,6 +10,7 @@ import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.service.AgentCallbackService;
 import com.bend.platform.service.AgentLoadControlService;
+import com.bend.platform.service.AutomationUsageService;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.service.StreamingSessionService;
@@ -53,6 +54,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     private final XboxHostService xboxHostService;
     private final StreamingSessionService streamingSessionService;
     private final TaskEventService taskEventService;
+    private final AutomationUsageService automationUsageService;
 
     /**
      * 统一进度上报入口。
@@ -597,6 +599,16 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         result.put("positionIndex", positionIndex != null ? positionIndex : account.getPositionIndex());
         result.put("gameName", updated != null ? updated.getGameName() : account.getGameName());
         return result;
+    }
+
+    @Override
+    public Map<String, Object> reportBillingEvent(Map<String, Object> payload) {
+        String taskId = (String) payload.get("taskId");
+        if (taskId == null || taskId.isBlank()) {
+            throw new BusinessException(400, "taskId不能为空");
+        }
+        Task task = requireTaskForAuthenticatedAgent(taskId);
+        return automationUsageService.recordBillableEvent(task, payload);
     }
 
     @Override

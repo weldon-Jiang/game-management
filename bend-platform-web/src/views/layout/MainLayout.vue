@@ -49,6 +49,10 @@
           <el-icon><Box /></el-icon>
           <template #title>Agent版本</template>
         </el-menu-item>
+        <el-menu-item v-if="authStore.isPlatformAdmin" index="SystemMonitoring" @click="router.push('/system-monitoring')">
+          <el-icon><Cpu /></el-icon>
+          <template #title>系统监控</template>
+        </el-menu-item>
 
         <div class="menu-group-title" v-if="!isCollapse && showAccountGroup">账号管理</div>
         <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="StreamingAccounts" @click="router.push('/streaming-accounts')">
@@ -59,11 +63,6 @@
           <el-icon><Trophy /></el-icon>
           <template #title>游戏账号</template>
         </el-menu-item>
-        <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="XboxHosts" @click="router.push('/xbox-hosts')">
-          <el-icon><Monitor /></el-icon>
-          <template #title>Xbox主机</template>
-        </el-menu-item>
-
         <div class="menu-group-title" v-if="!isCollapse && showAgentGroup">Agent管理</div>
         <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="Agents" @click="router.push('/agents')">
           <el-icon><Cpu /></el-icon>
@@ -155,7 +154,6 @@ import {
   OfficeBuilding,
   User,
   VideoPlay,
-  Monitor,
   Trophy,
   Coin,
   Key,

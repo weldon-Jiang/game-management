@@ -66,6 +66,10 @@ class GameAccountInfo:
     is_primary: bool = False
     target_matches: int = 3
     today_match_count: int = 0
+    cooldown_hours: int = 23
+    total_coins: int = 0
+    today_coins: int = 0
+    dr_level: str = ""
 
 
 @dataclass

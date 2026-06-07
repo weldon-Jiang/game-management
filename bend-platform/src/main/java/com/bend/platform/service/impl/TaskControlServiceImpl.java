@@ -96,7 +96,11 @@ public class TaskControlServiceImpl implements TaskControlService {
         if (request.getGameAccountIds() != null && !request.getGameAccountIds().isEmpty()) {
             Set<String> selected = new HashSet<>(request.getGameAccountIds());
             gameAccounts = gameAccounts.stream().filter(ga -> selected.contains(ga.getId())).toList();
+            if (gameAccounts.size() != selected.size()) {
+                throw new BusinessException(400, "选中的游戏账号不属于该串流账号或不存在");
+            }
         }
+        validateGameAccountOccupancy(merchantId, gameAccounts);
 
         XboxHost selectedHost = null;
         if (request.getXboxHostId() != null && !request.getXboxHostId().isBlank()) {
@@ -214,6 +218,35 @@ public class TaskControlServiceImpl implements TaskControlService {
             gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.BUSY.getCode());
             gameAccountService.updateAgentId(ga.getId(), agentId);
         }
+    }
+
+    private void validateGameAccountOccupancy(String merchantId, List<GameAccount> gameAccounts) {
+        if (gameAccounts == null || gameAccounts.isEmpty()) {
+            throw new BusinessException(400, "请至少选择一个游戏账号");
+        }
+        List<String> gameAccountIds = gameAccounts.stream().map(GameAccount::getId).toList();
+        List<TaskGameAccountStatus> occupancies =
+                statusService.findActiveOccupancies(merchantId, gameAccountIds);
+        if (occupancies.isEmpty()) {
+            return;
+        }
+        Map<String, GameAccount> accountMap = new HashMap<>();
+        for (GameAccount account : gameAccounts) {
+            accountMap.put(account.getId(), account);
+        }
+        List<Map<String, Object>> conflicts = new ArrayList<>();
+        for (TaskGameAccountStatus occupancy : occupancies) {
+            GameAccount account = accountMap.get(occupancy.getGameAccountId());
+            Map<String, Object> conflict = new HashMap<>();
+            conflict.put("gameAccountId", occupancy.getGameAccountId());
+            conflict.put("gameAccountName", account != null ? account.getGameName() : occupancy.getGameAccountId());
+            conflict.put("taskId", occupancy.getTaskId());
+            conflict.put("streamingAccountId", occupancy.getStreamingAccountId());
+            conflicts.add(conflict);
+        }
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("conflicts", conflicts);
+        throw new BusinessException(400, "部分游戏账号已被其他活跃串流任务占用", payload);
     }
 
     private void restoreStreamingAccountState(Task task) {
@@ -412,6 +445,13 @@ public class TaskControlServiceImpl implements TaskControlService {
                 displayName = account.getId();
             }
             status.setGameAccountName(displayName);
+            status.setDailyMatchLimit(account.getDailyMatchLimit());
+            status.setTodayMatchCount(account.getTodayMatchCount());
+            status.setTotalCoins(account.getTotalCoins());
+            status.setTodayCoins(account.getTodayCoins());
+            status.setDrLevel(account.getDrLevel());
+            status.setCooldownHours(account.getCooldownHours());
+            status.setTodayLastCompletedTime(account.getTodayLastCompletedTime());
         }
     }
 
@@ -495,6 +535,12 @@ public class TaskControlServiceImpl implements TaskControlService {
             if (Boolean.TRUE.equals(ga.getProfileBound())) {
                 info.put("profileBound", true);
             }
+            info.put("dailyMatchLimit", ga.getDailyMatchLimit());
+            info.put("todayMatchCount", ga.getTodayMatchCount());
+            info.put("cooldownHours", ga.getCooldownHours());
+            info.put("totalCoins", ga.getTotalCoins());
+            info.put("todayCoins", ga.getTodayCoins());
+            info.put("drLevel", ga.getDrLevel());
             info.put("passwordToken", credentialTokenService.generateToken(
                     "game_account:" + ga.getId(), ga.getPasswordEncrypted()));
             result.add(info);

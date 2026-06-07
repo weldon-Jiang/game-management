@@ -89,6 +89,10 @@ public class GameAccountServiceImpl implements GameAccountService {
         entity.setGameName(normalizeOptionalGameName(account.getGameName()));
         entity.setEmail(account.getEmail());
         entity.setPlatform(accountPlatform);
+        entity.setDailyMatchLimit(account.getDailyMatchLimit() != null ? account.getDailyMatchLimit() : 3);
+        entity.setCooldownHours(normalizeCooldownHours(account.getCooldownHours()));
+        entity.setTotalCoins(0);
+        entity.setTodayCoins(0);
         if (account.getPassword() != null) {
             entity.setPasswordEncrypted(aesUtil.encrypt(account.getPassword()));
         }
@@ -155,6 +159,10 @@ public class GameAccountServiceImpl implements GameAccountService {
                 entity.setGameName(normalizeOptionalGameName(dto.getGameName()));
                 entity.setEmail(dto.getEmail());
                 entity.setPlatform(PlatformTypeUtil.normalizeOrDefault(dto.getPlatform()));
+                entity.setDailyMatchLimit(dto.getDailyMatchLimit() != null ? dto.getDailyMatchLimit() : 3);
+                entity.setCooldownHours(normalizeCooldownHours(dto.getCooldownHours()));
+                entity.setTotalCoins(0);
+                entity.setTodayCoins(0);
                 if (dto.getPassword() != null) {
                     entity.setPasswordEncrypted(aesUtil.encrypt(dto.getPassword()));
                 }
@@ -307,6 +315,12 @@ public class GameAccountServiceImpl implements GameAccountService {
         }
         if (account.getProfileBound() != null) {
             existing.setProfileBound(account.getProfileBound());
+        }
+        if (account.getDailyMatchLimit() != null) {
+            existing.setDailyMatchLimit(account.getDailyMatchLimit());
+        }
+        if (account.getCooldownHours() != null) {
+            existing.setCooldownHours(normalizeCooldownHours(account.getCooldownHours()));
         }
         existing.setUpdatedTime(LocalDateTime.now());
 
@@ -491,6 +505,14 @@ public class GameAccountServiceImpl implements GameAccountService {
      */
     private String normalizeOptionalGameName(String gameName) {
         return StringUtils.isNotBlank(gameName) ? gameName.trim() : null;
+    }
+
+    private String normalizeOptionalText(String value) {
+        return StringUtils.isNotBlank(value) ? value.trim() : null;
+    }
+
+    private Integer normalizeCooldownHours(Integer value) {
+        return value == null || value < 23 ? 23 : value;
     }
 
     @Override

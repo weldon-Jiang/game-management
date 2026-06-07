@@ -3,6 +3,8 @@ package com.bend.platform.controller;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.SystemAlert;
 import com.bend.platform.entity.SystemMetrics;
+import com.bend.platform.exception.BusinessException;
+import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.AlertService;
 import com.bend.platform.service.SystemMonitorService;
 import com.bend.platform.util.UserContext;
@@ -47,6 +49,7 @@ public class MonitoringController {
      */
     @GetMapping("/jvm")
     public ApiResponse<SystemMonitorService.JvmInfo> getJvmInfo() {
+        requirePlatformAdmin();
         return ApiResponse.success(monitorService.getJvmInfo());
     }
 
@@ -57,6 +60,7 @@ public class MonitoringController {
      */
     @GetMapping("/system")
     public ApiResponse<SystemMonitorService.SystemInfo> getSystemInfo() {
+        requirePlatformAdmin();
         return ApiResponse.success(monitorService.getSystemInfo());
     }
 
@@ -67,7 +71,19 @@ public class MonitoringController {
      */
     @GetMapping("/stats")
     public ApiResponse<SystemMonitorService.BusinessStats> getBusinessStats() {
+        requirePlatformAdmin();
         return ApiResponse.success(monitorService.getBusinessStats());
+    }
+
+    /**
+     * 获取监控总览。
+     *
+     * @return 当前 JVM、系统、业务统计和最近趋势点
+     */
+    @GetMapping("/overview")
+    public ApiResponse<SystemMonitorService.OverviewInfo> getOverview() {
+        requirePlatformAdmin();
+        return ApiResponse.success(monitorService.getOverview());
     }
 
     /**
@@ -80,9 +96,11 @@ public class MonitoringController {
     @GetMapping("/metrics/trend")
     public ApiResponse<List<Map<String, Object>>> getMetricsTrend(
             @RequestParam(defaultValue = "1") int hours,
-            @RequestParam String metricName) {
+            @RequestParam String metricName,
+            @RequestParam(defaultValue = "60") int limit) {
 
-        List<SystemMetrics> metrics = monitorService.getMetricsTrend(hours, metricName);
+        requirePlatformAdmin();
+        List<SystemMetrics> metrics = monitorService.getMetricsTrendLimited(hours, metricName, limit);
         List<Map<String, Object>> result = new ArrayList<>();
         for (SystemMetrics metric : metrics) {
             Map<String, Object> dataPoint = new HashMap<>();
@@ -100,6 +118,7 @@ public class MonitoringController {
      */
     @GetMapping("/alerts")
     public ApiResponse<List<SystemAlert>> getUnresolvedAlerts() {
+        requirePlatformAdmin();
         return ApiResponse.success(alertService.getUnresolvedAlerts());
     }
 
@@ -110,6 +129,7 @@ public class MonitoringController {
      */
     @GetMapping("/alerts/stats")
     public ApiResponse<Map<String, Long>> getAlertStats() {
+        requirePlatformAdmin();
         return ApiResponse.success(alertService.getAlertStats());
     }
 
@@ -121,6 +141,7 @@ public class MonitoringController {
      */
     @PostMapping("/alerts/{id}/acknowledge")
     public ApiResponse<Void> acknowledgeAlert(@PathVariable String id) {
+        requirePlatformAdmin();
         String userId = UserContext.getUserId();
         if (userId == null) {
             userId = "system";
@@ -140,6 +161,7 @@ public class MonitoringController {
     public ApiResponse<Void> resolveAlert(
             @PathVariable String id,
             @RequestBody Map<String, String> body) {
+        requirePlatformAdmin();
         String userId = UserContext.getUserId();
         if (userId == null) {
             userId = "system";
@@ -157,6 +179,7 @@ public class MonitoringController {
      */
     @PostMapping("/alerts/{id}/ignore")
     public ApiResponse<Void> ignoreAlert(@PathVariable String id) {
+        requirePlatformAdmin();
         alertService.ignoreAlert(id);
         return ApiResponse.success("告警已忽略", null);
     }
@@ -172,6 +195,13 @@ public class MonitoringController {
     public ApiResponse<List<SystemAlert>> getMerchantAlerts(
             @PathVariable String merchantId,
             @RequestParam(defaultValue = "false") boolean includeResolved) {
+        requirePlatformAdmin();
         return ApiResponse.success(alertService.getMerchantAlerts(merchantId, includeResolved));
+    }
+
+    private void requirePlatformAdmin() {
+        if (!UserContext.isPlatformAdmin()) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
     }
 }

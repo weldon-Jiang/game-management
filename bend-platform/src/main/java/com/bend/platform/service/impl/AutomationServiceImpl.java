@@ -369,6 +369,12 @@ public class AutomationServiceImpl implements AutomationService {
             if (Boolean.TRUE.equals(ga.getProfileBound())) {
                 info.put("profileBound", true);
             }
+            info.put("dailyMatchLimit", ga.getDailyMatchLimit());
+            info.put("todayMatchCount", ga.getTodayMatchCount());
+            info.put("cooldownHours", ga.getCooldownHours());
+            info.put("totalCoins", ga.getTotalCoins());
+            info.put("todayCoins", ga.getTodayCoins());
+            info.put("drLevel", ga.getDrLevel());
             info.put("passwordToken", credentialTokenService.generateToken(
                 "game_account:" + ga.getId(), ga.getPasswordEncrypted()));
             result.add(info);

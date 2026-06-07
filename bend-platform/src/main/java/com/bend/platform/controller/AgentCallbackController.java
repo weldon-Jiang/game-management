@@ -93,6 +93,18 @@ public class AgentCallbackController {
         }
     }
 
+    @PostMapping("/billing-event")
+    public ApiResponse<Map<String, Object>> reportBillingEvent(@RequestBody Map<String, Object> payload) {
+        try {
+            return ApiResponse.success(agentCallbackService.reportBillingEvent(payload));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        } catch (Exception e) {
+            log.error("处理计费事件失败", e);
+            return ApiResponse.error(500, "处理失败: " + e.getMessage());
+        }
+    }
+
     @Deprecated
     @PostMapping("/task/{taskId}/status")
     public ApiResponse<Void> reportTaskStatus(

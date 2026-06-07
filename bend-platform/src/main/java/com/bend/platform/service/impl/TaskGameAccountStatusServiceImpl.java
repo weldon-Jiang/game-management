@@ -54,6 +54,14 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
     }
 
     @Override
+    public List<TaskGameAccountStatus> findActiveOccupancies(String merchantId, List<String> gameAccountIds) {
+        if (merchantId == null || gameAccountIds == null || gameAccountIds.isEmpty()) {
+            return List.of();
+        }
+        return statusMapper.findActiveOccupancies(merchantId, gameAccountIds);
+    }
+
+    @Override
     @Transactional
     public void updateMatchComplete(String taskId, String gameAccountId, boolean success) {
         TaskGameAccountStatus status = findByTaskIdAndGameAccountId(taskId, gameAccountId);

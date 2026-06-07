@@ -356,6 +356,51 @@ class PlatformApiClient:
             )
         return False
 
+    async def report_billing_event(
+        self,
+        task_id: str,
+        game_account_id: str,
+        game_action_type: str,
+        billing_unit: str,
+        unit_index: int,
+        *,
+        session_id: Optional[str] = None,
+        coins_delta: int = 0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Report an idempotent Step4 billable event."""
+        url = self._get_callback_url('billing-event')
+        headers = await self._get_headers()
+        payload: Dict[str, Any] = {
+            "taskId": task_id,
+            "gameAccountId": game_account_id,
+            "gameActionType": game_action_type,
+            "billingUnit": billing_unit,
+            "unitIndex": unit_index,
+            "coinsDelta": coins_delta,
+        }
+        if session_id:
+            payload["sessionId"] = session_id
+        if metadata:
+            payload["metadata"] = metadata
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get('code') == 200:
+                        return result.get('data', {})
+                    return {"success": False, "error": result.get('message')}
+                return {"success": False, "error": f"HTTP {response.status}"}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
     async def get_task_info(self, task_id: str) -> Optional[Dict[str, Any]]:
         """
         获取任务信息

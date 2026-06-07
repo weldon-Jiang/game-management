@@ -254,6 +254,10 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
             gaInfo.put("priority", ga.getPriority());
             gaInfo.put("dailyMatchLimit", ga.getDailyMatchLimit());
             gaInfo.put("todayMatchCount", ga.getTodayMatchCount());
+            gaInfo.put("cooldownHours", ga.getCooldownHours());
+            gaInfo.put("totalCoins", ga.getTotalCoins());
+            gaInfo.put("todayCoins", ga.getTodayCoins());
+            gaInfo.put("drLevel", ga.getDrLevel());
             gameAccountList.add(gaInfo);
         }
         taskData.set("gameAccounts", gameAccountList);

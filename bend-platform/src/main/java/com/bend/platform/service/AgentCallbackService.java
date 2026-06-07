@@ -22,6 +22,8 @@ public interface AgentCallbackService {
 
     Map<String, Object> updateProfileBinding(String gameAccountId, Map<String, Object> payload);
 
+    Map<String, Object> reportBillingEvent(Map<String, Object> payload);
+
     void reportTaskStatusLegacy(String taskId, Map<String, String> payload);
 
     void updateGameAccountStatusLegacy(String taskId, String gameAccountId, Map<String, Object> payload);

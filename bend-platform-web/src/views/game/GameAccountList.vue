@@ -68,6 +68,26 @@
             {{ row.totalMatchCount ?? 0 }}
           </template>
         </el-table-column>
+        <el-table-column label="今日上限" width="90" align="center">
+          <template #default="{ row }">
+            {{ row.todayMatchCount ?? 0 }}/{{ row.dailyMatchLimit ?? 3 }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="cooldownHours" label="间隔(小时)" width="100" align="center">
+          <template #default="{ row }">
+            {{ row.cooldownHours ?? 23 }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="totalCoins" label="累计金币" width="100" align="center">
+          <template #default="{ row }">
+            {{ row.totalCoins ?? 0 }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="drLevel" label="DR等级" width="90" align="center">
+          <template #default="{ row }">
+            {{ row.drLevel || '-' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="createdTime" label="创建时间" width="170" show-overflow-tooltip>
           <template #default="{ row }">
             {{ formatDate(row.createdTime) }}
@@ -190,6 +210,12 @@
         <el-form-item v-if="dialogType === 'edit'" label="档案绑定" prop="profileBound">
           <el-switch v-model="formData.profileBound" active-text="已绑定" inactive-text="未绑定" />
           <div class="form-hint">切换账号时 Agent 会按游戏昵称在「您是谁」列表中自动定位</div>
+        </el-form-item>
+        <el-form-item label="每日最大场次" prop="dailyMatchLimit">
+          <el-input-number v-model="formData.dailyMatchLimit" :min="0" :max="99" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="自动化间隔(小时)" prop="cooldownHours">
+          <el-input-number v-model="formData.cooldownHours" :min="23" :max="720" style="width: 100%" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -344,7 +370,9 @@ const formData = reactive({
   password: '',
   platform: 'xbox',
   positionIndex: -1,
-  profileBound: false
+  profileBound: false,
+  dailyMatchLimit: 3,
+  cooldownHours: 23
 })
 
 /**
@@ -400,6 +428,8 @@ const showAddDialog = async () => {
   formData.platform = 'xbox'
   formData.positionIndex = -1
   formData.profileBound = false
+  formData.dailyMatchLimit = 3
+  formData.cooldownHours = 23
   passwordVisible.value = false
   passwordLoaded.value = false
   if (authStore.isPlatformAdmin && merchantList.value.length === 0) {
@@ -422,6 +452,8 @@ const showEditDialog = async (row) => {
   formData.platform = row.platform || 'xbox'
   formData.positionIndex = row.positionIndex ?? -1
   formData.profileBound = !!row.profileBound
+  formData.dailyMatchLimit = row.dailyMatchLimit ?? 3
+  formData.cooldownHours = row.cooldownHours ?? 23
   passwordVisible.value = false
   passwordLoaded.value = false
 
@@ -483,7 +515,9 @@ const handleSubmit = async () => {
         gameName: formData.gameName?.trim() || undefined,
         email: formData.email,
         password: formData.password,
-        platform: formData.platform
+        platform: formData.platform,
+        dailyMatchLimit: formData.dailyMatchLimit,
+        cooldownHours: formData.cooldownHours
       })
       ElMessage.success('创建成功')
     } else {
@@ -493,7 +527,9 @@ const handleSubmit = async () => {
         email: formData.email,
         password: formData.password || undefined,
         platform: formData.platform,
-        profileBound: formData.profileBound
+        profileBound: formData.profileBound,
+        dailyMatchLimit: formData.dailyMatchLimit,
+        cooldownHours: formData.cooldownHours
       }
       await gameAccountApi.update(formData.id, updateData)
       ElMessage.success('更新成功')
@@ -601,6 +637,8 @@ const handleImport = async () => {
 
     const gameNameIdx = header.indexOf('游戏昵称')
     const platformIdx = header.indexOf('平台类型')
+    const dailyLimitIdx = header.indexOf('每日最大场次')
+    const cooldownIdx = header.indexOf('自动化间隔小时')
 
     const accounts = []
     for (let i = 1; i < lines.length; i++) {
@@ -610,7 +648,9 @@ const handleImport = async () => {
           gameName: gameNameIdx >= 0 ? (values[gameNameIdx] || '') : '',
           email: values[emailIdx],
           password: values[passwordIdx] || '',
-          platform: platformIdx >= 0 ? (values[platformIdx] || 'xbox') : 'xbox'
+          platform: platformIdx >= 0 ? (values[platformIdx] || 'xbox') : 'xbox',
+          dailyMatchLimit: dailyLimitIdx >= 0 && values[dailyLimitIdx] ? Number(values[dailyLimitIdx]) : undefined,
+          cooldownHours: cooldownIdx >= 0 && values[cooldownIdx] ? Number(values[cooldownIdx]) : undefined
         })
       }
     }

@@ -128,10 +128,36 @@ public class GameAccount {
     private Integer todayMatchCount;
 
     /**
+     * 单账号自动化冷却间隔（小时）
+     * 默认最小 23 小时，用于限制同一游戏账号连续进入自动化的最小间隔
+     */
+    private Integer cooldownHours;
+
+    /**
      * 总比赛场次
      * 累计已进行的游戏场次
      */
     private Integer totalMatchCount;
+
+    /**
+     * 累计获得金币
+     */
+    private Integer totalCoins;
+
+    /**
+     * 今日获得金币
+     */
+    private Integer todayCoins;
+
+    /**
+     * 当前 DR 等级
+     */
+    private String drLevel;
+
+    /**
+     * 今日最后一次完成可计费事件时间
+     */
+    private LocalDateTime todayLastCompletedTime;
 
     /**
      * 最后使用时间

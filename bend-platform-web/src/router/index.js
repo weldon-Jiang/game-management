@@ -75,6 +75,12 @@ const routes = [
         meta: { title: 'Agent版本', icon: 'Box', requiresAdmin: true }
       },
       {
+        path: 'system-monitoring',
+        name: 'SystemMonitoring',
+        component: () => import('@/views/system/SystemMonitoring.vue'),
+        meta: { title: '系统监控', icon: 'Cpu', requiresAdmin: true }
+      },
+      {
         path: 'registration-codes',
         name: 'RegistrationCodes',
         component: () => import('@/views/registration/RegistrationCodeList.vue'),
