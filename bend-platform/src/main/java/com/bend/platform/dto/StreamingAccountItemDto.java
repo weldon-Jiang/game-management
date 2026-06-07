@@ -15,6 +15,7 @@ public class StreamingAccountItemDto {
     private String email;
     private String status;
     private String agentId;
+    private String agentName;
     private String platform;
     private LocalDateTime lastHeartbeat;
     private LocalDateTime createdTime;

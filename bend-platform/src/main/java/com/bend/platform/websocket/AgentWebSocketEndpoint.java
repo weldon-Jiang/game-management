@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import jakarta.annotation.PostConstruct;
 import jakarta.websocket.*;
 import jakarta.websocket.server.PathParam;
@@ -285,6 +286,22 @@ public class AgentWebSocketEndpoint {
         log.info("发送任务取消指令 - AgentID: {}, TaskID: {}", agentId, taskId);
     }
 
+    public static boolean sendTaskControlToAgent(String agentId, Map<String, Object> data) {
+        if (data == null || !data.containsKey("taskId")) {
+            log.warn("task_control 拒绝下发：缺少 taskId - AgentID: {}", agentId);
+            return false;
+        }
+        Session session = AGENT_SESSIONS.get(agentId);
+        if (session == null || !session.isOpen()) {
+            log.warn("Agent不在线，task_control 未下发 - AgentID: {}", agentId);
+            return false;
+        }
+        sendMessage(session, "task_control", data);
+        log.info("发送 task_control - AgentID: {}, TaskID: {}, action: {}",
+                agentId, data.get("taskId"), data.get("action"));
+        return true;
+    }
+
     public static void sendVersionUpdate(String agentId, AgentVersion version) {
         Map<String, Object> data = new HashMap<>();
         data.put("version", version.getVersion());
@@ -488,7 +505,8 @@ public class AgentWebSocketEndpoint {
 
             Map<String, Object> adminData = new HashMap<>();
             adminData.put("agentId", agentId);
-            adminData.put("agentName", agent.getHost());
+            String displayName = StringUtils.hasText(agent.getAgentName()) ? agent.getAgentName() : agent.getHost();
+            adminData.put("agentName", displayName);
             adminData.put("merchantId", merchantId);
             adminData.put("discoveredCount", discoveredCount);
             adminData.put("xboxes", discoveredXboxes);

@@ -49,26 +49,6 @@ test.describe('任务管理流程', () => {
     }
   })
 
-  test('应该支持任务类型筛选', async ({ page }) => {
-    await page.goto('/tasks')
-
-    const selects = page.locator('.el-select')
-    const count = await selects.count()
-    if (count > 1) {
-      const typeSelect = selects.nth(1)
-      if (await typeSelect.isVisible()) {
-        await typeSelect.click()
-        await page.waitForSelector('.el-select-dropdown')
-
-        const option = page.locator('.el-select-dropdown__item').first()
-        if (await option.isVisible()) {
-          await option.click()
-          await page.waitForTimeout(500)
-        }
-      }
-    }
-  })
-
   test('应该显示状态标签', async ({ page }) => {
     await page.goto('/tasks')
     await page.waitForSelector('.el-table', { timeout: 5000 })

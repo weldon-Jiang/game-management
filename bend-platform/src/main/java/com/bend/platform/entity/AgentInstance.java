@@ -39,6 +39,12 @@ public class AgentInstance {
     private String agentId;
 
     /**
+     * Agent显示名称
+     * 平台侧维护，同一商户下不可重复
+     */
+    private String agentName;
+
+    /**
      * Agent密钥
      * 用于API请求的身份验证
      * 首次注册时由系统生成

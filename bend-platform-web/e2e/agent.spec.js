@@ -27,6 +27,7 @@ test.describe('Agent 管理流程', () => {
     await page.goto('/agents')
     await page.waitForSelector('.el-table', { timeout: 5000 })
 
+    await expect(page.locator('text=Agent名称')).toBeVisible()
     await expect(page.locator('text=Agent ID')).toBeVisible()
     await expect(page.locator('text=主机地址')).toBeVisible()
     await expect(page.locator('text=状态')).toBeVisible()
@@ -72,61 +73,16 @@ test.describe('Agent 管理流程', () => {
     }
   })
 
-  test('点击查看任务应该打开任务弹窗', async ({ page }) => {
+  test('点击查看任务应该跳转到任务管理并带上 Agent 条件', async ({ page }) => {
     await page.goto('/agents')
     await page.waitForSelector('.el-table__row', { timeout: 5000 })
 
     const viewButton = page.locator('text=查看任务').first()
     if (await viewButton.isVisible()) {
       await viewButton.click()
-
-      await page.waitForSelector('.el-dialog', { timeout: 3000 })
-      await expect(page.locator('.el-dialog')).toBeVisible()
-      await expect(page.locator('text=Agent 任务监控')).toBeVisible()
-    }
-  })
-
-  test('任务弹窗应该显示 Agent 信息', async ({ page }) => {
-    await page.goto('/agents')
-    await page.waitForSelector('.el-table__row', { timeout: 5000 })
-
-    const viewButton = page.locator('text=查看任务').first()
-    if (await viewButton.isVisible()) {
-      await viewButton.click()
-      await page.waitForSelector('.el-dialog', { timeout: 3000 })
-
-      await expect(page.locator('text=Agent ID')).toBeVisible()
-      await expect(page.locator('text=商户')).toBeVisible()
-      await expect(page.locator('text=状态')).toBeVisible()
-    }
-  })
-
-  test('任务弹窗应该支持切换 Tab', async ({ page }) => {
-    await page.goto('/agents')
-    await page.waitForSelector('.el-table__row', { timeout: 5000 })
-
-    const viewButton = page.locator('text=查看任务').first()
-    if (await viewButton.isVisible()) {
-      await viewButton.click()
-      await page.waitForSelector('.el-dialog', { timeout: 3000 })
-
-      await expect(page.locator('text=运行中的任务')).toBeVisible()
-      await expect(page.locator('text=所有任务')).toBeVisible()
-    }
-  })
-
-  test('任务弹窗应该支持关闭', async ({ page }) => {
-    await page.goto('/agents')
-    await page.waitForSelector('.el-table__row', { timeout: 5000 })
-
-    const viewButton = page.locator('text=查看任务').first()
-    if (await viewButton.isVisible()) {
-      await viewButton.click()
-      await page.waitForSelector('.el-dialog', { timeout: 3000 })
-
-      await page.locator('.el-dialog__footer button').filter({ hasText: '关闭' }).click()
-      await page.waitForTimeout(500)
-      await expect(page.locator('.el-dialog')).not.toBeVisible()
+      await page.waitForURL('**/tasks?agentId=*', { timeout: 5000 })
+      await expect(page.locator('h2')).toContainText('任务管理')
+      await expect(page.url()).toContain('agentId=')
     }
   })
 })

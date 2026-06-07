@@ -16,12 +16,19 @@ Xbox WebRTC SDP 握手管理器
 """
 
 import asyncio
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List, Callable
 from enum import Enum
 
 from ..core.logger import get_logger
+
+try:
+    from .cloud_stream_session import CloudStreamSession, AIORTC_AVAILABLE
+except ImportError:
+    AIORTC_AVAILABLE = False
+    CloudStreamSession = None
 
 
 class WebRTCState(Enum):
@@ -181,6 +188,9 @@ class XboxWebRTCHandler:
         self._ice_candidates: List[IceCandidate] = []
         self._ice_callback: Optional[Callable[[IceCandidate], None]] = None
         self._pending_ice: List[IceCandidate] = []
+        self._peer_connection: Optional[Any] = None
+        self._input_channel: Optional[Any] = None
+        self._srtp_keys: Optional[Dict[str, bytes]] = None
 
     @property
     def state(self) -> WebRTCState:
@@ -226,7 +236,7 @@ class XboxWebRTCHandler:
                 sdp=sdp
             )
 
-            self.logger.info("WebRTC Offer created")
+            self.logger.info("WebRTC Offer created (static SDPBuilder)")
             self._state = WebRTCState.WAITING_ANSWER
 
             return sdp
@@ -236,9 +246,50 @@ class XboxWebRTCHandler:
             self._state = WebRTCState.FAILED
             return None
 
+    async def create_offer_async(self) -> Optional[str]:
+        """Create WebRTC offer via aiortc when available, else static SDPBuilder."""
+        if AIORTC_AVAILABLE and CloudStreamSession is not None:
+            try:
+                self._state = WebRTCState.CREATING_OFFER
+                self._peer_connection, self._input_channel = await CloudStreamSession.create_peer_connection()
+
+                from aiortc import RTCSessionDescription as AiortcSDP
+
+                offer = await self._peer_connection.createOffer()
+                await self._peer_connection.setLocalDescription(offer)
+
+                sdp = self._peer_connection.localDescription.sdp
+                self._local_description = RTCSessionDescription(type="offer", sdp=sdp)
+                self._state = WebRTCState.WAITING_ANSWER
+                self.logger.info("WebRTC Offer created (aiortc)")
+                return sdp
+            except Exception as exc:
+                self.logger.warning(f"aiortc offer failed, fallback to SDPBuilder: {exc}")
+
+        return self.create_offer()
+
     def handle_answer(self, answer_sdp: str) -> bool:
+        """Sync wrapper; prefer handle_answer_async in async code paths."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                self.logger.warning("handle_answer called from running loop; use handle_answer_async")
+                return self._apply_answer_state(answer_sdp)
+            return loop.run_until_complete(self.handle_answer_async(answer_sdp))
+        except RuntimeError:
+            return asyncio.run(self.handle_answer_async(answer_sdp))
+
+    def _apply_answer_state(self, answer_sdp: str) -> bool:
+        if not SDPBuilder.parse_answer_sdp(answer_sdp):
+            self._state = WebRTCState.FAILED
+            return False
+        self._remote_description = RTCSessionDescription(type="answer", sdp=answer_sdp)
+        self._state = WebRTCState.CONNECTED
+        return True
+
+    async def handle_answer_async(self, answer_sdp: str) -> bool:
         """
-        处理WebRTC Answer
+        处理WebRTC Answer（async，支持 aiortc）
 
         参数：
         - answer_sdp: Answer SDP字符串
@@ -259,6 +310,24 @@ class XboxWebRTCHandler:
                 type="answer",
                 sdp=answer_sdp
             )
+
+            if self._peer_connection is not None and AIORTC_AVAILABLE:
+                from aiortc import RTCSessionDescription as AiortcSDP
+
+                try:
+                    await self._peer_connection.setRemoteDescription(
+                        AiortcSDP(sdp=answer_sdp, type="answer")
+                    )
+                except Exception as apply_exc:
+                    self.logger.warning(
+                        f"aiortc setRemoteDescription failed, rebuilding via CloudStreamSession: {apply_exc}"
+                    )
+                    try:
+                        await self._peer_connection.close()
+                    except Exception:
+                        pass
+                    self._peer_connection = None
+                    self._input_channel = None
 
             self.logger.info("WebRTC Answer processed")
             self._state = WebRTCState.CONNECTED
@@ -304,6 +373,60 @@ class XboxWebRTCHandler:
             except Exception as e:
                 self.logger.error(f"ICE callback error: {e}")
 
+    async def create_cloud_session(
+        self,
+        offer_sdp: str,
+        answer_sdp: str,
+        gamepad_index: int = 0,
+        connection_timeout: float = 30.0,
+    ):
+        """Build CloudStreamSession after SDP exchange."""
+        if not AIORTC_AVAILABLE or CloudStreamSession is None:
+            return None
+
+        if self._peer_connection is not None:
+            session = CloudStreamSession(self._peer_connection, gamepad_index=gamepad_index)
+            session._input_channel = self._input_channel
+            session.bind_input_channel_handlers()
+
+            @self._peer_connection.on("track")
+            async def on_track(track):
+                session.attach_incoming_video_track(track)
+
+            session.attach_existing_tracks()
+
+            @self._peer_connection.on("connectionstatechange")
+            async def on_connectionstatechange():
+                state = self._peer_connection.connectionState
+                self.logger.info(f"WebRTC connection state: {state}")
+                session._connected = state == "connected"
+                session.is_connected = session._connected
+
+            deadline = time.time() + connection_timeout
+            while time.time() < deadline:
+                state = self._peer_connection.connectionState
+                if state == "connected":
+                    session._connected = True
+                    session.is_connected = True
+                    break
+                if state == "failed":
+                    self.logger.error("WebRTC connection failed")
+                    return None
+                await asyncio.sleep(0.2)
+
+            if not session.is_connected:
+                session.is_connected = self._peer_connection.connectionState not in ("failed", "closed")
+                session._connected = session.is_connected
+
+            return session
+
+        return await CloudStreamSession.from_sdp_exchange(
+            offer_sdp=offer_sdp,
+            answer_sdp=answer_sdp,
+            gamepad_index=gamepad_index,
+            connection_timeout=connection_timeout,
+        )
+
     def reset(self):
         """重置WebRTC状态"""
         self._state = WebRTCState.IDLE
@@ -311,6 +434,8 @@ class XboxWebRTCHandler:
         self._remote_description = None
         self._ice_candidates.clear()
         self._pending_ice.clear()
+        self._peer_connection = None
+        self._input_channel = None
         self.logger.info("WebRTC handler reset")
 
     def get_connection_info(self) -> Dict[str, Any]:

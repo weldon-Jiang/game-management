@@ -303,7 +303,8 @@ public interface ResultCode {
         UNBIND_STREAMING_FAILED(19009, "解绑流媒体账号失败"),
         BIND_TASK_FAILED(19010, "绑定任务失败"),
         UNBIND_TASK_FAILED(19011, "解绑任务失败"),
-        NOT_ONLINE(19012, "Agent实例不在线");
+        NOT_ONLINE(19012, "Agent实例不在线"),
+        AGENT_NAME_DUPLICATE(19013, "同一商户下Agent名称已存在");
 
         private final int code;
         private final String message;

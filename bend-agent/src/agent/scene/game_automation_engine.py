@@ -148,6 +148,7 @@ class ActionExecutor:
         self.logger = get_logger('action_executor')
         self._controller = None
         self._xbox_session = None
+        self._controller_protocol = None
 
     def set_controller(self, controller):
         """设置Xbox控制器"""
@@ -158,6 +159,24 @@ class ActionExecutor:
         """设置Xbox SmartGlass会话"""
         self._xbox_session = session
         self.logger.info("动作执行器已绑定Xbox会话")
+
+    def set_controller_protocol(self, protocol):
+        """绑定 ControllerProtocol 并同步 WebRTC 会话。"""
+        self._controller_protocol = protocol
+        if protocol and getattr(protocol, "_stream_controller", None):
+            self.set_xbox_session(protocol._stream_controller)
+        self.logger.info("动作执行器已绑定手柄协议")
+
+    async def _send_gamepad_state(self, gamepad_data: Dict[str, Any]) -> bool:
+        """Send gamepad state via WebRTC DataChannel or legacy SmartGlass session."""
+        if not self._xbox_session:
+            return False
+        if hasattr(self._xbox_session, "send_gamepad_state"):
+            return await self._xbox_session.send_gamepad_state(gamepad_data)
+        if hasattr(self._xbox_session, "send_input"):
+            await self._xbox_session.send_input("gamepad", gamepad_data)
+            return True
+        return False
 
     async def execute(self, action: Action) -> bool:
         """
@@ -205,30 +224,43 @@ class ActionExecutor:
         duration = action.params.get('duration', 0.1)
 
         button_map = {
-            'A': 'BUTTON_A', 'B': 'BUTTON_B', 'X': 'BUTTON_X', 'Y': 'BUTTON_Y',
-            'START': 'BUTTON_START', 'SELECT': 'BUTTON_SELECT',
-            'L1': 'BUTTON_L1', 'R1': 'BUTTON_R1',
-            'UP': 'DPAD_UP', 'DOWN': 'DPAD_DOWN', 'LEFT': 'DPAD_LEFT', 'RIGHT': 'DPAD_RIGHT'
+            'A': 'A', 'B': 'B', 'X': 'X', 'Y': 'Y',
+            'START': 'START', 'SELECT': 'SELECT', 'VIEW': 'VIEW', 'MENU': 'MENU',
+            'L1': 'L1', 'R1': 'R1', 'LB': 'L1', 'RB': 'R1',
+            'UP': 'DPAD_UP', 'DOWN': 'DPAD_DOWN', 'LEFT': 'DPAD_LEFT', 'RIGHT': 'DPAD_RIGHT',
+            'DPAD_UP': 'DPAD_UP', 'DPAD_DOWN': 'DPAD_DOWN',
+            'DPAD_LEFT': 'DPAD_LEFT', 'DPAD_RIGHT': 'DPAD_RIGHT',
+            'XBOX': 'NEXUS', 'NEXUS': 'NEXUS', 'GUIDE': 'NEXUS',
         }
 
-        flag_name = button_map.get(button.upper(), 'BUTTON_A')
+        flag_name = button_map.get(button.upper(), 'A')
 
         if self._xbox_session:
             try:
                 from ..input.controller_protocol import ControllerSignal, XboxButtonFlag
 
+                if not hasattr(XboxButtonFlag, flag_name):
+                    self.logger.warning(f"Unknown button: {button}")
+                    return False
+
+                flag = getattr(XboxButtonFlag, flag_name)
                 signal = ControllerSignal()
-                if hasattr(XboxButtonFlag, flag_name):
-                    flag = getattr(XboxButtonFlag, flag_name)
-                    signal.set_button(flag, True)
-                    await self._xbox_session.send_input("gamepad", signal.to_dict())
+                signal.set_button(flag, True)
+                ok_press = await self._send_gamepad_state(signal.to_dict())
+                if not ok_press:
+                    self.logger.warning(
+                        f"Gamepad press failed: {button} -> {flag_name} ({flag.value})"
+                    )
 
                 await asyncio.sleep(duration)
 
                 signal.set_button(flag, False)
-                await self._xbox_session.send_input("gamepad", signal.to_dict())
-
-                return True
+                ok_release = await self._send_gamepad_state(signal.to_dict())
+                if not ok_release:
+                    self.logger.warning(
+                        f"Gamepad release failed: {button} -> {flag_name} ({flag.value})"
+                    )
+                return ok_press and ok_release
             except Exception as e:
                 self.logger.error(f"Send button signal failed: {e}")
                 return False
@@ -248,12 +280,12 @@ class ActionExecutor:
 
                 signal = ControllerSignal()
                 signal.set_thumb(thumb, x, y)
-                await self._xbox_session.send_input("gamepad", signal.to_dict())
+                await self._send_gamepad_state(signal.to_dict())
 
                 await asyncio.sleep(duration)
 
                 signal = ControllerSignal()
-                await self._xbox_session.send_input("gamepad", signal.to_dict())
+                await self._send_gamepad_state(signal.to_dict())
 
                 return True
             except Exception as e:

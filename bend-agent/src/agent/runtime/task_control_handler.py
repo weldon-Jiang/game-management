@@ -1,0 +1,188 @@
+"""
+WebSocket task_control message handler.
+
+Contract: every control message MUST include taskId; cross-task operations rejected.
+"""
+
+from typing import Any, Callable, Dict, Optional
+
+from ..core.logger import get_logger
+from .input_focus import InputFocusManager
+from .phase_fsm import PauseMode, SessionPhase
+from .task_registry import TaskRuntimeRegistry
+
+
+class TaskControlHandler:
+    """Routes task_control WS actions to the correct task runtime."""
+
+    def __init__(
+        self,
+        registry: Optional[TaskRuntimeRegistry] = None,
+        focus_manager: Optional[InputFocusManager] = None,
+    ):
+        self.logger = get_logger("task_control")
+        self._registry = registry or TaskRuntimeRegistry.get_instance()
+        self._focus = focus_manager or InputFocusManager.get_instance()
+        self._scheduler: Optional[Any] = None
+
+    def set_scheduler(self, scheduler: Any) -> None:
+        self._scheduler = scheduler
+
+    async def handle(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        task_id = data.get("taskId") or data.get("task_id")
+        action = (data.get("action") or "").lower()
+
+        if not task_id:
+            self.logger.warning("task_control rejected: missing taskId")
+            return {"success": False, "error": "taskId is required"}
+
+        runtime = self._registry.get(task_id)
+        if runtime is None:
+            self.logger.warning("task_control rejected: unknown taskId=%s", task_id)
+            return {"success": False, "error": f"Unknown taskId: {task_id}"}
+
+        handlers: Dict[str, Callable] = {
+            "pause": self._pause,
+            "resume": self._resume,
+            "cancel": self._cancel,
+            "terminate": self._terminate,
+            "show_window": self._show_window,
+            "hide_window": self._hide_window,
+            "focus_window": self._focus_window,
+            "window_show": self._show_window,
+            "window_hide": self._hide_window,
+            "window_focus": self._focus_window,
+            "skip_game_account": self._skip_game_account,
+            "reconnect_stream": self._reconnect_stream,
+            "start_game_automation": self._start_automation,
+            "open_streaming_session": self._open_streaming,
+        }
+
+        handler = handlers.get(action)
+        if not handler:
+            return {"success": False, "error": f"Unknown action: {action}"}
+
+        try:
+            return await handler(runtime, data)
+        except Exception as exc:
+            self.logger.error("task_control %s failed: %s", action, exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+
+    async def _pause(self, runtime, data: Dict) -> Dict:
+        mode_str = (data.get("mode") or "immediate").lower()
+        mode = (
+            PauseMode.AFTER_MATCH
+            if mode_str == "after_match"
+            else PauseMode.IMMEDIATE
+        )
+        runtime.pause_mode = mode
+        runtime.pause_after_match = mode == PauseMode.AFTER_MATCH
+        runtime.phase_before_pause = runtime.phase_fsm.phase
+        runtime.context.pause()
+        phase = runtime.set_phase(
+            SessionPhase.PAUSED_AFTER_MATCH
+            if mode == PauseMode.AFTER_MATCH
+            else SessionPhase.PAUSED_IMMEDIATE,
+            f"Paused ({mode.value})",
+        )
+        self._focus.focus(runtime.task_id)
+        if self._scheduler:
+            await self._scheduler.pause_task(runtime.task_id, mode=mode)
+        return {"success": True, "phase": phase.value, "pauseMode": mode.value}
+
+    async def _resume(self, runtime, data: Dict) -> Dict:
+        if not runtime.phase_fsm.is_paused():
+            return {"success": False, "error": "Task is not paused"}
+        runtime.pause_mode = None
+        runtime.pause_after_match = False
+        runtime.context.resume()
+        prev = runtime.phase_before_pause
+        runtime.phase_before_pause = None
+        if prev == SessionPhase.READY or not runtime.phase_fsm.automation_started:
+            phase = runtime.set_phase(SessionPhase.READY, "Resumed")
+        else:
+            phase = runtime.set_phase(SessionPhase.AUTOMATING, "Resumed")
+        if self._scheduler:
+            await self._scheduler.resume_task(runtime.task_id)
+        return {"success": True, "phase": phase.value}
+
+    async def _cancel(self, runtime, data: Dict) -> Dict:
+        return await self._terminate(runtime, data)
+
+    async def _terminate(self, runtime, data: Dict) -> Dict:
+        runtime.cancel_event.set()
+        runtime.set_phase(SessionPhase.CLOSING, "Terminating")
+        if self._scheduler and hasattr(self._scheduler, "force_terminate_task"):
+            await self._scheduler.force_terminate_task(runtime.task_id)
+        elif self._scheduler:
+            await self._scheduler.stop_task(runtime.task_id)
+        return {"success": True, "terminated": True}
+
+    async def _show_window(self, runtime, data: Dict) -> Dict:
+        runtime.window_visible = True
+        if self._scheduler and hasattr(self._scheduler, "reopen_display_window"):
+            ok = await self._scheduler.reopen_display_window(runtime.task_id)
+            if not ok:
+                wm = runtime.modules.get("window_manager")
+                if wm:
+                    await wm.show_by_task(runtime.task_id)
+            return {"success": ok, "windowVisible": ok}
+        wm = runtime.modules.get("window_manager")
+        if wm:
+            await wm.show_by_task(runtime.task_id)
+        return {"success": True, "windowVisible": True}
+
+    async def _hide_window(self, runtime, data: Dict) -> Dict:
+        runtime.window_visible = False
+        if self._scheduler and hasattr(self._scheduler, "close_display_window"):
+            ok = await self._scheduler.close_display_window(runtime.task_id)
+            return {"success": ok, "windowVisible": False}
+        wm = runtime.modules.get("window_manager")
+        if wm:
+            await wm.hide_by_task(runtime.task_id)
+        return {"success": True, "windowVisible": False}
+
+    async def _focus_window(self, runtime, data: Dict) -> Dict:
+        self._focus.focus(runtime.task_id)
+        wm = runtime.modules.get("window_manager")
+        if wm:
+            await wm.focus_by_task(runtime.task_id)
+        return {"success": True}
+
+    async def _skip_game_account(self, runtime, data: Dict) -> Dict:
+        ga_id = data.get("gameAccountId") or data.get("game_account_id")
+        if not ga_id:
+            return {"success": False, "error": "gameAccountId required"}
+        skipped = runtime.modules.setdefault("skipped_accounts", set())
+        skipped.add(ga_id)
+        task_obj = runtime.task_object
+        if task_obj and hasattr(task_obj, "skip_game_account"):
+            await task_obj.skip_game_account(ga_id)
+        return {"success": True, "gameAccountId": ga_id}
+
+    async def _reconnect_stream(self, runtime, data: Dict) -> Dict:
+        session = runtime.modules.get("streaming_session")
+        if session and hasattr(session, "reconnect"):
+            ok = await session.reconnect()
+            return {"success": ok}
+        return {"success": False, "error": "No active streaming session"}
+
+    async def _start_automation(self, runtime, data: Dict) -> Dict:
+        if not runtime.phase_fsm.can_start_automation():
+            return {
+                "success": False,
+                "error": f"Cannot start automation in phase {runtime.phase_fsm.phase.value}",
+            }
+        game_action_type = data.get("gameActionType") or data.get("game_action_type")
+        if game_action_type:
+            runtime.context.game_action_type = game_action_type
+        automation_event = runtime.modules.get("automation_start_event")
+        if automation_event:
+            automation_event.set()
+        if self._scheduler:
+            await self._scheduler.start_automation(runtime.task_id, game_action_type)
+        runtime.set_phase(SessionPhase.AUTOMATING, "Automation started")
+        return {"success": True, "gameActionType": runtime.context.game_action_type}
+
+    async def _open_streaming(self, runtime, data: Dict) -> Dict:
+        return {"success": True, "phase": runtime.phase_fsm.phase.value}

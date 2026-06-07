@@ -28,11 +28,14 @@ API端点：
 
 import asyncio
 import json
+
+import aiohttp
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 from enum import Enum
 
 from ..core.logger import get_logger
+from ..gssv.base_uri import DEFAULT_GSSV_BASE_URI, normalize_gssv_base_uri
 
 
 class SessionState(Enum):
@@ -114,17 +117,27 @@ class XboxPlaySessionManager:
     - 使用完毕后调用 close_session() 关闭会话
     """
 
-    BASE_URL = "https://uks.core.gssv-play-prodxhome.xboxlive.com"
+    DEFAULT_BASE_URL = DEFAULT_GSSV_BASE_URI
     PROVISION_TIMEOUT = 30
     PROVISION_POLL_INTERVAL = 1
-    SDP_POLL_TIMEOUT = 10
-    SDP_POLL_INTERVAL = 1
+    SDP_POLL_MAX_ATTEMPTS = 30
+    SDP_POLL_INTERVAL = 1.0
+    SDP_EXCHANGE_RETRIES = 2
 
-    def __init__(self):
+    def __init__(self, base_url: Optional[str] = None):
         self.logger = get_logger('xbox_play_session')
+        self._base_url = normalize_gssv_base_uri(base_url)
         self._current_session: Optional[PlaySession] = None
         self._access_token: Optional[str] = None
         self._aiohttp_session: Optional[Any] = None
+        self._last_sdp_error_code: Optional[str] = None
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    def set_base_url(self, base_url: Optional[str]) -> None:
+        self._base_url = normalize_gssv_base_uri(base_url)
 
     async def _get_http_session(self):
         """获取或创建aiohttp会话"""
@@ -175,7 +188,7 @@ class XboxPlaySessionManager:
                 'x-xbl-contract-version': '1'
             }
 
-            url = f"{self.BASE_URL}/v6/servers/home"
+            url = f"{self._base_url}/v6/servers/home"
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -246,7 +259,7 @@ class XboxPlaySessionManager:
                 'x-xbl-contract-version': '1'
             }
 
-            url = f"{self.BASE_URL}/{play_path}"
+            url = f"{self._base_url}/{play_path}"
             data = {
                 "clientSessionId": config.client_session_id or "",
                 "titleId": config.title_id or "",
@@ -274,7 +287,7 @@ class XboxPlaySessionManager:
             ) as resp:
                 response_data = await resp.json()
 
-                if resp.status in (200, 201):
+                if resp.status in (200, 201, 202):
                     session_id = response_data.get('sessionId', '')
                     session_path = response_data.get('sessionPath', '')
                     state = response_data.get('state', '')
@@ -342,13 +355,15 @@ class XboxPlaySessionManager:
         返回：
         - 是否成功 Provisioned
         """
+        import aiohttp
+
         self.logger.info(f"Waiting for session provisioning: {session_path}")
 
         for attempt in range(self.PROVISION_TIMEOUT):
             await asyncio.sleep(self.PROVISION_POLL_INTERVAL)
 
             try:
-                state_url = f"{self.BASE_URL}/{session_path}/state"
+                state_url = f"{self._base_url}/{session_path}/state"
                 async with http_session.get(
                     state_url,
                     headers=headers,
@@ -359,6 +374,24 @@ class XboxPlaySessionManager:
                         state = state_data.get('state', '')
 
                         self.logger.debug(f"Provisioning attempt {attempt + 1}: state={state}")
+
+                        if state == "ReadyToConnect":
+                            lpt = state_data.get("lpt") or state_data.get("lastProvisioningToken")
+                            if lpt:
+                                connect_url = f"{self._base_url}/{session_path}/connect"
+                                try:
+                                    async with http_session.post(
+                                        connect_url,
+                                        json={"lpt": lpt},
+                                        headers=headers,
+                                        timeout=aiohttp.ClientTimeout(total=10),
+                                    ) as connect_resp:
+                                        self.logger.info(
+                                            "ReadyToConnect -> connect: %s",
+                                            connect_resp.status,
+                                        )
+                                except Exception as connect_err:
+                                    self.logger.warning("connect POST failed: %s", connect_err)
 
                         if state == "Provisioned":
                             return True
@@ -415,6 +448,8 @@ class XboxPlaySessionManager:
             self.logger.error("No SDP offer available")
             return None
 
+        self._last_sdp_error_code = None
+
         try:
             import aiohttp
             http_session = await self._get_http_session()
@@ -424,18 +459,20 @@ class XboxPlaySessionManager:
                 'x-xbl-contract-version': '1'
             }
 
-            url = f"{self.BASE_URL}/{use_session.session_path}/sdp"
+            url = f"{self._base_url}/{use_session.session_path}/sdp"
             data = {
                 "messageType": "offer",
                 "sdp": actual_sdp_offer,
                 "configuration": {
                     "chatConfiguration": {
-                        "codec": sdp_config.chat_codec,
-                        "container": sdp_config.container,
+                        "bytesPerSample": sdp_config.bytes_per_sample,
+                        "expectedClipDurationMs": sdp_config.expected_clip_duration_ms,
+                        "format": {
+                            "codec": sdp_config.chat_codec,
+                            "container": sdp_config.container,
+                        },
                         "numChannels": sdp_config.chat_channels,
                         "sampleFrequencyHz": sdp_config.chat_sample_rate,
-                        "bytesPerSample": sdp_config.bytes_per_sample,
-                        "expectedClipDurationMs": sdp_config.expected_clip_duration_ms
                     },
                     "chat": {
                         "minVersion": 1,
@@ -480,9 +517,20 @@ class XboxPlaySessionManager:
 
                 elif resp.status == 202:
                     self.logger.info("SDP exchange async (202), polling for answer...")
-                    sdp_answer = await self._poll_sdp_answer(
-                        url, headers, http_session
-                    )
+                    sdp_answer = None
+                    for attempt in range(self.SDP_EXCHANGE_RETRIES):
+                        if attempt > 0:
+                            self.logger.info(
+                                "SDP poll retry %s/%s after brief backoff",
+                                attempt + 1,
+                                self.SDP_EXCHANGE_RETRIES,
+                            )
+                            await asyncio.sleep(2.0)
+                        sdp_answer = await self._poll_sdp_answer(
+                            url, headers, http_session
+                        )
+                        if sdp_answer:
+                            break
 
                     if sdp_answer:
                         self.logger.info("SDP exchange successful (polled response)")
@@ -522,16 +570,33 @@ class XboxPlaySessionManager:
         - SDP字符串或None
         """
         try:
+            from ..xhome_stream.ice_handler import rewrite_sdp
+
             if 'sdp' in response_data:
-                return response_data['sdp']
+                sdp = response_data['sdp']
+                return rewrite_sdp(sdp) if sdp else None
+
+            error_details = response_data.get('errorDetails')
+            if isinstance(error_details, dict):
+                error_code = error_details.get('code')
+                if error_code:
+                    self._last_sdp_error_code = error_code
+                    self.logger.warning(
+                        "SDP response error: code=%s, message=%s",
+                        self._last_sdp_error_code,
+                        error_details.get('message'),
+                    )
+                    return None
 
             if 'exchangeResponse' in response_data:
                 exchange_response = response_data['exchangeResponse']
                 if isinstance(exchange_response, str):
                     exchange_data = json.loads(exchange_response)
-                    return exchange_data.get('sdp')
+                    sdp = exchange_data.get('sdp')
+                    return rewrite_sdp(sdp) if sdp else None
                 elif isinstance(exchange_response, dict):
-                    return exchange_response.get('sdp')
+                    sdp = exchange_response.get('sdp')
+                    return rewrite_sdp(sdp) if sdp else None
 
             self.logger.warning(f"Unexpected SDP response format: {response_data}")
             return None
@@ -565,8 +630,9 @@ class XboxPlaySessionManager:
         返回：
         - Answer SDP或None
         """
-        for attempt in range(self.SDP_POLL_TIMEOUT):
-            await asyncio.sleep(self.SDP_POLL_INTERVAL)
+        for attempt in range(self.SDP_POLL_MAX_ATTEMPTS):
+            if attempt > 0:
+                await asyncio.sleep(self.SDP_POLL_INTERVAL)
 
             try:
                 async with http_session.get(
@@ -579,22 +645,52 @@ class XboxPlaySessionManager:
                         sdp_answer = self._extract_sdp_from_response(response_data)
 
                         if sdp_answer:
-                            self.logger.info(f"SDP answer received after {attempt + 1} polls")
+                            self.logger.info(
+                                "SDP answer received after %s poll(s)",
+                                attempt + 1,
+                            )
                             return sdp_answer
 
-                        self.logger.debug(f"SDP poll {attempt + 1}: waiting for answer...")
+                        if self._last_sdp_error_code == "AgentNotListening":
+                            self.logger.warning(
+                                "SDP polling stopped: session is not listening"
+                            )
+                            return None
 
-                    elif resp.status == 202:
-                        self.logger.debug(f"SDP poll {attempt + 1}: still processing...")
+                        self.logger.debug(
+                            "SDP poll %s: 200 without answer, keep waiting...",
+                            attempt + 1,
+                        )
 
+                    elif resp.status in (202, 204):
+                        self.logger.info(
+                            "SDP poll %s: still processing (status=%s)",
+                            attempt + 1,
+                            resp.status,
+                        )
+
+                    elif resp.status >= 500:
+                        self.logger.warning(
+                            "SDP poll %s: server error %s, keep retrying",
+                            attempt + 1,
+                            resp.status,
+                        )
                     else:
-                        self.logger.warning(f"SDP poll returned unexpected status: {resp.status}")
-                        break
+                        body = await resp.text()
+                        self.logger.warning(
+                            "SDP poll %s: unexpected status %s body=%s",
+                            attempt + 1,
+                            resp.status,
+                            body[:200],
+                        )
 
             except Exception as e:
                 self.logger.warning(f"SDP poll error (attempt {attempt + 1}): {e}")
 
-        self.logger.error(f"SDP polling timeout after {self.SDP_POLL_TIMEOUT}s")
+        self.logger.error(
+            "SDP polling timeout after %ss",
+            int(self.SDP_POLL_MAX_ATTEMPTS * self.SDP_POLL_INTERVAL),
+        )
         return None
 
     async def close_session(self, session_id: str = None) -> bool:
@@ -620,7 +716,7 @@ class XboxPlaySessionManager:
                 'x-xbl-contract-version': '1'
             }
 
-            url = f"{self.BASE_URL}/v6/servers/home"
+            url = f"{self._base_url}/v6/servers/home"
             async with session.delete(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status in (200, 204):
                     self.logger.info(f"Session closed: {sid}")

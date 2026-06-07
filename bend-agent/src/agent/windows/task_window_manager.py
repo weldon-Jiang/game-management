@@ -231,6 +231,28 @@ class TaskWindowManager:
             return await self.hide_window(window.window_id)
         return False
 
+    def get_window_id_by_task(self, task_id: str) -> Optional[str]:
+        """Return window_id for task_id."""
+        return self._task_to_window.get(task_id)
+
+    async def focus_window(self, window_id: str) -> bool:
+        """Bring window to foreground (display_only)."""
+        if window_id not in self._windows:
+            return False
+        window = self._windows[window_id]
+        if window.window_handle is None:
+            return False
+        try:
+            import win32gui
+            import win32con
+            win32gui.ShowWindow(window.window_handle, win32con.SW_SHOW)
+            win32gui.SetForegroundWindow(window.window_handle)
+            window.is_visible = True
+            return True
+        except Exception as e:
+            self.logger.error(f"置顶窗口失败: {e}")
+            return False
+
     def get_window_by_task(self, task_id: str) -> Optional[WindowInfo]:
         """
         根据任务ID获取窗口信息

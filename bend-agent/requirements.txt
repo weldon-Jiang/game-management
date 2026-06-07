@@ -21,3 +21,6 @@ torch>=2.0.0
 torchvision>=0.15.0
 imageio-ffmpeg>=0.4.0
 pyotp>=2.9.0  # TOTP验证码生成，用于MFA自动化
+aiortc>=1.6.0
+av>=10.0.0
+compress-pickle>=2.0.0

@@ -20,7 +20,8 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
 
     @Override
     @Transactional
-    public void createStatusRecords(String taskId, List<String> gameAccountIds, List<Integer> dailyLimits, String streamingAccountId) {
+    public void createStatusRecords(String taskId, List<String> gameAccountIds, List<Integer> dailyLimits,
+                                    String streamingAccountId, String sessionId) {
         for (int i = 0; i < gameAccountIds.size(); i++) {
             String gameAccountId = gameAccountIds.get(i);
             Integer dailyLimit = (i < dailyLimits.size()) ? dailyLimits.get(i) : 3;
@@ -29,6 +30,8 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
             status.setTaskId(taskId);
             status.setGameAccountId(gameAccountId);
             status.setStreamingAccountId(streamingAccountId);
+            status.setSessionId(sessionId);
+            status.setPhase("pending");
             status.setStatus(TaskGameAccountStatusEnum.PENDING.getCode());
             status.setCompletedCount(0);
             status.setFailedCount(0);
@@ -174,6 +177,14 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
                 record.setTotalMatches(dailyLimit);
             }
             statusMapper.updateById(record);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void updateProvisioningStatus(TaskGameAccountStatus status) {
+        if (status != null && status.getId() != null) {
+            statusMapper.updateById(status);
         }
     }
 }

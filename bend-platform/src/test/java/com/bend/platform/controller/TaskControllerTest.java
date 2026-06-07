@@ -209,7 +209,10 @@ class TaskControllerTest {
         assertNotNull(response.getData());
         assertTrue(response.getData().contains("pending"));
         assertTrue(response.getData().contains("running"));
+        assertTrue(response.getData().contains("paused"));
         assertTrue(response.getData().contains("completed"));
         assertTrue(response.getData().contains("failed"));
+        assertTrue(response.getData().contains("cancelled"));
+        assertTrue(response.getData().contains("stopped"));
     }
 }

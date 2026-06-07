@@ -54,8 +54,10 @@ class WSMessageType(Enum):
     - TASK_RESULT: 任务执行结果
     - CONNECTED: 连接成功通知
     - ERROR: 错误消息
+    - TASK_CONTROL: 任务级控制（必须含 taskId）
     """
     TASK = "task"                     # 任务消息
+    TASK_CONTROL = "task_control"     # 任务级控制
     COMMAND = "command"               # 命令消息
     PROGRESS = "progress"             # 进度上报（新增）
     HEARTBEAT = "heartbeat"           # 心跳

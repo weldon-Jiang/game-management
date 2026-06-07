@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.bend.platform.dto.AgentInstancePageRequest;
 import com.bend.platform.entity.AgentInstance;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Agent实例服务接口
@@ -62,4 +64,10 @@ public interface AgentInstanceService {
     void offlineByTimeout(int minutes);
 
     List<AgentInstance> findAllOnline();
+
+    AgentInstance updateAgentName(String agentId, String agentName);
+
+    Map<String, String> resolveDisplayNames(Collection<String> agentIds);
+
+    String resolveDisplayName(String agentId);
 }

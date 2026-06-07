@@ -13,6 +13,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from ..core.logger import get_logger
+from ..gssv.base_uri import DEFAULT_GSSV_BASE_URI, normalize_gssv_base_uri
+from ..gssv.network_util import is_blocked_scan_ip, pick_local_lan_ip
 
 
 @dataclass
@@ -60,7 +62,7 @@ class XboxDiscovery:
     XBOX_STREAM_HTTPS_PORT = 3080
     XBOX_VALIDATION_PORTS = [5050, 3074, 3080]
 
-    XBOX_LIVE_API_BASE = "https://uks.core.gssv-play-prodxhome.xboxlive.com"
+    DEFAULT_API_BASE = DEFAULT_GSSV_BASE_URI
 
     SEARCH_REQUEST = (
         "M-SEARCH * HTTP/1.1\r\n"
@@ -89,12 +91,16 @@ class XboxDiscovery:
         "\r\n"
     )
 
-    def __init__(self):
+    def __init__(self, api_base: Optional[str] = None):
         self.logger = get_logger('xbox_discovery')
+        self._api_base = normalize_gssv_base_uri(api_base)
         self._discovered_xboxes: Dict[str, XboxInfo] = {}
         self._discovery_task: Optional[asyncio.Task] = None
         self._running = False
         self._access_token: Optional[str] = None
+
+    def set_api_base(self, api_base: Optional[str]) -> None:
+        self._api_base = normalize_gssv_base_uri(api_base)
 
     def set_access_token(self, token: str):
         """
@@ -131,7 +137,7 @@ class XboxDiscovery:
                 'x-xbl-contract-version': '1'
             }
 
-            url = f"{self.XBOX_LIVE_API_BASE}/v6/servers/home"
+            url = f"{self._api_base}/v6/servers/home"
             self.logger.info("使用 Xbox Live 云端 API 发现 Xbox...")
 
             async with aiohttp.ClientSession() as session:
@@ -159,7 +165,7 @@ class XboxDiscovery:
                                 name=device_name,
                                 ip_address="",
                                 port=self.SMARTGLASS_PORT,
-                                live_id=server_id,
+                                live_id=server.get('liveId', '') or server_id,
                                 console_type=console_type,
                                 firmware_version="Unknown",
                                 last_seen=datetime.now(),
@@ -370,6 +376,12 @@ class XboxDiscovery:
         if not local_ip:
             self.logger.warning("无法获取本机IP地址，网络扫描跳过")
             return found_ips
+        if is_blocked_scan_ip(local_ip):
+            self.logger.warning(
+                "跳过局域网扫描：本机出口 IP %s 属于代理/TUN 网段（非真实 LAN）",
+                local_ip,
+            )
+            return found_ips
 
         network_prefix = '.'.join(local_ip.split('.')[:3])
         ports_to_scan = [5050, 3074, 3080]
@@ -412,13 +424,8 @@ class XboxDiscovery:
         return found_ips
 
     def _get_local_ip(self) -> Optional[str]:
-        """Get local IP address"""
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.connect(("8.8.8.8", 80))
-                return s.getsockname()[0]
-        except Exception:
-            return None
+        """Prefer RFC1918 LAN address; ignore proxy fake-ip ranges."""
+        return pick_local_lan_ip()
 
     async def _broadcast_ping(self) -> List[str]:
         """Send broadcast ping to discover devices"""

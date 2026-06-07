@@ -105,6 +105,17 @@ public class GameAccount {
     private Integer priority;
 
     /**
+     * Xbox「您是谁」列表中的位置（0=最上方）
+     * 与 gameName/gamertag 解耦，需在主机上校准后填写
+     */
+    private Integer positionIndex;
+
+    /**
+     * 档案是否已在 Xbox 主机绑定（日常任务仅切换，不走凭据登录）
+     */
+    private Boolean profileBound;
+
+    /**
      * 每日比赛限制场次
      * 每天最多进行的游戏场次
      */

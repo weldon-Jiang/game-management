@@ -298,6 +298,15 @@ public class GameAccountServiceImpl implements GameAccountService {
         if (account.getPlatform() != null && !account.getPlatform().isBlank()) {
             existing.setPlatform(PlatformTypeUtil.requireValid(account.getPlatform()));
         }
+        if (account.getGameName() != null) {
+            existing.setGameName(account.getGameName());
+        }
+        if (account.getPositionIndex() != null) {
+            existing.setPositionIndex(account.getPositionIndex());
+        }
+        if (account.getProfileBound() != null) {
+            existing.setProfileBound(account.getProfileBound());
+        }
         existing.setUpdatedTime(LocalDateTime.now());
 
         gameAccountMapper.updateById(existing);
@@ -448,6 +457,25 @@ public class GameAccountServiceImpl implements GameAccountService {
         account.setUpdatedTime(LocalDateTime.now());
         gameAccountMapper.updateById(account);
         log.info("更新游戏账号状态 - ID: {}, 状态: {}", id, status);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateProfileBinding(String id, Boolean profileBound, Integer positionIndex) {
+        GameAccount account = gameAccountMapper.selectById(id);
+        if (account == null) {
+            throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
+        }
+        if (profileBound != null) {
+            account.setProfileBound(profileBound);
+        }
+        if (positionIndex != null) {
+            account.setPositionIndex(positionIndex);
+        }
+        account.setUpdatedTime(LocalDateTime.now());
+        gameAccountMapper.updateById(account);
+        log.info("更新游戏账号档案绑定 - ID: {}, profileBound: {}, positionIndex: {}",
+                id, profileBound, positionIndex);
     }
 
     @Override

@@ -358,6 +358,12 @@ public class AutomationServiceImpl implements AutomationService {
             info.put("gameName", ga.getGameName());
             info.put("email", ga.getEmail());
             info.put("isPrimary", ga.getIsPrimary());
+            if (ga.getPositionIndex() != null) {
+                info.put("positionIndex", ga.getPositionIndex());
+            }
+            if (Boolean.TRUE.equals(ga.getProfileBound())) {
+                info.put("profileBound", true);
+            }
             info.put("passwordToken", credentialTokenService.generateToken(
                 "game_account:" + ga.getId(), ga.getPasswordEncrypted()));
             result.add(info);

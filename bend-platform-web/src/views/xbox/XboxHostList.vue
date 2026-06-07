@@ -253,7 +253,7 @@
             <el-option
               v-for="agent in onlineAgents"
               :key="agent.agentId"
-              :label="`${agent.agentId} - ${agent.merchantName || '未知商户'}`"
+              :label="getAgentDisplayName(agent)"
               :value="agent.agentId"
             />
           </el-select>
@@ -308,7 +308,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Check, Search } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { xboxApi, streamingApi, merchantApi, agentApi } from '@/api'
-import { getXboxHostStatusText, getXboxHostStatusType, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag } from '@/utils/constants'
+import { getAgentDisplayName, getXboxHostStatusText, getXboxHostStatusType, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag } from '@/utils/constants'
 import { connectStomp, subscribeToTopic, getStompClient } from '@/utils/stompClient'
 
 let discoverySubscription = null

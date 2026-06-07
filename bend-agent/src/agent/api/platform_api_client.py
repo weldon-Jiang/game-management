@@ -304,6 +304,49 @@ class PlatformApiClient:
         )
         return {"success": False, "error": last_error}
 
+    async def update_profile_binding(
+        self,
+        game_account_id: str,
+        *,
+        profile_bound: bool = True,
+        position_index: Optional[int] = None,
+    ) -> bool:
+        """Persist profile_bound / position_index after successful console login."""
+        url = self._get_callback_url(f'game-account/{game_account_id}/profile-binding')
+        headers = await self._get_headers()
+        payload: Dict[str, Any] = {"profileBound": profile_bound}
+        if position_index is not None:
+            payload["positionIndex"] = position_index
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get('code') == 200:
+                        self.logger.info(
+                            "profile_bound 已回写平台 - gameAccountId=%s",
+                            game_account_id,
+                        )
+                        return True
+                self.logger.warning(
+                    "profile_bound 回写失败 - gameAccountId=%s HTTP=%s",
+                    game_account_id,
+                    response.status,
+                )
+        except Exception as exc:
+            self.logger.warning(
+                "profile_bound 回写异常 - gameAccountId=%s: %s",
+                game_account_id,
+                exc,
+            )
+        return False
+
     async def get_task_info(self, task_id: str) -> Optional[Dict[str, Any]]:
         """
         获取任务信息

@@ -9,7 +9,8 @@ public enum GameActionType {
 
     AUCTION_TRANSFER("auction_transfer", "拍卖行转会", true),
     SQUAD_BATTLE("squad_battle", "SQB模式", true),
-    DIVISIONS_RIVALS("divisions_rivals", "DR模式", false),
+    TRANSFER_SQB_COMBO("transfer_sqb_combo", "转会+SQB组合", true),
+    DIVISIONS_RIVALS("divisions_rivals", "DR模式", true),
     WEEKEND_LEAGUE("weekend_league", "周赛", false);
 
     private final String code;

@@ -87,10 +87,28 @@ public class Task {
     private String targetAgentId;
 
     /**
+     * 目标Agent显示名称（非数据库字段）
+     */
+    @TableField(exist = false)
+    private String targetAgentName;
+
+    /**
      * 关联的流媒体账号ID
      * 任务操作的流媒体账号
      */
     private String streamingAccountId;
+
+    /**
+     * 串流账号显示名称（非数据库字段）
+     */
+    @TableField(exist = false)
+    private String streamingAccountName;
+
+    private String sessionId;
+    private String sessionPhase;
+    private Boolean gameActionPending;
+    private String pauseMode;
+    private Boolean windowVisible;
 
     /**
      * 关联的游戏账号ID

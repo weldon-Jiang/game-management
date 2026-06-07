@@ -26,7 +26,16 @@ mkdir "%BUILD_DIR%"
 
 REM Install dependencies
 echo [2/9] Installing dependencies...
-pip install pyarmor pyinstaller aiohttp websockets beautifulsoup4 playwright Pillow opencv-python numpy pystray pyautogui pydirectinput pywin32 inputs python-xlib PyYAML python-json-logger asyncio-throttle pycryptodome scikit-image easyocr torch torchvision imageio-ffmpeg pyotp -q
+pip install pyarmor pyinstaller -q
+pip install -r "%PROJECT_ROOT%\requirements.txt" -q
+if errorlevel 1 (
+    echo PyPI default failed, retrying requirements install with Aliyun mirror...
+    pip install -r "%PROJECT_ROOT%\requirements.txt" -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com -q
+    if errorlevel 1 (
+        echo [ERROR] Failed to install requirements.txt
+        exit /b 1
+    )
+)
 
 REM Create build directory structure
 echo [3/9] Creating build directory structure...
@@ -113,6 +122,16 @@ pyinstaller --name "BendAgent" ^
     --hidden-import=torchvision ^
     --hidden-import=imageio_ffmpeg ^
     --hidden-import=pyotp ^
+    --hidden-import=aiortc ^
+    --hidden-import=aioice ^
+    --hidden-import=pylibsrtp ^
+    --hidden-import=google_crc32c ^
+    --hidden-import=ifaddr ^
+    --hidden-import=av ^
+    --hidden-import=compress_pickle ^
+    --collect-all=av ^
+    --collect-all=aiortc ^
+    --collect-submodules=aiortc ^
     --collect-all=pystray ^
     --noconfirm ^
     "%OBFUSCATED_DIR%\main.py"
@@ -135,9 +154,14 @@ if exist "%OUTPUT_DIR%\BendAgent.exe" (
         echo   - Copied README.txt
     )
 
-    REM Create templates directory (Agent will auto-create logs on first run)
-    mkdir "%OUTPUT_DIR%\templates" 2>nul
-    echo   - Created templates directory
+    REM Copy templates (scene PNGs for streaming_scene_detector)
+    if exist "%PROJECT_ROOT%\templates" (
+        robocopy "%PROJECT_ROOT%\templates" "%OUTPUT_DIR%\templates" *.png /NFL /NDL /NJH /NJS >nul
+        echo   - Copied templates PNGs
+    ) else (
+        mkdir "%OUTPUT_DIR%\templates" 2>nul
+        echo   - Created empty templates directory
+    )
 
     REM Create logs directory
     mkdir "%OUTPUT_DIR%\logs" 2>nul

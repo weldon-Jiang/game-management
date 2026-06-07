@@ -365,6 +365,7 @@ class CentralManager:
 
             # 设置WebSocket事件处理器
             self.ws.on('task', self._handle_task)            # 任务处理
+            self.ws.on('task_control', self._handle_task_control)  # 任务级控制
             self.ws.on('command', self._handle_command)      # 命令处理
             self.ws.on('version_update', self._handle_version_update)  # 版本更新
             self.ws.on('automation_control', self._handle_automation_control)  # 自动化控制
@@ -883,9 +884,50 @@ class CentralManager:
         task_id = data.get('taskId')
         self.logger.info(f"Received stop_task command for task: {task_id}")
 
+        from ..task.automation_scheduler import get_active_scheduler
         from ..task.task_executor import task_executor
-        task_executor.request_cancel(task_id)
+
+        scheduler = get_active_scheduler()
+        if scheduler:
+            await scheduler.force_terminate_task(task_id)
+        else:
+            task_executor.request_cancel(task_id)
         self.logger.info(f"Task stop requested: {task_id}")
+
+    async def _handle_task_control(self, data: Dict):
+        """
+        Handle task_control WS messages. taskId is mandatory.
+        """
+        task_id = data.get('taskId') or data.get('task_id')
+        if not task_id:
+            self.logger.warning("task_control rejected: missing taskId")
+            return {'success': False, 'error': 'taskId is required'}
+
+        self.logger.info(
+            "Received task_control: action=%s taskId=%s",
+            data.get('action'),
+            task_id,
+        )
+        try:
+            from ..task.automation_scheduler import get_active_scheduler, TaskControlHandler
+            from ..runtime.task_registry import TaskRuntimeRegistry
+            from ..runtime.input_focus import InputFocusManager
+
+            scheduler = get_active_scheduler()
+            if scheduler:
+                result = await scheduler.handle_task_control(data)
+            else:
+                handler = TaskControlHandler(
+                    TaskRuntimeRegistry.get_instance(),
+                    InputFocusManager.get_instance(),
+                )
+                result = await handler.handle(data)
+            await self.ws.send('task_control_ack', {
+                'taskId': task_id,
+                **result,
+            })
+        except Exception as e:
+            self.logger.error("task_control handler error: %s", e, exc_info=True)
 
     async def _handle_cancel_task(self, data: Dict):
         """
@@ -902,8 +944,14 @@ class CentralManager:
         task_id = data.get('taskId')
         self.logger.info(f"Received cancel_task command for task: {task_id}")
 
+        from ..task.automation_scheduler import get_active_scheduler
         from ..task.task_executor import task_executor
-        task_executor.request_cancel(task_id)
+
+        scheduler = get_active_scheduler()
+        if scheduler:
+            await scheduler.force_terminate_task(task_id)
+        else:
+            task_executor.request_cancel(task_id)
         self.logger.info(f"Task cancel requested: {task_id}")
 
     async def _handle_discover_xbox(self, data: Dict):

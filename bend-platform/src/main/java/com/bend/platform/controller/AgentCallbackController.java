@@ -82,6 +82,17 @@ public class AgentCallbackController {
         }
     }
 
+    @PostMapping("/game-account/{gameAccountId}/profile-binding")
+    public ApiResponse<Map<String, Object>> updateProfileBinding(
+            @PathVariable String gameAccountId,
+            @RequestBody Map<String, Object> payload) {
+        try {
+            return ApiResponse.success(agentCallbackService.updateProfileBinding(gameAccountId, payload));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        }
+    }
+
     @Deprecated
     @PostMapping("/task/{taskId}/status")
     public ApiResponse<Void> reportTaskStatus(

@@ -17,9 +17,11 @@ describe('constants.js - 状态映射常量', () => {
     it('应该包含所有任务状态', () => {
       expect(TASK_STATUS_MAP).toHaveProperty('pending')
       expect(TASK_STATUS_MAP).toHaveProperty('running')
+      expect(TASK_STATUS_MAP).toHaveProperty('paused')
       expect(TASK_STATUS_MAP).toHaveProperty('completed')
       expect(TASK_STATUS_MAP).toHaveProperty('failed')
       expect(TASK_STATUS_MAP).toHaveProperty('cancelled')
+      expect(TASK_STATUS_MAP).toHaveProperty('stopped')
     })
 
     it('每个状态应该有 text 和 type 属性', () => {
@@ -77,9 +79,11 @@ describe('constants.js - 工具函数', () => {
     it('应该返回正确的状态文本', () => {
       expect(getTaskStatusText('pending')).toBe('待执行')
       expect(getTaskStatusText('running')).toBe('执行中')
+      expect(getTaskStatusText('paused')).toBe('已暂停')
       expect(getTaskStatusText('completed')).toBe('已完成')
       expect(getTaskStatusText('failed')).toBe('已失败')
       expect(getTaskStatusText('cancelled')).toBe('已取消')
+      expect(getTaskStatusText('stopped')).toBe('已停止')
     })
 
     it('对于未知状态应该返回原值', () => {

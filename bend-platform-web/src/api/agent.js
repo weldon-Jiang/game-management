@@ -5,6 +5,7 @@ export const agentApi = {
   listPage: (params) => request.get('/api/agents/page', { params }),
   listOnline: () => request.get('/api/agents/online'),
   getById: (agentId) => request.get(`/api/agents/${agentId}`),
+  updateName: (agentId, data) => request.put(`/api/agents/${agentId}/name`, data),
   updateStatus: (id, status) => request.put(`/api/agent-instances/${id}/status`, null, { params: { status } }),
   delete: (agentId) => request.delete(`/api/agents/${agentId}`),
   batchDelete: (agentIds) => request.delete('/api/agents/batch', { data: agentIds }),

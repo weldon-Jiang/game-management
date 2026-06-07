@@ -37,9 +37,11 @@ import java.util.Map;
  * 任务状态：
  * - pending: 等待分配
  * - running: 执行中
+ * - paused: 已暂停
  * - completed: 已完成
  * - failed: 执行失败
  * - cancelled: 已取消
+ * - stopped: 已停止
  */
 @Slf4j
 @RestController
@@ -303,7 +305,7 @@ public class TaskController {
     @GetMapping("/statuses")
     public ApiResponse<List<String>> getStatuses() {
         return ApiResponse.success(Arrays.asList(
-            "pending", "running", "completed", "failed", "cancelled"
+            "pending", "running", "paused", "completed", "failed", "cancelled", "stopped"
         ));
     }
 

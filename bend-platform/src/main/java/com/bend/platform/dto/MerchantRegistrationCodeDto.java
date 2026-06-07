@@ -14,7 +14,9 @@ public class MerchantRegistrationCodeDto {
     private String code;
     private String status;
     private String usedByAgentId;
+    private String usedByAgentName;
     private String agentId;
+    private String agentName;
     private LocalDateTime createdTime;
     private LocalDateTime expireTime;
     private LocalDateTime usedTime;

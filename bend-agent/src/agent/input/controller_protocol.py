@@ -10,6 +10,7 @@ Xbox 手柄信号协议
 
 技术实现参考（streaming项目）：
 - xsrp.WriteControllerData(username, signals)
+- 云端串流：CloudStreamSession input DataChannel
 
 作者：技术团队
 版本：2.0（新增send_gamepad_state功能）
@@ -25,21 +26,29 @@ from ..core.logger import get_logger
 
 
 class XboxButtonFlag(Enum):
-    """Xbox手柄按钮标志位"""
-    A = 0x0001
-    B = 0x0002
-    X = 0x0004
-    Y = 0x0008
-    L1 = 0x0010
-    R1 = 0x0020
-    START = 0x0040
-    SELECT = 0x0080
-    L3 = 0x0100
-    R3 = 0x0200
-    DPAD_UP = 0x1000
-    DPAD_DOWN = 0x2000
-    DPAD_LEFT = 0x4000
-    DPAD_RIGHT = 0x8000
+    """
+    xCloud 手柄按钮位掩码（对齐 xsrp.XSGamepadButtons / xsrpst diagrams）。
+
+    参考 xsrpst controller_option[2]：Nexus=2, A=16, DPadDown=512, DPadUp=4096。
+    """
+    NEXUS = 2
+    A = 16
+    B = 32
+    X = 64
+    Y = 128
+    VIEW = 256
+    DPAD_DOWN = 512
+    DPAD_LEFT = 1024
+    DPAD_RIGHT = 2048
+    DPAD_UP = 4096
+    MENU = 8192
+    # 别名（兼容旧调用名）
+    START = 8192
+    SELECT = 256
+    L1 = 16384
+    R1 = 32768
+    L3 = 65536
+    R3 = 131072
 
 
 @dataclass
@@ -188,9 +197,11 @@ class ControllerProtocol:
         设置流控制器
 
         参数：
-        - controller: XboxStreamController实例
+        - controller: XboxStreamController 或 CloudStreamSession 实例
         """
         self._stream_controller = controller
+        controller_name = type(controller).__name__ if controller else "None"
+        self.logger.info(f"流控制器已设置: {controller_name}")
 
     async def send_signal(self, signal: ControllerSignal) -> bool:
         """

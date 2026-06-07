@@ -85,7 +85,7 @@
         </el-table-column>
         <el-table-column prop="usedByAgentId" label="绑定的Agent" min-width="150">
           <template #default="{ row }">
-            <span v-if="row.usedByAgentId" class="text-muted">{{ row.usedByAgentId }}</span>
+            <span v-if="row.usedByAgentId" class="text-muted">{{ row.usedByAgentName || row.usedByAgentId }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>

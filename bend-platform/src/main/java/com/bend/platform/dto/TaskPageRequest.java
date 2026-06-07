@@ -19,4 +19,14 @@ public class TaskPageRequest extends PageRequest {
      * 任务类型过滤
      */
     private String type;
+
+    /**
+     * 执行Agent过滤
+     */
+    private String targetAgentId;
+
+    /**
+     * 串流账号过滤
+     */
+    private String streamingAccountId;
 }

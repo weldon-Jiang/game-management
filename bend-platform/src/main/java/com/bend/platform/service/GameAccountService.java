@@ -52,6 +52,11 @@ public interface GameAccountService {
      */
     void updateStatus(String id, String status);
 
+    /**
+     * Agent callback: persist console profile binding after successful login/switch.
+     */
+    void updateProfileBinding(String id, Boolean profileBound, Integer positionIndex);
+
     void clearAgentIdByStreamingId(String streamingId);
 
     List<GameAccount> findByStreamingId(String streamingId);

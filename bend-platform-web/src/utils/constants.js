@@ -78,9 +78,19 @@ export const XBOX_HOST_STATUS_TYPE_MAP = {
 export const TASK_STATUS_MAP = {
   pending: { text: '待执行', type: 'warning' },
   running: { text: '执行中', type: 'primary' },
+  paused: { text: '已暂停', type: 'warning' },
   completed: { text: '已完成', type: 'success' },
   failed: { text: '已失败', type: 'danger' },
-  cancelled: { text: '已取消', type: 'info' }
+  cancelled: { text: '已取消', type: 'info' },
+  stopped: { text: '已停止', type: 'info' }
+}
+
+/** 已结束、不可再操作的任务状态 */
+export const TASK_TERMINAL_STATUSES = ['completed', 'cancelled', 'failed', 'stopped']
+
+export const isTaskTerminal = (status) => {
+  if (!status) return false
+  return TASK_TERMINAL_STATUSES.includes(status)
 }
 
 export const ACCOUNT_TASK_STATUS_MAP = {
@@ -106,7 +116,8 @@ export const AUTOMATION_TASK_TYPES = [
 export const GAME_ACTION_TYPE_MAP = {
   auction_transfer: { text: '拍卖行转会', visible: true },
   squad_battle: { text: 'SQB模式', visible: true },
-  divisions_rivals: { text: 'DR模式', visible: false },
+  transfer_sqb_combo: { text: '转会+SQB组合', visible: true },
+  divisions_rivals: { text: 'DR模式', visible: true },
   weekend_league: { text: '周赛', visible: false }
 }
 
@@ -279,6 +290,14 @@ export const getRoleType = (role) => {
   return ROLE_TYPE_MAP[role] || 'info'
 }
 
+export const getAgentDisplayName = (agent, fallbackId = '') => {
+  if (agent && typeof agent === 'object') {
+    return agent.agentName || agent.host || agent.agentId || '-'
+  }
+  const id = typeof agent === 'string' ? agent : fallbackId
+  return id || '-'
+}
+
 export const getTaskStatusText = (status) => {
   if (!status) return '-'
   return TASK_STATUS_MAP[status]?.text || status
@@ -335,4 +354,85 @@ export const getVisibleGameActionTypes = () => {
 export const getGameActionTypeText = (code) => {
   if (!code) return '-'
   return GAME_ACTION_TYPE_MAP[code]?.text || code
+}
+
+export const SESSION_PHASE_MAP = {
+  opening: { text: '启动中', type: 'info' },
+  authenticating: { text: '认证中', type: 'info' },
+  discovering: { text: '发现主机', type: 'info' },
+  streaming: { text: '串流连接中', type: 'primary' },
+  initializing_display: { text: '初始化画面', type: 'primary' },
+  initializing_input: { text: '初始化输入', type: 'primary' },
+  ready: { text: '串流就绪', type: 'success' },
+  automating: { text: '自动化执行中', type: 'primary' },
+  paused_immediate: { text: '已暂停', type: 'warning' },
+  paused_after_match: { text: '本场后暂停', type: 'warning' },
+  closing: { text: '关闭中', type: 'info' },
+  closed: { text: '已关闭', type: 'info' },
+  failed: { text: '失败', type: 'danger' }
+}
+
+export const GAME_ACCOUNT_RUN_STATUS_MAP = {
+  pending: { text: '待执行', type: 'info' },
+  running: { text: '操作中', type: 'primary' },
+  game_preparing: { text: '游戏准备中', type: 'primary' },
+  gaming: { text: '比赛中', type: 'success' },
+  completed: { text: '已完成', type: 'success' },
+  failed: { text: '失败', type: 'danger' },
+  cancelled: { text: '已取消', type: 'info' },
+  skipped: { text: '已跳过', type: 'warning' },
+  timeout: { text: '超时', type: 'danger' }
+}
+
+export const GAME_ACCOUNT_PHASE_MAP = {
+  pending: '待执行',
+  provisioning: '账号准备',
+  automating: '自动化中',
+  completed: '已完成',
+  failed: '失败',
+  skipped: '已跳过'
+}
+
+export const PROVISIONING_PHASE_MAP = {
+  login: '登录游戏',
+  navigate: '导航中',
+  switch_account: '切换账号',
+  calibrate: '校准位置',
+  ready: '准备完成'
+}
+
+export const getSessionPhaseText = (phase) => {
+  if (!phase) return '-'
+  const key = String(phase).toLowerCase()
+  if (SESSION_PHASE_MAP[key]) return SESSION_PHASE_MAP[key].text
+  if (key.startsWith('paused')) return '已暂停'
+  return phase
+}
+
+export const getSessionPhaseType = (phase) => {
+  if (!phase) return 'info'
+  const key = String(phase).toLowerCase()
+  if (SESSION_PHASE_MAP[key]) return SESSION_PHASE_MAP[key].type
+  if (key.startsWith('paused')) return 'warning'
+  return 'info'
+}
+
+export const getGameAccountRunStatusText = (status) => {
+  if (!status) return '-'
+  return GAME_ACCOUNT_RUN_STATUS_MAP[status]?.text || status
+}
+
+export const getGameAccountRunStatusType = (status) => {
+  if (!status) return 'info'
+  return GAME_ACCOUNT_RUN_STATUS_MAP[status]?.type || 'info'
+}
+
+export const getGameAccountPhaseText = (phase) => {
+  if (!phase) return '-'
+  return GAME_ACCOUNT_PHASE_MAP[phase] || phase
+}
+
+export const getProvisioningPhaseText = (phase) => {
+  if (!phase) return ''
+  return PROVISIONING_PHASE_MAP[phase] || phase
 }

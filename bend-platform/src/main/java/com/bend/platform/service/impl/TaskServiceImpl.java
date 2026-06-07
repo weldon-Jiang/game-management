@@ -31,6 +31,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -74,6 +75,9 @@ public class TaskServiceImpl implements TaskService {
 
     @Autowired
     private GameAccountService gameAccountService;
+
+    @Autowired
+    private com.bend.platform.service.AgentInstanceService agentInstanceService;
 
     /**
      * 创建任务
@@ -144,6 +148,15 @@ public class TaskServiceImpl implements TaskService {
                 if (xboxHost != null) {
                     task.setXboxHostName(xboxHost.getName());
                     task.setXboxHostIp(xboxHost.getIpAddress());
+                }
+            }
+            if (StringUtils.hasText(task.getTargetAgentId())) {
+                task.setTargetAgentName(agentInstanceService.resolveDisplayName(task.getTargetAgentId()));
+            }
+            if (StringUtils.hasText(task.getStreamingAccountId())) {
+                var streamingAccount = streamingAccountService.findById(task.getStreamingAccountId());
+                if (streamingAccount != null) {
+                    task.setStreamingAccountName(streamingAccount.getName());
                 }
             }
         }
@@ -227,15 +240,62 @@ public class TaskServiceImpl implements TaskService {
             }
         }
 
+        if (UserContext.isPlatformAdmin() && StringUtils.hasText(request.getMerchantId())) {
+            wrapper.eq(Task::getMerchantId, request.getMerchantId());
+        }
         if (StringUtils.hasText(request.getStatus())) {
             wrapper.eq(Task::getStatus, request.getStatus());
         }
         if (StringUtils.hasText(request.getType())) {
             wrapper.eq(Task::getType, request.getType());
         }
+        if (StringUtils.hasText(request.getTargetAgentId())) {
+            wrapper.eq(Task::getTargetAgentId, request.getTargetAgentId());
+        }
+        if (StringUtils.hasText(request.getStreamingAccountId())) {
+            wrapper.eq(Task::getStreamingAccountId, request.getStreamingAccountId());
+        }
         wrapper.orderByDesc(Task::getCreatedTime);
         Page<Task> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
-        return taskMapper.selectPage(page, wrapper);
+        IPage<Task> result = taskMapper.selectPage(page, wrapper);
+        populateTaskDisplayFields(result.getRecords());
+        return result;
+    }
+
+    private void populateTaskDisplayFields(List<Task> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return;
+        }
+        List<String> agentIds = tasks.stream()
+                .map(Task::getTargetAgentId)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<String, String> agentNames = agentIds.isEmpty()
+                ? java.util.Collections.emptyMap()
+                : agentInstanceService.resolveDisplayNames(agentIds);
+
+        List<String> streamingIds = tasks.stream()
+                .map(Task::getStreamingAccountId)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<String, String> streamingNames = new HashMap<>();
+        for (String streamingId : streamingIds) {
+            var account = streamingAccountService.findById(streamingId);
+            if (account != null) {
+                streamingNames.put(streamingId, account.getName());
+            }
+        }
+
+        for (Task task : tasks) {
+            if (StringUtils.hasText(task.getTargetAgentId())) {
+                task.setTargetAgentName(agentNames.get(task.getTargetAgentId()));
+            }
+            if (StringUtils.hasText(task.getStreamingAccountId())) {
+                task.setStreamingAccountName(streamingNames.get(task.getStreamingAccountId()));
+            }
+        }
     }
 
     /**

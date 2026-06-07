@@ -13,6 +13,7 @@ import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.StreamingAccount;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
+import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountLoginRecordService;
@@ -56,6 +57,7 @@ public class StreamingAccountController {
     private final StreamingAccountLoginRecordService loginRecordService;
     private final MerchantService merchantService;
     private final GameAccountService gameAccountService;
+    private final AgentInstanceService agentInstanceService;
     private final AesUtil aesUtil;
 
     /**
@@ -128,10 +130,20 @@ public class StreamingAccountController {
         Map<String, String> merchantNameMap = merchants.stream()
                 .collect(Collectors.toMap(Merchant::getId, Merchant::getName));
 
+        List<String> agentIds = page.getRecords().stream()
+                .map(StreamingAccount::getAgentId)
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<String, String> agentNameMap = agentInstanceService.resolveDisplayNames(agentIds);
+
         IPage<StreamingAccountItemDto> dtoPage = page.convert(item -> {
             StreamingAccountItemDto dto = new StreamingAccountItemDto();
             BeanUtils.copyProperties(item, dto);
             dto.setMerchantName(merchantNameMap.get(item.getMerchantId()));
+            if (StringUtils.isNotBlank(item.getAgentId())) {
+                dto.setAgentName(agentNameMap.get(item.getAgentId()));
+            }
             return dto;
         });
 

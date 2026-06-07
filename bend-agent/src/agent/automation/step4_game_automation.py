@@ -43,6 +43,7 @@ from ..task.task_context import (
     AgentTaskContext,
     Step4Result,
     TaskStepStatus,
+    TaskMainStatus,
     GameAccountInfo
 )
 from ..input.football_controller import FootballController
@@ -52,7 +53,13 @@ from ..scene.scene_action_mapper import SceneActionMapper
 automation_engine = None
 account_switcher = None
 
-VALID_TASK_TYPES = frozenset({'auction_transfer', 'squad_battle', 'divisions_rivals', 'weekend_league'})
+VALID_TASK_TYPES = frozenset({
+    'auction_transfer',
+    'squad_battle',
+    'transfer_sqb_combo',
+    'divisions_rivals',
+    'weekend_league',
+})
 
 # expected_screen -> Streaming scene IDs (Xbox system UI 1-9, football UT menus 100+)
 EXPECTED_SCREEN_SCENES: Dict[str, list] = {
@@ -131,6 +138,91 @@ async def _ensure_streaming_scene_detector(context: AgentTaskContext, logger):
     return detector
 
 
+async def _apply_fc_controller_actions(
+    context: AgentTaskContext,
+    actions: list,
+    logger,
+) -> None:
+    """Apply controller actions returned by FC server."""
+    protocol = getattr(context, '_controller_protocol', None)
+    if not protocol or not actions:
+        return
+
+    from ..input.controller_protocol import ControllerSignal, XboxButtonFlag
+
+    key_map = {
+        "controller_buttons_a": XboxButtonFlag.A,
+        "controller_buttons_b": XboxButtonFlag.B,
+        "controller_buttons_x": XboxButtonFlag.X,
+        "controller_buttons_y": XboxButtonFlag.Y,
+        "controller_dpad_up": XboxButtonFlag.DPAD_UP,
+        "controller_dpad_down": XboxButtonFlag.DPAD_DOWN,
+        "controller_dpad_left": XboxButtonFlag.DPAD_LEFT,
+        "controller_dpad_right": XboxButtonFlag.DPAD_RIGHT,
+        "controller_buttons_nexus": XboxButtonFlag.NEXUS,
+        "controller_buttons_back": XboxButtonFlag.VIEW,
+        "controller_buttons_menu": XboxButtonFlag.MENU,
+        "controller_left_shoulder": XboxButtonFlag.L1,
+        "controller_right_shoulder": XboxButtonFlag.R1,
+        "controller_left_stick": XboxButtonFlag.L3,
+        "controller_right_stick": XboxButtonFlag.R3,
+    }
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        signal = ControllerSignal()
+        for key, flag in key_map.items():
+            if key in action:
+                signal.set_button(flag, True)
+        if "controller_left_trigger" in action:
+            signal.left_trigger = min(255, int(action["controller_left_trigger"] / 128))
+        if "controller_right_trigger" in action:
+            signal.right_trigger = min(255, int(action["controller_right_trigger"] / 128))
+        for axis_key, attr in (
+            ("controller_left_stick_x", "left_thumb_x"),
+            ("controller_left_stick_y", "left_thumb_y"),
+            ("controller_right_stick_x", "right_thumb_x"),
+            ("controller_right_stick_y", "right_thumb_y"),
+        ):
+            if axis_key in action:
+                setattr(signal, attr, int(action[axis_key]))
+
+        await protocol.send_signal(signal)
+        duration = float(action.get("controller_duration", 0) or 0)
+        interval = float(action.get("controller_interval", 0) or 0)
+        if duration > 0:
+            await asyncio.sleep(duration)
+        await protocol.send_signal(ControllerSignal.zero())
+        if interval > 0:
+            await asyncio.sleep(interval)
+
+
+async def _ensure_fc_scene_client(context: AgentTaskContext, logger):
+    """Create FC remote scene client when enabled in config."""
+    if getattr(context, '_fc_scene_client', None) is not None:
+        return context._fc_scene_client
+
+    from ..core.config import config as agent_config
+    if not agent_config.get('fc_server.enabled', False):
+        return None
+
+    from ..scene.fc_scene_client import FCSceneClient
+
+    host = agent_config.get('fc_server.host', '127.0.0.1')
+    port = int(agent_config.get('fc_server.port', 8080))
+    client = FCSceneClient(
+        host=host,
+        port=port,
+        username=context.streaming_account_email,
+        session_token=getattr(context, '_fc_session_token', ''),
+        gamepad_index=0,
+    )
+    context._fc_scene_client = client
+    logger.info("FCSceneClient 已就绪 (%s:%s)", host, port)
+    return client
+
+
 async def _match_expected_screen(
     context: AgentTaskContext,
     expected_screen: str,
@@ -138,13 +230,16 @@ async def _match_expected_screen(
     game_logger,
     timeout_sec: float = 25.0,
 ) -> bool:
-    """使用模板匹配校验期望画面。"""
+    """使用模板匹配或 FC 远程场景识别校验期望画面。"""
     scene_ids = EXPECTED_SCREEN_SCENES.get(expected_screen)
     if not scene_ids:
         game_logger.warning(f"[场景: {expected_screen}] 未配置场景ID，跳过模板校验")
         return False
 
-    detector = await _ensure_streaming_scene_detector(context, logger)
+    from ..core.config import config as agent_config
+    prefer_remote = agent_config.get('fc_server.prefer_remote_scene', False)
+    fc_client = await _ensure_fc_scene_client(context, logger) if prefer_remote else None
+    detector = None if prefer_remote and fc_client else await _ensure_streaming_scene_detector(context, logger)
     deadline = time.time() + timeout_sec
 
     while time.time() < deadline:
@@ -154,18 +249,31 @@ async def _match_expected_screen(
             continue
 
         image = frame.data if hasattr(frame, 'data') else frame
-        for scene_id in scene_ids:
-            result = detector.recognize_scene(image, scene_id=scene_id)
-            if result.matched:
+
+        if fc_client:
+            remote_scene_id, actions = await fc_client.recognize_scene_id(image)
+            if remote_scene_id in scene_ids:
                 logger.info(
-                    f"场景匹配成功: {expected_screen} -> scene {scene_id} "
-                    f"(confidence={result.confidence:.2f})"
+                    f"FC 远程场景匹配成功: {expected_screen} -> scene {remote_scene_id}"
                 )
                 game_logger.info(
-                    f"[场景: {expected_screen}] 匹配 scene {scene_id} "
-                    f"({result.confidence:.2f})"
+                    f"[场景: {expected_screen}] FC 匹配 scene {remote_scene_id}"
                 )
+                await _apply_fc_controller_actions(context, actions, logger)
                 return True
+        elif detector:
+            for scene_id in scene_ids:
+                result = detector.recognize_scene(image, scene_id=scene_id)
+                if result.matched:
+                    logger.info(
+                        f"场景匹配成功: {expected_screen} -> scene {scene_id} "
+                        f"(confidence={result.confidence:.2f})"
+                    )
+                    game_logger.info(
+                        f"[场景: {expected_screen}] 匹配 scene {scene_id} "
+                        f"({result.confidence:.2f})"
+                    )
+                    return True
         await asyncio.sleep(0.5)
 
     game_logger.warning(f"[场景: {expected_screen}] 模板匹配超时 ({timeout_sec}s)")
@@ -193,9 +301,109 @@ def _apply_task_type(context: AgentTaskContext, game_account: GameAccountInfo, l
         logger.info("游戏操作类型 divisions_rivals: DR模式（与玩家线上对战）")
     elif game_action_type == 'weekend_league':
         logger.info("游戏操作类型 weekend_league: 周赛")
+    elif game_action_type == 'transfer_sqb_combo':
+        logger.info("游戏操作类型 transfer_sqb_combo: 转会+SQB组合")
     else:
         logger.info(f"游戏操作类型 {game_action_type}: 执行默认SQB模式")
     return game_action_type
+
+
+async def _pause_for_manual_fc_launch(
+    context: AgentTaskContext,
+    game_account: GameAccountInfo,
+    reason: str,
+    error_code: str,
+    report_progress: Callable,
+    set_session_phase: Optional[Callable],
+    check_cancel: Callable[[], bool],
+    logger,
+    stream_logger,
+) -> bool:
+    """Pause automation and sync platform task status; wait until user resumes."""
+    from ..runtime.phase_fsm import SessionPhase
+
+    context.pause()
+    context.update_task_status(TaskMainStatus.PAUSED)
+
+    if set_session_phase:
+        await set_session_phase(SessionPhase.PAUSED_IMMEDIATE, reason)
+    else:
+        await report_progress(
+            context.task_id,
+            "SESSION",
+            "RUNNING",
+            reason,
+            {
+                "scope": "session",
+                "phase": SessionPhase.PAUSED_IMMEDIATE.value,
+                "pauseMode": "immediate",
+            },
+        )
+
+    await report_progress(
+        context.task_id,
+        "STEP4",
+        "RUNNING",
+        reason,
+        {
+            "gameAccountId": game_account.id,
+            "gameAccountName": game_account.gamertag,
+            "matchStatus": "MANUAL_REQUIRED",
+            "accountStatus": "paused",
+            "errorCode": error_code,
+            "errorDetails": reason,
+        },
+    )
+    logger.warning("自动化已暂停，等待人工处理后恢复: %s", reason)
+    stream_logger.warning(reason)
+
+    while context.is_paused():
+        if check_cancel():
+            return False
+        await asyncio.sleep(0.3)
+
+    context.update_task_status(TaskMainStatus.RUNNING)
+    if set_session_phase:
+        await set_session_phase(
+            SessionPhase.AUTOMATING,
+            "人工处理完成，继续尝试启动 FC",
+        )
+    logger.info("任务已恢复，重新尝试启动 FC")
+    stream_logger.info("任务已恢复，重新尝试启动 FC")
+    return True
+
+
+async def _launch_fc_with_manual_pause(
+    switcher,
+    context: AgentTaskContext,
+    game_account: GameAccountInfo,
+    check_cancel: Callable[[], bool],
+    report_progress: Callable,
+    set_session_phase: Optional[Callable],
+    logger,
+    stream_logger,
+) -> bool:
+    """Launch FC/UT; on home-screen stuck, pause for manual intervention instead of failing."""
+    from ..game.account_switcher import ManualInterventionRequired
+
+    while True:
+        try:
+            return await switcher.launch_fc_to_ut_menu()
+        except ManualInterventionRequired as exc:
+            reason = f"账号 {game_account.gamertag}：{exc.reason}"
+            resumed = await _pause_for_manual_fc_launch(
+                context,
+                game_account,
+                reason,
+                exc.error_code,
+                report_progress,
+                set_session_phase,
+                check_cancel,
+                logger,
+                stream_logger,
+            )
+            if not resumed:
+                return False
 
 
 async def step4_execute_gaming(
@@ -203,7 +411,11 @@ async def step4_execute_gaming(
     check_cancel: Callable[[], bool],
     report_progress: Callable[[str, str, str, Optional[Dict]], None],
     platform_client: Optional[Any] = None,
-    window_manager: Optional[Any] = None
+    window_manager: Optional[Any] = None,
+    provisioning_module: Optional[Any] = None,
+    skipped_accounts: Optional[set] = None,
+    pause_after_match: Optional[Callable[[], bool]] = None,
+    set_session_phase: Optional[Callable] = None,
 ) -> Step4Result:
     """
     步骤四执行：自动操作Xbox主机
@@ -252,7 +464,7 @@ async def step4_execute_gaming(
 
     logger.info("画面捕获器可用，开始自动操作Xbox主机")
 
-    engine, switcher = await _init_game_automation(context, logger)
+    engine, switcher = await _init_game_automation(context, logger, platform_client)
     if not engine or not switcher:
         error_msg = "游戏自动化引擎初始化失败"
         logger.error(error_msg)
@@ -282,6 +494,11 @@ async def step4_execute_gaming(
             logger.warning("[手柄信号] 引擎不支持信号发送")
 
     try:
+        keyboard_mapper = getattr(context, "_keyboard_mapper", None)
+        if keyboard_mapper and getattr(keyboard_mapper, "_running", False):
+            await keyboard_mapper.stop()
+            logger.info("步骤四已停止键盘映射器，避免与 SDL 显示循环并发访问 pygame")
+
         if context.enable_window_display and context.sdl_window is not None:
             logger.info("[全局异步] 启动帧捕获、显示和场景检测任务")
             global_frame_queue = asyncio.Queue(maxsize=5)
@@ -325,12 +542,41 @@ async def step4_execute_gaming(
         logger.info(f"游戏账号数量: {len(context.game_accounts)}, "
                    f"目标总比赛数: {total_matches}")
 
+        skipped = skipped_accounts or set()
+
+        if provisioning_module is not None and hasattr(provisioning_module, "refresh_dependencies"):
+            detector = await _ensure_streaming_scene_detector(context, logger)
+            provisioning_module.refresh_dependencies(
+                detector,
+                getattr(context, "_controller_protocol", None),
+            )
+
         for account_index, game_account in enumerate(context.game_accounts):
             if check_cancel():
                 logger.info("任务被取消，步骤四终止")
                 context.update_step_status("step4", TaskStepStatus.SKIPPED, "任务被取消")
                 return Step4Result(success=False, error_code="CANCELLED",
                                  message="任务被取消")
+
+            await context.wait_if_paused()
+
+            if game_account.id in skipped:
+                logger.info("跳过游戏账号: %s", game_account.gamertag)
+                continue
+
+            if provisioning_module is not None:
+                prov = await provisioning_module.ensure(
+                    game_account,
+                    check_cancel=check_cancel,
+                    skipped=False,
+                )
+                if not prov.success:
+                    logger.warning(
+                        "账号 %s 准备失败: %s",
+                        game_account.gamertag,
+                        prov.message,
+                    )
+                    continue
 
             current_completed = context.matches_completed_today[game_account.id]
 
@@ -360,7 +606,67 @@ async def step4_execute_gaming(
             # 流媒体账号日志：记录当前处理的游戏账号
             stream_logger.info(f"开始处理游戏账号: {game_account.gamertag} ({account_index+1}/{len(context.game_accounts)})")
 
-            switch_result = await account_switcher.switch_to(game_account.id)
+            from ..xbox.stream_keepalive import StreamKeepaliveLoop
+
+            launch_ok = False
+            async with StreamKeepaliveLoop(
+                lambda: getattr(context, "xbox_session", None),
+                interval=4.0,
+            ):
+                switch_result = await account_switcher.switch_to(game_account.id)
+                if switch_result.success:
+                    launch_ok = await _launch_fc_with_manual_pause(
+                        account_switcher,
+                        context,
+                        game_account,
+                        check_cancel,
+                        report_progress,
+                        set_session_phase,
+                        logger,
+                        stream_logger,
+                    )
+                    if not launch_ok:
+                        logger.warning(
+                            "进 FC 失败，尝试重连 input DataChannel 后重试一次"
+                        )
+                        from ..xbox.stream_recovery import (
+                            reconnect_input_channel,
+                            rebind_stream_bindings,
+                        )
+
+                        if await reconnect_input_channel(context, logger):
+                            executor = (
+                                automation_engine._action_executor
+                                if automation_engine
+                                and hasattr(automation_engine, "_action_executor")
+                                else None
+                            )
+                            rebind_stream_bindings(
+                                context,
+                                executor=executor,
+                                switcher=account_switcher,
+                                engine=automation_engine,
+                            )
+                            launch_ok = await _launch_fc_with_manual_pause(
+                                account_switcher,
+                                context,
+                                game_account,
+                                check_cancel,
+                                report_progress,
+                                set_session_phase,
+                                logger,
+                                stream_logger,
+                            )
+
+                    if not launch_ok:
+                        launch_msg = (
+                            f"账号 {game_account.gamertag} 切换成功但未能进入 FC/UT，"
+                            "将继续尝试检测主菜单"
+                        )
+                        logger.warning(launch_msg)
+                        game_logger.warning(launch_msg)
+                        stream_logger.warning(launch_msg)
+
             if not switch_result.success:
                 switch_msg = (
                     f"账号 {game_account.gamertag} 切换失败: "
@@ -384,9 +690,18 @@ async def step4_execute_gaming(
                 )
                 continue
 
-            login_confirmed = await _detect_screen_state(
-                context, "MAIN_MENU", logger, game_logger
-            )
+            if launch_ok:
+                login_confirmed = True
+                confirm_msg = (
+                    f"账号 {game_account.gamertag} 已进入 FC/UT 界面（场景链确认）"
+                )
+                logger.info(confirm_msg)
+                game_logger.info(confirm_msg)
+                stream_logger.info(confirm_msg)
+            else:
+                login_confirmed = await _detect_screen_state(
+                    context, "MAIN_MENU", logger, game_logger
+                )
             if not login_confirmed:
                 msg = f"账号 {game_account.gamertag} 登录未确认，跳过该账号"
                 logger.warning(msg)
@@ -448,6 +763,15 @@ async def step4_execute_gaming(
                     if cleanup_needed:
                         await _cleanup_account_resources(context, game_account, logger, game_logger)
 
+                if pause_after_match and pause_after_match():
+                    context.pause()
+                    await report_progress(
+                        context.task_id, "STEP4", "RUNNING",
+                        "本场完成后暂停",
+                        {"matchStatus": "PAUSE_AFTER_MATCH"},
+                    )
+                    await context.wait_if_paused()
+
                 if match_success:
                     context.matches_completed_today[game_account.id] += 1
                     completed_matches += 1
@@ -499,6 +823,20 @@ async def step4_execute_gaming(
                        f"{game_account.target_matches} 场比赛")
             game_logger.info(f"今日已完成 {game_account.target_matches} 场比赛")
             stream_logger.info(f"游戏账号 {game_account.gamertag} 今日已完成 {game_account.target_matches} 场比赛")
+
+        if total_matches > 0 and completed_matches == 0:
+            error_msg = "游戏自动化结束但未完成任何比赛"
+            logger.error(error_msg)
+            stream_logger.error(error_msg)
+            context.update_step_status("step4", TaskStepStatus.FAILED, error_msg)
+            await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
+            await _close_task_window(window_manager, context.task_id, "no_matches", logger)
+            return Step4Result(
+                success=False,
+                error_code="NO_MATCHES_COMPLETED",
+                message=error_msg,
+                total_matches=0,
+            )
 
         success_msg = f"自动操作Xbox主机完成，共完成 {completed_matches} 场比赛"
         logger.info(success_msg)
@@ -578,7 +916,11 @@ async def _close_task_window(window_manager, task_id: str, reason: str, logger):
         logger.error(f"关闭窗口失败 (任务: {task_id}): {e}")
 
 
-async def _init_game_automation(context: AgentTaskContext, logger):
+async def _init_game_automation(
+    context: AgentTaskContext,
+    logger,
+    platform_client: Optional[Any] = None,
+):
     """
     初始化游戏自动化引擎
 
@@ -648,14 +990,48 @@ async def _init_game_automation(context: AgentTaskContext, logger):
             {
                 'account_id': ga.id,
                 'gamertag': ga.gamertag,
-                'email': getattr(ga, 'email', None),
-                'position_index': idx,
+                'email': getattr(ga, 'email', None) or None,
+                'password': getattr(ga, 'password', None) or None,
+                'position_index': (
+                    ga.position_index if getattr(ga, 'position_index', -1) >= 0 else idx
+                ),
+                'is_new_user': bool(getattr(ga, 'is_new_user', False)),
+                'profile_bound': bool(getattr(ga, 'profile_bound', False)),
                 'max_matches_per_day': ga.target_matches,
             }
             for idx, ga in enumerate(context.game_accounts)
         ]
         switcher.set_accounts(accounts_data)
         switcher.set_action_executor(executor)
+        if context.xbox_session:
+            switcher.set_stream_session(context.xbox_session)
+
+        async def _reconnect_input_and_rebind() -> bool:
+            from ..xbox.stream_recovery import reconnect_input_channel, rebind_stream_bindings
+
+            ok = await reconnect_input_channel(context, logger)
+            if ok:
+                rebind_stream_bindings(
+                    context,
+                    executor=executor,
+                    switcher=switcher,
+                    engine=engine,
+                )
+            return ok
+
+        switcher.set_reconnect_callback(_reconnect_input_and_rebind)
+        switcher.set_task_context(context)
+
+        if platform_client and hasattr(platform_client, "update_profile_binding"):
+
+            async def _mark_profile_bound(ga_id: str, position_index: int) -> None:
+                await platform_client.update_profile_binding(
+                    ga_id,
+                    profile_bound=True,
+                    position_index=position_index,
+                )
+
+            switcher.set_profile_bound_callback(_mark_profile_bound)
 
         streaming_detector = None
         if context.frame_capture:
@@ -732,7 +1108,20 @@ async def _execute_match_for_account(
     logger.info(f"执行比赛: {game_account.gamertag}")
     game_logger.info("执行比赛")
 
+    action_type = _normalize_game_action_type(context.game_action_type)
+    if action_type == 'transfer_sqb_combo':
+        completed = context.matches_completed_today.get(game_account.id, 0)
+        if completed % 2 == 0:
+            await _navigate_to_auction(context, logger, game_logger)
+            game_logger.info("组合模式: 转会阶段完成")
+            return True, None, None
+        action_type = 'squad_battle'
+
     try:
+        if action_type == 'auction_transfer':
+            await _navigate_to_auction(context, logger, game_logger)
+            return True, None, None
+
         await _enter_match(context, game_account, logger, game_logger, report_progress)
 
         await _wait_for_match_start(context, game_account, logger, game_logger, report_progress)
@@ -798,6 +1187,9 @@ async def _navigate_to_game_mode(
         await _navigate_to_dr(context, logger, game_logger)
     elif game_action_type == 'weekend_league':
         await _navigate_to_weekend_league(context, logger, game_logger)
+    elif game_action_type == 'transfer_sqb_combo':
+        await _navigate_to_auction(context, logger, game_logger)
+        await _navigate_to_squad_battle(context, logger, game_logger)
     else:
         logger.warning(f"未知的游戏操作类型: {game_action_type}，默认导航到SQB模式")
         await _navigate_to_squad_battle(context, logger, game_logger)
@@ -872,55 +1264,51 @@ async def _navigate_to_squad_battle(
     game_logger
 ) -> None:
     """
-    导航到SQB模式
+    导航到 SQB 模式（读取 SCENE_TRANSITIONS 链）
 
-    导航路径：主页 → UT → Squad Battles → 选择难度 → 选择对手 → 开始比赛
-
-    操作序列：
-    1. 从主页按 RB×3 + A 进入 UT 菜单
-    2. 按 LB + A 进入 Squad Battles
-    3. 选择难度 (默认Harder)
-    4. 选择对手
-    5. 按 A 开始比赛
+    路径：147 → 149 → 155 → 156 → 168 → 177(业余A) → 183 → 189
+    对齐 streaming get_scenes_diagram / configs.scene_transitions.SQB_UT_MENU_CHAIN
     """
-    logger.info("导航到SQB模式")
-    game_logger.info("[SQB] 开始导航到SQB模式")
+    from configs.scene_transitions import (
+        SQB_COMPLETE_SCENES,
+        SQB_NAVIGATION_SCENES,
+        trim_sqb_navigation_chain,
+    )
+
+    logger.info("导航到SQB模式 (SCENE_TRANSITIONS 链)")
+    game_logger.info("[SQB] 开始导航 (scene_transitions 链)")
+
+    global account_switcher
 
     try:
-        # 1. 进入 UT 菜单：RB×3 + A
-        logger.info("[SQB] 步骤1: 进入UT菜单 (RB×3 + A)")
-        for _ in range(3):
-            await _press_button(context, XboxButtonFlag.R1, 0.2)
-            await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
-        await _press_button(context, XboxButtonFlag.A, 0.5)
-        await asyncio.sleep(2)
+        if not account_switcher:
+            logger.error("[SQB] account_switcher 未初始化，无法执行场景转移链")
+            game_logger.error("[SQB] account_switcher 未初始化")
+            return
 
-        # 2. 进入 Squad Battles：LB×2 + A
-        logger.info("[SQB] 步骤2: 进入Squad Battles (LB×2 + A)")
-        for _ in range(2):
-            await _press_button(context, XboxButtonFlag.L1, 0.2)
-            await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
-        await _press_button(context, XboxButtonFlag.A, 0.5)
-        await asyncio.sleep(2)
+        current = await account_switcher._detect_any_scene(
+            SQB_NAVIGATION_SCENES, strict=False
+        )
+        chain = trim_sqb_navigation_chain(current)
+        if not chain:
+            logger.info("[SQB] 已在赛前界面 (scene189)，跳过导航")
+            game_logger.info("[SQB] 已在 scene189")
+            return
 
-        # 3. 选择难度 (向下选择1次到Harder)
-        logger.info("[SQB] 步骤3: 选择难度 (Harder)")
-        await _press_button(context, XboxButtonFlag.DPAD_DOWN, 0.3)
-        await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
-        await _press_button(context, XboxButtonFlag.A, 0.5)
-        await asyncio.sleep(1)
+        logger.info(f"[SQB] 当前 scene={current}，执行链: {chain}")
+        game_logger.info(f"[SQB] 链: {chain}")
 
-        # 4. 选择第一个对手
-        logger.info("[SQB] 步骤4: 选择对手")
-        await _press_button(context, XboxButtonFlag.A, 0.5)
-        await asyncio.sleep(2)
-
-        # 5. 开始比赛
-        logger.info("[SQB] 步骤5: 开始比赛")
-        await _press_button(context, XboxButtonFlag.A, 0.5)
-
-        logger.info("[SQB] 导航完成，等待匹配")
-        game_logger.info("[SQB] 导航完成")
+        ok = await account_switcher.run_scene_transition_chain(
+            chain,
+            label="SQB",
+            complete_scenes=SQB_COMPLETE_SCENES,
+        )
+        if ok:
+            logger.info("[SQB] 场景转移链完成，等待匹配")
+            game_logger.info("[SQB] 导航完成")
+        else:
+            logger.error("[SQB] 场景转移链未完成")
+            game_logger.error("[SQB] 导航失败，请检查 logs/debug_scene*.png")
 
     except Exception as e:
         logger.error(f"[SQB] 导航异常: {e}")
@@ -1603,6 +1991,9 @@ async def _display_loop(
 
     while not cancel_event.is_set():
         try:
+            if hasattr(context.sdl_window, 'process_events'):
+                context.sdl_window.process_events()
+
             frame = await asyncio.wait_for(
                 frame_queue.get(),
                 timeout=0.5

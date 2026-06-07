@@ -9,6 +9,7 @@ import com.bend.platform.dto.MerchantRegistrationCodePageRequest;
 import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.MerchantRegistrationCode;
 import com.bend.platform.repository.MerchantMapper;
+import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.MerchantRegistrationCodeService;
 import com.bend.platform.service.MerchantRegistrationCodeService.ActivationResult;
 import com.bend.platform.util.UserContext;
@@ -45,6 +46,7 @@ public class MerchantRegistrationCodeController {
 
     private final MerchantRegistrationCodeService registrationCodeService;
     private final MerchantMapper merchantMapper;
+    private final AgentInstanceService agentInstanceService;
 
     /**
      * 生成注册码
@@ -237,6 +239,13 @@ public class MerchantRegistrationCodeController {
             merchantMapper.selectList(wrapper).forEach(m -> merchantNameMap.put(m.getId(), m.getName()));
         }
 
+        List<String> agentIds = records.stream()
+                .flatMap(code -> java.util.stream.Stream.of(code.getUsedByAgentId(), code.getAgentId()))
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<String, String> agentNameMap = agentInstanceService.resolveDisplayNames(agentIds);
+
         List<MerchantRegistrationCodeDto> dtos = records.stream().map(code -> {
             MerchantRegistrationCodeDto dto = new MerchantRegistrationCodeDto();
             dto.setId(code.getId());
@@ -245,7 +254,13 @@ public class MerchantRegistrationCodeController {
             dto.setCode(code.getCode());
             dto.setStatus(code.getStatus());
             dto.setUsedByAgentId(code.getUsedByAgentId());
+            if (StringUtils.hasText(code.getUsedByAgentId())) {
+                dto.setUsedByAgentName(agentNameMap.get(code.getUsedByAgentId()));
+            }
             dto.setAgentId(code.getAgentId());
+            if (StringUtils.hasText(code.getAgentId())) {
+                dto.setAgentName(agentNameMap.get(code.getAgentId()));
+            }
             dto.setCreatedTime(code.getCreatedTime());
             dto.setExpireTime(code.getExpireTime());
             dto.setUsedTime(code.getUsedTime());

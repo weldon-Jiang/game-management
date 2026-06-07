@@ -44,6 +44,7 @@ logs/
 
 # Runtime data
 tokens/
+credentials/
 *.json
 
 # Build artifacts
@@ -52,3 +53,4 @@ obfuscated/
 pytest.ini
 test_*.py
 *.pyc
+templates/

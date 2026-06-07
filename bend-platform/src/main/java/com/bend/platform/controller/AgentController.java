@@ -3,6 +3,8 @@ package com.bend.platform.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.bend.platform.dto.AgentInstancePageRequest;
 import com.bend.platform.dto.ApiResponse;
+import com.bend.platform.dto.UpdateAgentNameRequest;
+import jakarta.validation.Valid;
 import com.bend.platform.entity.AgentInstance;
 import com.bend.platform.entity.MerchantRegistrationCode;
 import com.bend.platform.service.AgentInstanceService;
@@ -241,6 +243,27 @@ public class AgentController {
             return ApiResponse.error(404, "Agent不存在");
         }
         return ApiResponse.success(instance);
+    }
+
+    /**
+     * 更新 Agent 显示名称（同一商户下不可重复）
+     */
+    @PutMapping("/{agentId}/name")
+    public ApiResponse<AgentInstance> updateAgentName(
+            @PathVariable String agentId,
+            @Valid @RequestBody UpdateAgentNameRequest request) {
+        AgentInstance instance = agentInstanceService.findByAgentId(agentId);
+        if (instance == null) {
+            return ApiResponse.error(404, "Agent不存在");
+        }
+        if (!UserContext.isPlatformAdmin()) {
+            String merchantId = UserContext.getMerchantId();
+            if (merchantId == null || !merchantId.equals(instance.getMerchantId())) {
+                return ApiResponse.error(403, "无权修改该Agent");
+            }
+        }
+        AgentInstance updated = agentInstanceService.updateAgentName(agentId, request.getAgentName());
+        return ApiResponse.success("更新成功", updated);
     }
 
     /**

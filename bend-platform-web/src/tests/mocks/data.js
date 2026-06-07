@@ -1,6 +1,7 @@
 export const mockAgent = {
   id: 'agent-001',
   agentId: 'agent-001',
+  agentName: '测试机1号',
   merchantId: 'merchant-001',
   merchantName: '测试商户',
   host: '192.168.1.100',
@@ -15,6 +16,7 @@ export const mockAgentList = [
   {
     id: 'agent-002',
     agentId: 'agent-002',
+    agentName: '测试机2号',
     merchantId: 'merchant-001',
     merchantName: '测试商户',
     host: '192.168.1.101',

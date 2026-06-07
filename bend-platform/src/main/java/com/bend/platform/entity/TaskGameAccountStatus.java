@@ -19,6 +19,17 @@ public class TaskGameAccountStatus {
 
     private String status;
 
+    private String sessionId;
+    private String phase;
+    private String gameActionType;
+    private Integer matchIndex;
+    private Integer matchTotal;
+    private String provisioningPhase;
+    private Integer provisioningStep;
+    private Integer provisioningStepTotal;
+    private String provisioningMessage;
+    private String activeModule;
+
     private Integer completedCount;
 
     private Integer failedCount;

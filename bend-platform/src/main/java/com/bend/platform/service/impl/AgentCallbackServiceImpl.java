@@ -2,15 +2,18 @@ package com.bend.platform.service.impl;
 
 import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.Task;
+import com.bend.platform.entity.TaskEvent;
 import com.bend.platform.entity.TaskGameAccountStatus;
 import com.bend.platform.entity.XboxHost;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
+import com.bend.platform.repository.TaskEventMapper;
 import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.service.AgentCallbackService;
 import com.bend.platform.service.AgentLoadControlService;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.StreamingAccountService;
+import com.bend.platform.service.StreamingSessionService;
 import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.service.TaskService;
 import com.bend.platform.service.XboxHostService;
@@ -36,6 +39,8 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     private final AgentLoadControlService loadControlService;
     private final StreamingAccountService streamingAccountService;
     private final XboxHostService xboxHostService;
+    private final StreamingSessionService streamingSessionService;
+    private final TaskEventMapper taskEventMapper;
 
     @Override
     public Map<String, Object> reportProgress(Map<String, Object> payload) {
@@ -65,6 +70,19 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         }
 
         Task task = requireTaskForAuthenticatedAgent(taskId);
+
+        String scope = (String) data.get("scope");
+        recordTaskEvent(task, taskId, data, status, message, scope);
+
+        if ("session".equals(scope)) {
+            return handleSessionScope(task, taskId, data, status, message);
+        }
+        if ("module".equals(scope) && "account_provisioning".equals(data.get("module"))) {
+            return handleProvisioningScope(taskId, data, status);
+        }
+        if ("game_account".equals(scope)) {
+            return handleGameAccountScope(taskId, data, status);
+        }
 
         Map<String, Object> response = new HashMap<>();
         response.put("received", true);
@@ -351,7 +369,11 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
                 Map<String, Object> gaInfo = new HashMap<>();
                 gaInfo.put("id", ga.getId());
                 gaInfo.put("gamertag", ga.getGameName());
+                gaInfo.put("gameName", ga.getGameName());
                 gaInfo.put("dailyMatchLimit", ga.getDailyMatchLimit());
+                if (ga.getPositionIndex() != null) {
+                    gaInfo.put("positionIndex", ga.getPositionIndex());
+                }
                 gameAccounts.add(gaInfo);
             }
         }
@@ -467,6 +489,47 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     }
 
     @Override
+    public Map<String, Object> updateProfileBinding(String gameAccountId, Map<String, Object> payload) {
+        if (gameAccountId == null || gameAccountId.isBlank()) {
+            throw new BusinessException(400, "gameAccountId不能为空");
+        }
+        GameAccount account = gameAccountService.findById(gameAccountId);
+        if (account == null) {
+            throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
+        }
+
+        Boolean profileBound = null;
+        Object boundRaw = payload.get("profileBound");
+        if (boundRaw == null) {
+            boundRaw = payload.get("profile_bound");
+        }
+        if (boundRaw instanceof Boolean b) {
+            profileBound = b;
+        } else if (boundRaw != null) {
+            profileBound = Boolean.parseBoolean(String.valueOf(boundRaw));
+        }
+
+        Integer positionIndex = null;
+        Object posRaw = payload.get("positionIndex");
+        if (posRaw == null) {
+            posRaw = payload.get("position_index");
+        }
+        if (posRaw instanceof Number n) {
+            positionIndex = n.intValue();
+        } else if (posRaw != null && !String.valueOf(posRaw).isBlank()) {
+            positionIndex = Integer.parseInt(String.valueOf(posRaw));
+        }
+
+        gameAccountService.updateProfileBinding(gameAccountId, profileBound, positionIndex);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("gameAccountId", gameAccountId);
+        result.put("profileBound", profileBound != null ? profileBound : account.getProfileBound());
+        result.put("positionIndex", positionIndex != null ? positionIndex : account.getPositionIndex());
+        return result;
+    }
+
+    @Override
     public void reportTaskStatusLegacy(String taskId, Map<String, String> payload) {
         log.warn("【deprecated】使用旧接口 reportTaskStatus，请迁移至 /api/v1/agent-callback/progress");
 
@@ -561,5 +624,122 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         }
 
         return statusList;
+    }
+
+    private void recordTaskEvent(
+            Task task, String taskId, Map<String, Object> data,
+            String status, String message, String scope) {
+        try {
+            TaskEvent event = new TaskEvent();
+            event.setTaskId(taskId);
+            event.setMerchantId(task.getMerchantId());
+            event.setScope(scope != null ? scope : "task");
+            event.setPhase((String) data.get("phase"));
+            event.setStatus(status);
+            event.setMessage(message);
+            event.setGameAccountId((String) data.get("gameAccountId"));
+            event.setModule((String) data.get("module"));
+            taskEventMapper.insert(event);
+        } catch (Exception e) {
+            log.debug("task_event insert skipped: {}", e.getMessage());
+        }
+    }
+
+    private Map<String, Object> handleGameAccountScope(
+            String taskId, Map<String, Object> data, String status) {
+        String gameAccountId = (String) data.get("gameAccountId");
+        if (gameAccountId != null) {
+            TaskGameAccountStatus gaStatus =
+                    statusService.findByTaskIdAndGameAccountId(taskId, gameAccountId);
+            if (gaStatus != null) {
+                String phase = (String) data.get("phase");
+                if (phase != null) {
+                    gaStatus.setPhase(phase);
+                }
+                gaStatus.setStatus(status.toLowerCase());
+                if (data.get("matchIndex") instanceof Number mi) {
+                    gaStatus.setMatchIndex(mi.intValue());
+                }
+                if (data.get("matchTotal") instanceof Number mt) {
+                    gaStatus.setMatchTotal(mt.intValue());
+                }
+                statusService.updateProvisioningStatus(gaStatus);
+            }
+        }
+        Map<String, Object> response = new HashMap<>();
+        response.put("received", true);
+        response.put("scope", "game_account");
+        return response;
+    }
+
+    private Map<String, Object> handleSessionScope(
+            Task task, String taskId, Map<String, Object> data,
+            String status, String message) {
+        String phase = (String) data.get("phase");
+        if (phase != null) {
+            task.setSessionPhase(phase);
+            if ("ready".equals(phase)) {
+                task.setGameActionPending(true);
+            }
+            if (phase.startsWith("paused")) {
+                task.setStatus("paused");
+            }
+            if ("automating".equals(phase)) {
+                task.setGameActionPending(false);
+            }
+        }
+        if (message != null) {
+            task.setProgressMessage(message);
+        }
+        Object windowState = data.get("windowState");
+        if (windowState != null) {
+            task.setWindowVisible("visible".equals(windowState));
+        }
+        Object pauseMode = data.get("pauseMode");
+        if (pauseMode != null) {
+            task.setPauseMode(String.valueOf(pauseMode));
+        }
+        taskMapper.updateById(task);
+
+        if (task.getSessionId() != null && phase != null) {
+            streamingSessionService.updatePhase(task.getSessionId(), phase, message);
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("received", true);
+        response.put("scope", "session");
+        response.put("action", "CONTINUE");
+        log.info("Session progress - TaskID: {}, phase: {}", taskId, phase);
+        return response;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> handleProvisioningScope(
+            String taskId, Map<String, Object> data, String status) {
+        String gameAccountId = (String) data.get("gameAccountId");
+        if (gameAccountId == null) {
+            throw new BusinessException(400, "gameAccountId required for provisioning scope");
+        }
+
+        TaskGameAccountStatus gaStatus = statusService.findByTaskIdAndGameAccountId(taskId, gameAccountId);
+        if (gaStatus != null) {
+            gaStatus.setActiveModule("account_provisioning");
+            gaStatus.setPhase("provisioning");
+            gaStatus.setProvisioningPhase((String) data.get("phase"));
+            gaStatus.setProvisioningMessage((String) data.get("message"));
+            if (data.get("stepIndex") instanceof Number stepIndex) {
+                gaStatus.setProvisioningStep(stepIndex.intValue());
+            }
+            if (data.get("stepTotal") instanceof Number stepTotal) {
+                gaStatus.setProvisioningStepTotal(stepTotal.intValue());
+            }
+            statusService.updateProvisioningStatus(gaStatus);
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("received", true);
+        response.put("scope", "module");
+        response.put("action", "CONTINUE");
+        return response;
     }
 }

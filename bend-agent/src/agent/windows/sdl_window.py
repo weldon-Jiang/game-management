@@ -3,21 +3,20 @@ SDL2自绘串流窗口
 ================
 
 功能说明：
-- 使用pygame创建自绘串流窗口
-- 支持视频帧渲染
-- 与pygame手柄控制器统一
-- 提供高效的帧捕获能力
+- 使用pygame创建自绘串流窗口（仅用于显示，不参与自动化识别）
+- 窗口固定 1280x720、可拖拽、不可缩放、可隐藏
+- 画面捕获/模板匹配使用 WebRTC 原始帧（对齐 streaming 项目 game_mat 逻辑）
 
 技术实现参考（streaming项目）：
-- SDL2窗口创建
-- pygame渲染
-- surfarray帧捕获
+- xsrp.StreamWindow.setFixedSize() 固定窗口尺寸
+- game_mat 为原始捕获帧，capture_mat 仅用于窗口显示缩放
 
 作者：技术团队
-版本：1.0
+版本：1.1
 """
 
 import asyncio
+import sys
 import time
 from typing import Optional, Tuple, Callable
 from dataclasses import dataclass
@@ -41,6 +40,7 @@ class SDLWindowState(Enum):
     READY = "ready"
     RUNNING = "running"
     PAUSED = "paused"
+    HIDDEN = "hidden"
     CLOSED = "closed"
     ERROR = "error"
 
@@ -51,46 +51,22 @@ class SDLWindowConfig:
     width: int = 1280
     height: int = 720
     title: str = "Bend Agent - Xbox Streaming"
-    flags: int = 0
     vsync: bool = True
     double_buffer: bool = True
     hardware_surface: bool = True
+    resizable: bool = False
+    hide_on_close: bool = False
+    fit_aspect: bool = True
 
 
 class SDLStreamWindow:
     """
-    SDL2自绘串流窗口
+    SDL2自绘串流窗口（显示专用）
 
-    功能说明：
-    - 创建和管理SDL窗口
-    - 渲染视频帧到窗口
-    - 提供高效的帧捕获
-    - 与pygame手柄统一
-
-    使用方式：
-    - window = SDLStreamWindow()
-    - await window.initialize(config)
-    - window.update_frame(frame)
-    - captured = window.capture_frame()
-
-    架构说明：
-    ┌─────────────────────────────────────────────────────────┐
-    │                  SDLStreamWindow                        │
-    │                                                         │
-    │  ┌─────────────────────────────────────────────────┐   │
-    │  │              pygame.display                     │   │
-    │  │                                                  │   │
-    │  │  ┌─────────────────────────────────────────┐   │   │
-    │  │  │            视频帧 Surface                 │   │   │
-    │  │  └─────────────────────────────────────────┘   │   │
-    │  │                    │                           │   │
-    │  │                    ▼                           │   │
-    │  │  ┌─────────────────────────────────────────┐   │   │
-    │  │  │         pygame.surfarray                │   │   │
-    │  │  │         → numpy数组                     │   │   │
-    │  │  └─────────────────────────────────────────┘   │   │
-    │  └─────────────────────────────────────────────────┘   │
-    └─────────────────────────────────────────────────────────┘
+    与 streaming StreamWindow 对齐：
+    - 固定窗口尺寸（setFixedSize），可拖拽标题栏移动
+    - 原始视频帧保存在 _last_source_frame，模板匹配不依赖窗口像素
+    - 窗口隐藏不影响 WebRTC / GPU 解码链路
     """
 
     def __init__(self, config: Optional[SDLWindowConfig] = None):
@@ -100,26 +76,23 @@ class SDLStreamWindow:
         self._screen = None
         self._frame_surface = None
         self._running = False
+        self._visible = True
+        self._hwnd: Optional[int] = None
         self._event_callbacks: dict = {}
         self._frame_callback: Optional[Callable] = None
         self._last_frame_time = 0
         self._frame_count = 0
         self._fps = 0.0
+        self._last_source_frame: Optional[np.ndarray] = None
+        self._source_size: Tuple[int, int] = (0, 0)
+        self._close_callback: Optional[Callable[[], None]] = None
+        self._close_requested = False
 
         if not PYGAME_AVAILABLE:
             self.logger.warning("pygame不可用，SDL窗口功能将不可用")
 
     async def initialize(self, config: Optional[SDLWindowConfig] = None) -> bool:
-        """
-        初始化SDL窗口
-
-        参数：
-        - config: 窗口配置（可选）
-
-        返回值：
-        - True: 初始化成功
-        - False: 初始化失败
-        """
+        """初始化固定尺寸窗口化 SDL 窗口。"""
         if not PYGAME_AVAILABLE:
             self.logger.error("pygame不可用，无法初始化SDL窗口")
             self._state = SDLWindowState.ERROR
@@ -131,15 +104,24 @@ class SDLStreamWindow:
             if config:
                 self._config = config
 
+            if self._config.vsync:
+                import os
+                os.environ.setdefault('SDL_VIDEO_VSYNC', '1')
+
             pygame.init()
 
-            flags = pygame.HWSURFACE | pygame.DOUBLEBUF
-            if self._config.vsync:
-                flags |= pygame.FULLSCREEN
+            flags = 0
+            if self._config.hardware_surface:
+                flags |= pygame.HWSURFACE
+            if self._config.double_buffer:
+                flags |= pygame.DOUBLEBUF
+            if self._config.resizable:
+                flags |= pygame.RESIZABLE
 
             self._screen = pygame.display.set_mode(
                 (self._config.width, self._config.height),
-                flags
+                flags,
+                vsync=1 if self._config.vsync else 0,
             )
             pygame.display.set_caption(self._config.title)
 
@@ -148,28 +130,146 @@ class SDLStreamWindow:
                 depth=24
             )
 
+            self._apply_window_constraints()
+            self._center_on_screen()
+
             self._running = True
             self._state = SDLWindowState.READY
-            self.logger.info(f"SDL窗口初始化成功: {self._config.width}x{self._config.height}")
+            self.logger.info(
+                f"SDL窗口初始化成功: {self._config.width}x{self._config.height} "
+                f"(windowed, fixed-size, draggable)"
+            )
 
             return True
 
+        except TypeError:
+            # pygame < 2.0 无 vsync 参数
+            try:
+                flags = pygame.HWSURFACE | pygame.DOUBLEBUF
+                self._screen = pygame.display.set_mode(
+                    (self._config.width, self._config.height),
+                    flags
+                )
+                pygame.display.set_caption(self._config.title)
+                self._frame_surface = pygame.Surface(
+                    (self._config.width, self._config.height),
+                    depth=24
+                )
+                self._apply_window_constraints()
+                self._center_on_screen()
+                self._running = True
+                self._state = SDLWindowState.READY
+                self.logger.info(
+                    f"SDL窗口初始化成功: {self._config.width}x{self._config.height}"
+                )
+                return True
+            except Exception as e:
+                self.logger.error(f"SDL窗口初始化失败: {e}")
+                self._state = SDLWindowState.ERROR
+                return False
         except Exception as e:
             self.logger.error(f"SDL窗口初始化失败: {e}")
             self._state = SDLWindowState.ERROR
             return False
 
+    def _get_hwnd(self) -> Optional[int]:
+        if self._hwnd:
+            return self._hwnd
+        if not PYGAME_AVAILABLE:
+            return None
+        try:
+            wm_info = pygame.display.get_wm_info()
+            self._hwnd = wm_info.get('window') or wm_info.get('hwnd')
+        except Exception:
+            self._hwnd = None
+        return self._hwnd
+
+    def set_close_callback(self, callback: Optional[Callable[[], None]]) -> None:
+        """Invoked when user clicks the title-bar close button."""
+        self._close_callback = callback
+
+    def _apply_window_constraints(self):
+        """Windows: fixed client area, standard caption with close/minimize, no resize."""
+        if sys.platform != 'win32':
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            hwnd = self._get_hwnd()
+            if not hwnd:
+                return
+
+            GWL_STYLE = -16
+            WS_OVERLAPPED = 0x00000000
+            WS_CAPTION = 0x00C00000
+            WS_SYSMENU = 0x00080000
+            WS_MINIMIZEBOX = 0x00020000
+            WS_THICKFRAME = 0x00040000
+            WS_MAXIMIZEBOX = 0x00010000
+            WS_HSCROLL = 0x00100000
+            WS_VSCROLL = 0x00200000
+
+            user32 = ctypes.windll.user32
+            style = (
+                WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+            )
+            user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+
+            rect = wintypes.RECT(0, 0, self._config.width, self._config.height)
+            user32.AdjustWindowRectEx(ctypes.byref(rect), style, False, 0)
+            outer_w = rect.right - rect.left
+            outer_h = rect.bottom - rect.top
+
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
+            x = max(0, (screen_w - outer_w) // 2)
+            y = max(0, (screen_h - outer_h) // 2)
+
+            SWP_NOZORDER = 0x0004
+            SWP_FRAMECHANGED = 0x0020
+            user32.SetWindowPos(
+                hwnd, 0, x, y, outer_w, outer_h,
+                SWP_NOZORDER | SWP_FRAMECHANGED,
+            )
+            user32.ShowScrollBar(hwnd, 0, False)  # SB_HORZ
+            user32.ShowScrollBar(hwnd, 1, False)  # SB_VERT
+            self.logger.debug(
+                "窗口样式已应用: hwnd=%s client=%sx%s outer=%sx%s",
+                hwnd,
+                self._config.width,
+                self._config.height,
+                outer_w,
+                outer_h,
+            )
+        except Exception as e:
+            self.logger.warning(f"应用窗口约束失败: {e}")
+
+    def _center_on_screen(self):
+        """将窗口居中显示。"""
+        if sys.platform != 'win32':
+            return
+        try:
+            import ctypes
+
+            hwnd = self._get_hwnd()
+            if not hwnd:
+                return
+
+            user32 = ctypes.windll.user32
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
+            x = max(0, (screen_w - self._config.width) // 2)
+            y = max(0, (screen_h - self._config.height) // 2)
+            user32.SetWindowPos(hwnd, 0, x, y, 0, 0, 0x0001 | 0x0004)  # NOSIZE | NOZORDER
+        except Exception as e:
+            self.logger.debug(f"窗口居中失败: {e}")
+
     def update_frame(self, frame: np.ndarray):
         """
-        更新窗口画面
+        更新窗口显示（仅显示用）。
 
-        参数：
-        - frame: 视频帧（numpy数组，HWC格式）
-
-        实现说明：
-        - numpy数组转换为pygame Surface
-        - 渲染到屏幕
-        - 更新FPS统计
+        原始帧存入 _last_source_frame，供降级捕获；自动化主路径使用 WebRTC 帧。
         """
         if not self._running or self._screen is None:
             return
@@ -178,28 +278,51 @@ class SDLStreamWindow:
             start_time = time.time()
 
             if frame.shape[2] == 3:
-                frame_rgb = frame
+                frame_bgr = np.ascontiguousarray(frame)
+                frame_rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
             else:
                 import cv2
+                frame_bgr = frame
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            frame_rgb = np.transpose(frame_rgb, (1, 0, 2))
+            self._last_source_frame = frame_bgr.copy()
+            self._source_size = (frame_bgr.shape[1], frame_bgr.shape[0])
 
-            self._frame_surface = pygame.surfarray.make_surface(frame_rgb)
+            frame_rgb_t = np.transpose(frame_rgb, (1, 0, 2))
+            self._frame_surface = pygame.surfarray.make_surface(frame_rgb_t)
+
+            if not self._visible:
+                self._update_fps(time.time() - start_time)
+                return
 
             self._screen.fill((0, 0, 0))
-            scaled = pygame.transform.scale(
-                self._frame_surface,
-                (self._config.width, self._config.height)
-            )
-            self._screen.blit(scaled, (0, 0))
+            src_w, src_h = self._source_size
+            dst_w, dst_h = self._config.width, self._config.height
+            if src_w <= 0 or src_h <= 0:
+                return
+            if self._config.fit_aspect:
+                scale = min(dst_w / src_w, dst_h / src_h)
+                draw_w = max(1, int(src_w * scale))
+                draw_h = max(1, int(src_h * scale))
+                scaled = pygame.transform.smoothscale(
+                    self._frame_surface, (draw_w, draw_h)
+                )
+                x = (dst_w - draw_w) // 2
+                y = (dst_h - draw_h) // 2
+                self._screen.blit(scaled, (x, y))
+            elif src_w == dst_w and src_h == dst_h:
+                self._screen.blit(self._frame_surface, (0, 0))
+            else:
+                scaled = pygame.transform.smoothscale(
+                    self._frame_surface, (dst_w, dst_h)
+                )
+                self._screen.blit(scaled, (0, 0))
 
             pygame.display.flip()
-
             self._update_fps(time.time() - start_time)
 
             if self._frame_callback:
-                self._frame_callback(frame)
+                self._frame_callback(frame_bgr)
 
         except Exception as e:
             self.logger.error(f"更新帧失败: {e}")
@@ -214,24 +337,21 @@ class SDLStreamWindow:
 
     def capture_frame(self) -> Optional[np.ndarray]:
         """
-        捕获当前窗口帧
+        返回最近一帧原始视频（BGR），与 streaming game_mat 一致。
 
-        返回值：
-        - 捕获的帧（numpy数组，HWC格式，BGR格式）或None
+        不读取窗口像素，避免隐藏/缩放影响模板匹配。
         """
-        if not self._running or self._screen is None:
+        if self._last_source_frame is not None:
+            return self._last_source_frame.copy()
+
+        if not self._running or self._screen is None or not self._visible:
             return None
 
         try:
             frame = pygame.surfarray.array3d(self._screen)
-
             frame = np.transpose(frame, (1, 0, 2))
-
             import cv2
-            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-            return frame_bgr
-
+            return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         except Exception as e:
             self.logger.error(f"捕获帧失败: {e}")
             return None
@@ -242,32 +362,56 @@ class SDLStreamWindow:
 
     def get_rgb_frame(self) -> Optional[np.ndarray]:
         """获取RGB格式帧"""
-        if not self._running or self._screen is None:
+        frame = self.capture_frame()
+        if frame is None:
             return None
+        import cv2
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        try:
-            frame = pygame.surfarray.array3d(self._screen)
-            return np.transpose(frame, (1, 0, 2))
-        except Exception as e:
-            self.logger.error(f"获取RGB帧失败: {e}")
-            return None
+    def hide(self):
+        """隐藏窗口（自动化继续运行）。"""
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                hwnd = self._get_hwnd()
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+            except Exception as e:
+                self.logger.warning(f"隐藏窗口失败: {e}")
+        self._visible = False
+        self._state = SDLWindowState.HIDDEN
+        self.logger.info("SDL窗口已隐藏")
+
+    def show(self):
+        """显示窗口。"""
+        self._hwnd = None
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                hwnd = self._get_hwnd()
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 5)  # SW_SHOW
+            except Exception as e:
+                self.logger.warning(f"显示窗口失败: {e}")
+        self._apply_window_constraints()
+        self._visible = True
+        if self._running:
+            self._state = SDLWindowState.RUNNING
+        self.logger.info("SDL窗口已显示")
+
+    @property
+    def is_visible(self) -> bool:
+        return self._visible
 
     def set_frame_callback(self, callback: Callable[[np.ndarray], None]):
-        """
-        设置帧回调
-
-        参数：
-        - callback: 每帧回调函数
-        """
+        """设置帧回调"""
         self._frame_callback = callback
 
     def process_events(self) -> bool:
         """
-        处理pygame事件
+        处理pygame事件。
 
-        返回值：
-        - True: 继续运行
-        - False: 收到退出事件
+        关闭按钮默认隐藏窗口而非退出，避免中断自动化。
         """
         if not PYGAME_AVAILABLE:
             return False
@@ -275,6 +419,17 @@ class SDLStreamWindow:
         try:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    self._close_requested = True
+                    if self._close_callback:
+                        try:
+                            self._close_callback()
+                        except Exception as exc:
+                            self.logger.warning("close callback failed: %s", exc)
+                        continue
+                    if self._config.hide_on_close:
+                        self.hide()
+                        continue
+                    self.close()
                     return False
 
                 if event.type in self._event_callbacks:
@@ -287,13 +442,7 @@ class SDLStreamWindow:
             return True
 
     def register_event_callback(self, event_type: int, callback: Callable):
-        """
-        注册事件回调
-
-        参数：
-        - event_type: pygame事件类型
-        - callback: 回调函数
-        """
+        """注册事件回调"""
         self._event_callbacks[event_type] = callback
 
     def clear(self):
@@ -317,9 +466,26 @@ class SDLStreamWindow:
         self._state = SDLWindowState.CLOSED
 
         if PYGAME_AVAILABLE:
-            pygame.quit()
+            try:
+                pygame.display.quit()
+            except Exception:
+                pass
 
         self.logger.info("SDL窗口已关闭")
+
+    async def destroy(self):
+        """Alias for task cleanup; does not call pygame.quit() if keyboard mapper still active."""
+        self._running = False
+        self._state = SDLWindowState.CLOSED
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                hwnd = self._get_hwnd()
+                if hwnd:
+                    ctypes.windll.user32.DestroyWindow(hwnd)
+            except Exception as e:
+                self.logger.debug("DestroyWindow: %s", e)
+        self.logger.info("SDL窗口已销毁")
 
     async def wait_for_close(self):
         """等待窗口关闭"""
@@ -331,60 +497,41 @@ class SDLStreamWindow:
         self.close()
 
     def get_stats(self) -> dict:
-        """
-        获取窗口统计信息
-
-        返回值：
-        - 统计信息字典
-        """
+        """获取窗口统计信息"""
         return {
             'state': self._state.value,
-            'resolution': f"{self._config.width}x{self._config.height}",
+            'display_resolution': f"{self._config.width}x{self._config.height}",
+            'source_resolution': f"{self._source_size[0]}x{self._source_size[1]}",
             'fps': self._fps,
             'frame_time_ms': self._last_frame_time * 1000,
             'frames_rendered': self._frame_count,
-            'running': self._running
+            'running': self._running,
+            'visible': self._visible,
         }
 
     @property
     def state(self) -> SDLWindowState:
-        """获取窗口状态"""
         return self._state
 
     @property
     def is_running(self) -> bool:
-        """检查窗口是否运行中"""
         return self._running
 
     @property
     def width(self) -> int:
-        """获取窗口宽度"""
         return self._config.width
 
     @property
     def height(self) -> int:
-        """获取窗口高度"""
         return self._config.height
 
     @property
     def surface(self):
-        """获取pygame Surface"""
         return self._screen
 
 
 class SDLFrameCapture:
-    """
-    SDL窗口帧捕获器
-
-    功能说明：
-    - 从SDL窗口高效捕获帧
-    - 支持多种格式输出
-    - 提供统计信息
-
-    使用方式：
-    - capture = SDLFrameCapture(window)
-    - frame = await capture.capture_frame()
-    """
+    """SDL窗口帧捕获器（降级路径，优先返回原始源帧）"""
 
     def __init__(self, window: SDLStreamWindow):
         self.logger = get_logger('sdl_capture')
@@ -393,12 +540,6 @@ class SDLFrameCapture:
         self._last_capture_time = 0
 
     async def capture_frame(self) -> Optional[np.ndarray]:
-        """
-        捕获帧
-
-        返回值：
-        - 捕获的帧或None
-        """
         start_time = time.time()
         frame = self._window.capture_frame()
 
@@ -409,12 +550,6 @@ class SDLFrameCapture:
         return frame
 
     def get_stats(self) -> dict:
-        """
-        获取捕获统计
-
-        返回值：
-        - 统计信息字典
-        """
         return {
             'frames_captured': self._capture_count,
             'last_capture_time_ms': self._last_capture_time,
@@ -423,7 +558,6 @@ class SDLFrameCapture:
 
     @property
     def capture_count(self) -> int:
-        """获取捕获帧数"""
         return self._capture_count
 
 

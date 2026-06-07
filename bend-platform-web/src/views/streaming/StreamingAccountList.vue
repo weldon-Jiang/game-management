@@ -54,7 +54,7 @@
         <!-- 运行Agent -->
         <el-table-column prop="agentId" label="运行Agent" width="300">
           <template #default="{ row }">
-            <span v-if="row.agentId" class="agent-id">{{ row.agentId }}</span>
+            <span v-if="row.agentId" class="agent-id">{{ row.agentName || row.agentId }}</span>
             <span v-else class="text-muted">未运行</span>
           </template>
         </el-table-column>
@@ -83,7 +83,7 @@
               :title="!isPlatformAutomationSupported(row.platform) ? '该账号为 PlayStation 类型，自动化功能尚未开放' : ''"
               @click="showStartAutomationDialog(row)"
             >
-              启动自动化
+              启动串流
             </el-button>
             <!-- 停止自动化按钮（busy状态显示） -->
             <el-button
@@ -217,8 +217,18 @@
       </template>
     </el-dialog>
 
-    <!-- 启动自动化对话框 -->
+    <StartWizard
+      v-model="wizardVisible"
+      :account="selectedAccount"
+      :agents="onlineAgents"
+      :hosts="boundHosts"
+      :game-accounts="wizardGameAccounts"
+      @started="onWizardStarted"
+    />
+
+    <!-- 遗留单步对话框（保留兼容，默认隐藏） -->
     <el-dialog
+      v-if="false"
       v-model="automationDialogVisible"
       title="启动自动化"
       width="500px"
@@ -434,11 +444,13 @@
  * - 对话框：新增/编辑、启动自动化、登录记录
  */
 import { ref, reactive, onMounted, nextTick, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import StartWizard from '@/components/automation/StartWizard.vue'
 import { Plus, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi, xboxApi } from '@/api'
-import { getStreamingAccountStatusText, getStreamingAccountStatusType, getAccountTaskStatusText, getAccountTaskStatusType, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag, isPlatformAutomationSupported, getVisibleGameActionTypes } from '@/utils/constants'
+import { getAgentDisplayName, getStreamingAccountStatusText, getStreamingAccountStatusType, getAccountTaskStatusText, getAccountTaskStatusType, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag, isPlatformAutomationSupported, getVisibleGameActionTypes } from '@/utils/constants'
 
 // ==================== 状态定义 ====================
 
@@ -447,6 +459,9 @@ import { getStreamingAccountStatusText, getStreamingAccountStatusType, getAccoun
  * 用于获取当前用户是否为平台管理员
  */
 const authStore = useAuthStore()
+const router = useRouter()
+const wizardVisible = ref(false)
+const wizardGameAccounts = ref([])
 
 /**
  * 加载状态标识
@@ -634,12 +649,17 @@ const loadMerchants = async () => {
  */
 const loadOnlineAgents = async () => {
   try {
-    const res = await agentApi.list({ status: 'online', pageSize: 100 })
-    if (res.code === 0 || res.code === 200) {
-      onlineAgents.value = res.data?.records || []
-    }
+    const res = await agentApi.listOnline()
+    onlineAgents.value = res.data || []
+    // #region agent log
+    fetch('http://127.0.0.1:7598/ingest/9cbbab43-1405-4014-8793-f701df850f81',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c660bd'},body:JSON.stringify({sessionId:'c660bd',location:'StreamingAccountList.vue:loadOnlineAgents',message:'online agents loaded',data:{count:onlineAgents.value.length,agentIds:onlineAgents.value.map(a=>a.agentId),agentNames:onlineAgents.value.map(a=>a.agentName)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
   } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7598/ingest/9cbbab43-1405-4014-8793-f701df850f81',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c660bd'},body:JSON.stringify({sessionId:'c660bd',location:'StreamingAccountList.vue:loadOnlineAgents:catch',message:'load online agents failed',data:{errorMessage:error?.message},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     console.error('Failed to load online agents:', error)
+    onlineAgents.value = []
   }
 }
 
@@ -803,10 +823,15 @@ const handleSubmit = async () => {
  * - row: 选中的账号行数据
  */
 const showStartAutomationDialog = async (row) => {
+  // #region agent log
+  fetch('http://127.0.0.1:7598/ingest/9cbbab43-1405-4014-8793-f701df850f81',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c660bd'},body:JSON.stringify({sessionId:'c660bd',location:'StreamingAccountList.vue:showStartAutomationDialog:entry',message:'showStartAutomationDialog called',data:{accountId:row?.id,platform:row?.platform},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
   if (!isPlatformAutomationSupported(row.platform)) {
     ElMessage.warning('该账号为 PlayStation 类型，自动化功能尚未开放')
     return
   }
+
+  let boundAccounts = []
 
   try {
     const subRes = await subscriptionApi.getStatus()
@@ -819,7 +844,10 @@ const showStartAutomationDialog = async (row) => {
     }
 
     const res = await gameAccountApi.list({ streamingId: row.id, pageSize: 1000 })
-    const boundAccounts = res.data?.records || []
+    boundAccounts = res.data?.records || []
+    // #region agent log
+    fetch('http://127.0.0.1:7598/ingest/9cbbab43-1405-4014-8793-f701df850f81',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c660bd'},body:JSON.stringify({sessionId:'c660bd',location:'StreamingAccountList.vue:showStartAutomationDialog:insideTry',message:'boundAccounts loaded inside try',data:{count:boundAccounts.length,accountId:row?.id},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     if (boundAccounts.length === 0) {
       ElMessage.warning('该流媒体账号下没有关联的游戏账号，请先关联游戏账号后再启动自动化')
       return
@@ -835,19 +863,44 @@ const showStartAutomationDialog = async (row) => {
       return
     }
   } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7598/ingest/9cbbab43-1405-4014-8793-f701df850f81',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c660bd'},body:JSON.stringify({sessionId:'c660bd',location:'StreamingAccountList.vue:showStartAutomationDialog:catch',message:'validation catch block',data:{errorMessage:error?.message},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     console.error('Failed to validate automation:', error)
     ElMessage.warning('检查订阅状态失败')
     return
   }
 
+  // #region agent log
+  fetch('http://127.0.0.1:7598/ingest/9cbbab43-1405-4014-8793-f701df850f81',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c660bd'},body:JSON.stringify({sessionId:'c660bd',location:'StreamingAccountList.vue:showStartAutomationDialog:afterTry',message:'after try block before wizard open',data:{boundAccountsType:typeof boundAccounts,boundAccountsCount:boundAccounts?.length,accountId:row?.id,runId:'post-fix'},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
+
   selectedAccount.value = row
   selectedAgentId.value = ''
   selectedHostId.value = ''
   boundHosts.value = []
+  wizardGameAccounts.value = boundAccounts
   selectedGameActionType.value = visibleGameActionTypes[0]?.code || 'squad_battle'
   await loadOnlineAgents()
+  // #region agent log
+  fetch('http://127.0.0.1:7598/ingest/9cbbab43-1405-4014-8793-f701df850f81',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c660bd'},body:JSON.stringify({sessionId:'c660bd',location:'StreamingAccountList.vue:showStartAutomationDialog:beforeWizard',message:'checking agents before wizard',data:{onlineCount:onlineAgents.value.length,rowAgentId:row?.agentId,rowAgentName:row?.agentName},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
+  if (onlineAgents.value.length === 0) {
+    ElMessage.warning('当前没有在线的 Agent，请确保 Agent 服务已启动并连接')
+    return
+  }
   await loadBoundHosts(row.id)
-  automationDialogVisible.value = true
+  wizardVisible.value = true
+}
+
+const onWizardStarted = (data) => {
+  loadData()
+  if (data?.taskId) {
+    ElMessage.success({
+      message: '串流已启动，可在任务详情选择自动化类型',
+      duration: 5000
+    })
+  }
 }
 
 const loadBoundHosts = async (streamingAccountId) => {
@@ -875,10 +928,9 @@ const loadBoundHosts = async (streamingAccountId) => {
  * - 格式化的显示文本
  */
 const formatAgentLabel = (agent) => {
-  const shortId = agent.agentId ? agent.agentId.substring(0, 8) : 'unknown'
-  const merchant = agent.merchantName || '未知商户'
+  const name = getAgentDisplayName(agent)
   const status = agent.status === 'online' ? '在线' : '离线'
-  return `${shortId}... - ${merchant} (${status})`
+  return `${name} (${status})`
 }
 
 /**

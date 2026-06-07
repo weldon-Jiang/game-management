@@ -52,7 +52,12 @@
           @selection-change="handleSelectionChange"
         >
         <el-table-column type="selection" width="50" />
-        <el-table-column prop="agentId" label="Agent ID" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="agentName" label="Agent名称" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span>{{ getAgentDisplayName(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="agentId" label="Agent ID" min-width="180" show-overflow-tooltip class-name="text-muted-col" />
         <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantId" label="商户" width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.merchantName">{{ row.merchantName }}</span>
@@ -89,9 +94,12 @@
             {{ row.lastHeartbeat ? formatDate(row.lastHeartbeat) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
+        <el-table-column label="操作" width="210" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="showTaskDialog(row)">
+            <el-button type="primary" link size="small" @click="showNameDialog(row)">
+              编辑名称
+            </el-button>
+            <el-button type="primary" link size="small" @click="goAgentTasks(row)">
               查看任务
             </el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">
@@ -115,21 +123,33 @@
       </div>
     </div>
 
-    <AgentTaskDialog
-      v-model:visible="taskDialogVisible"
-      :agent="selectedAgent"
-    />
+    <el-dialog v-model="nameDialogVisible" title="编辑Agent名称" width="480px" :close-on-click-modal="false">
+      <el-form label-width="90px">
+        <el-form-item label="Agent ID">
+          <span class="text-muted">{{ editingAgent?.agentId }}</span>
+        </el-form-item>
+        <el-form-item label="Agent名称" required>
+          <el-input v-model="editingAgentName" placeholder="请输入Agent名称，如：办公室1号机" maxlength="64" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="nameDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingName" @click="handleSaveName">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { Refresh } from '@element-plus/icons-vue'
 import { agentApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
-import { getAgentStatusText, getAgentStatusType } from '@/utils/constants'
+import { getAgentDisplayName, getAgentStatusText, getAgentStatusType } from '@/utils/constants'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import AgentTaskDialog from './AgentTaskDialog.vue'
+
+const router = useRouter()
 
 const authStore = useAuthStore()
 
@@ -142,6 +162,10 @@ const selectedAgents = ref([])
 const cleaningUninstalled = ref(false)
 const cleaningOffline = ref(false)
 const batchDeleting = ref(false)
+const nameDialogVisible = ref(false)
+const editingAgent = ref(null)
+const editingAgentName = ref('')
+const savingName = ref(false)
 
 const pagination = reactive({
   pageNum: 1,
@@ -149,8 +173,38 @@ const pagination = reactive({
   total: 0
 })
 
-const taskDialogVisible = ref(false)
-const selectedAgent = ref(null)
+const goAgentTasks = (agent) => {
+  router.push({ name: 'Tasks', query: { agentId: agent.agentId } })
+}
+
+const showNameDialog = (agent) => {
+  editingAgent.value = agent
+  editingAgentName.value = agent.agentName || ''
+  nameDialogVisible.value = true
+}
+
+const handleSaveName = async () => {
+  const name = editingAgentName.value?.trim()
+  if (!name) {
+    ElMessage.warning('请输入Agent名称')
+    return
+  }
+  savingName.value = true
+  try {
+    const res = await agentApi.updateName(editingAgent.value.agentId, { agentName: name })
+    if (res.code === 0 || res.code === 200) {
+      ElMessage.success('Agent名称已更新')
+      nameDialogVisible.value = false
+      loadData()
+    } else {
+      ElMessage.error(res.message || '更新失败')
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || '更新失败')
+  } finally {
+    savingName.value = false
+  }
+}
 
 const handleSearch = () => {
   pagination.pageNum = 1
@@ -183,15 +237,10 @@ const loadData = async () => {
   }
 }
 
-const showTaskDialog = (agent) => {
-  selectedAgent.value = agent
-  taskDialogVisible.value = true
-}
-
 const handleDelete = async (agent) => {
   try {
     await ElMessageBox.confirm(
-      `确定要删除Agent "${agent.agentId}" 吗？删除后无法恢复。`,
+      `确定要删除Agent "${getAgentDisplayName(agent)}" 吗？删除后无法恢复。`,
       '确认删除',
       {
         confirmButtonText: '删除',

@@ -6,7 +6,8 @@ import java.util.List;
 
 public interface TaskGameAccountStatusService {
 
-    void createStatusRecords(String taskId, List<String> gameAccountIds, List<Integer> dailyLimits, String streamingAccountId);
+    void createStatusRecords(String taskId, List<String> gameAccountIds, List<Integer> dailyLimits,
+                             String streamingAccountId, String sessionId);
 
     List<TaskGameAccountStatus> findByTaskId(String taskId);
 
@@ -33,4 +34,6 @@ public interface TaskGameAccountStatusService {
     void cancelByTaskId(String taskId);
 
     void updateDailyMatchInfo(String taskId, String gameAccountId, Integer todayCompleted, Integer dailyLimit);
+
+    void updateProvisioningStatus(TaskGameAccountStatus status);
 }

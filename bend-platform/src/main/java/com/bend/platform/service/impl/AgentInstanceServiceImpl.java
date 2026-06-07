@@ -24,9 +24,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Agent实例服务实现类
@@ -451,5 +454,90 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
         }
 
         log.info("批量下线超时Agent - 数量: {}", timeoutAgents.size());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentInstance updateAgentName(String agentId, String agentName) {
+        String normalizedName = agentName == null ? null : agentName.trim();
+        if (!StringUtils.hasText(normalizedName)) {
+            throw new BusinessException(ResultCode.System.PARAM_INVALID, "Agent名称不能为空");
+        }
+
+        AgentInstance instance = findByAgentId(agentId);
+        if (instance == null) {
+            throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
+        }
+
+        if (existsAgentNameInMerchant(instance.getMerchantId(), normalizedName, instance.getId())) {
+            throw new BusinessException(ResultCode.AgentInstance.AGENT_NAME_DUPLICATE);
+        }
+
+        instance.setAgentName(normalizedName);
+        agentInstanceMapper.updateById(instance);
+        populateMerchantNames(List.of(instance));
+        log.info("更新Agent名称 - AgentID: {}, AgentName: {}", agentId, normalizedName);
+        return instance;
+    }
+
+    @Override
+    public Map<String, String> resolveDisplayNames(Collection<String> agentIds) {
+        if (agentIds == null || agentIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<String> ids = agentIds.stream()
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.toList());
+        if (ids.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(AgentInstance::getAgentId, ids);
+        List<AgentInstance> agents = agentInstanceMapper.selectList(wrapper);
+
+        Map<String, String> result = new HashMap<>();
+        for (AgentInstance agent : agents) {
+            result.put(agent.getAgentId(), toDisplayName(agent));
+        }
+        for (String id : ids) {
+            result.putIfAbsent(id, id);
+        }
+        return result;
+    }
+
+    @Override
+    public String resolveDisplayName(String agentId) {
+        if (!StringUtils.hasText(agentId)) {
+            return agentId;
+        }
+        AgentInstance agent = findByAgentId(agentId);
+        return agent == null ? agentId : toDisplayName(agent);
+    }
+
+    private boolean existsAgentNameInMerchant(String merchantId, String agentName, String excludeId) {
+        if (!StringUtils.hasText(merchantId) || !StringUtils.hasText(agentName)) {
+            return false;
+        }
+        LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AgentInstance::getMerchantId, merchantId)
+                .eq(AgentInstance::getAgentName, agentName)
+                .ne(StringUtils.hasText(excludeId), AgentInstance::getId, excludeId);
+        return agentInstanceMapper.selectCount(wrapper) > 0;
+    }
+
+    private String toDisplayName(AgentInstance agent) {
+        if (agent == null) {
+            return null;
+        }
+        if (StringUtils.hasText(agent.getAgentName())) {
+            return agent.getAgentName();
+        }
+        if (StringUtils.hasText(agent.getHost())) {
+            return agent.getHost();
+        }
+        return agent.getAgentId();
     }
 }

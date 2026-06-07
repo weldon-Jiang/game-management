@@ -29,10 +29,22 @@ from typing import Dict, Optional, List, Any, Callable
 
 from ..core.logger import get_logger
 from ..utils.crypto_util import decrypt_password
-from .task_context import AgentTaskContext, GameAccountInfo, XboxInfo, AutomationResult
-from ..windows.task_window_manager import TaskWindowManager
-from .automation_task import AgentAutomationTask
+from .task_context import AgentTaskContext, GameAccountInfo, XboxInfo, AutomationResult, PauseMode
+from ..window.window_manager import StreamingWindowManager
+from ..orchestration.streaming_account_task import StreamingAccountTask
+from ..runtime.task_registry import TaskRuntimeRegistry, StreamingAccountTaskRuntime
+from ..runtime.task_control_handler import TaskControlHandler  # noqa: F401 — re-exported via get_active_scheduler
+from ..runtime.input_focus import InputFocusManager
+from ..runtime.phase_fsm import SessionPhase
+from ..core.config import config
 from ..api.platform_api_client import PlatformApiClient
+
+
+_active_scheduler: Optional["AutomationScheduler"] = None
+
+
+def get_active_scheduler() -> Optional["AutomationScheduler"]:
+    return _active_scheduler
 
 
 class AutomationScheduler:
@@ -70,16 +82,22 @@ class AutomationScheduler:
         - agent_secret: Agent Secret（用于HTTP认证）
         """
         self.logger = get_logger('automation_scheduler')
-        self._max_concurrent = max_concurrent_tasks
-        self._semaphore = asyncio.Semaphore(max_concurrent_tasks)
+        self._max_concurrent = max_concurrent_tasks or int(
+            config.get("task.max_concurrent", 10)
+        )
+        self._semaphore = asyncio.Semaphore(self._max_concurrent)
 
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self._task_contexts: Dict[str, AgentTaskContext] = {}
         self._task_results: Dict[str, AutomationResult] = {}
         self._cancel_events: Dict[str, asyncio.Event] = {}
-        self._task_objects: Dict[str, AgentAutomationTask] = {}
+        self._task_objects: Dict[str, StreamingAccountTask] = {}
 
-        self._window_manager = TaskWindowManager(max_concurrent_windows=max_concurrent_tasks)
+        self._registry = TaskRuntimeRegistry.get_instance()
+        self._task_control = TaskControlHandler(self._registry, InputFocusManager.get_instance())
+        self._task_control.set_scheduler(self)
+
+        self._window_manager = StreamingWindowManager(max_concurrent=self._max_concurrent)
         self._platform_client = PlatformApiClient(agent_id=agent_id, agent_secret=agent_secret)
 
         self._lock = threading.Lock()
@@ -92,7 +110,10 @@ class AutomationScheduler:
         self._streaming_xbox_hosts: Dict[str, str] = {}  # xbox_id -> task_id
         self._xbox_lock = asyncio.Lock()
 
-        self.logger.info(f"任务调度器初始化完成，最大并发: {max_concurrent_tasks}")
+        global _active_scheduler
+        _active_scheduler = self
+
+        self.logger.info(f"任务调度器初始化完成，最大并发: {self._max_concurrent}")
         self.logger.info(f"登录间隔控制: 同一账号{self.MIN_LOGIN_INTERVAL}秒, 不同账号{self.MIN_ACCOUNT_INTERVAL}秒")
 
     async def acquire_xbox_host(self, xbox_id: str, task_id: str) -> bool:
@@ -160,10 +181,11 @@ class AutomationScheduler:
         streaming_account_password: str,
         game_accounts: List[Dict[str, Any]],
         assigned_xbox: Optional[Dict[str, Any]] = None,
-        game_action_type: str = "squad_battle",
+        game_action_type: str = "",
         account_platform: str = "xbox",
         auto_match_host: bool = True,
         streaming_account_auto_code: str = "",
+        two_phase: bool = True,
     ) -> bool:
         """
         启动自动化任务
@@ -222,6 +244,9 @@ class AutomationScheduler:
                 gamertag=ga.get("gameName", ga.get("gamertag", "")),
                 email=ga.get("email", ""),
                 password=decrypted_game_password or "",
+                position_index=ga.get("positionIndex", ga.get("position_index", -1)),
+                is_new_user=bool(ga.get("isNewUser", ga.get("is_new_user", False))),
+                profile_bound=bool(ga.get("profileBound", ga.get("profile_bound", False))),
                 is_primary=ga.get("isPrimary", False),
                 target_matches=ga.get("dailyMatchLimit", ga.get("targetMatches", 3)),
                 today_match_count=ga.get("todayMatchCount", 0)
@@ -239,6 +264,21 @@ class AutomationScheduler:
             )
 
         cancel_event = asyncio.Event()
+        context.pause_event = asyncio.Event()
+        context.pause_event.set()
+
+        def _on_window_close() -> None:
+            asyncio.create_task(self.close_display_window(task_id))
+
+        context.window_close_callback = _on_window_close
+
+        runtime = StreamingAccountTaskRuntime(
+            task_id=task_id,
+            context=context,
+            cancel_event=cancel_event,
+            modules={"window_manager": self._window_manager},
+        )
+        runtime.on_phase_change = self._make_phase_reporter(task_id)
 
         # 登录间隔控制（防止触发安全验证）
         await self._wait_login_interval(streaming_account_email)
@@ -246,12 +286,14 @@ class AutomationScheduler:
         with self._lock:
             self._cancel_events[task_id] = cancel_event
             self._task_contexts[task_id] = context
+            self._registry.register(runtime)
 
         await self._semaphore.acquire()
 
         asyncio_task = asyncio.create_task(
-            self._run_task(task_id, context, cancel_event)
+            self._run_task(task_id, runtime, cancel_event, two_phase, game_action_type)
         )
+        runtime.asyncio_task = asyncio_task
 
         with self._lock:
             self._running_tasks[task_id] = asyncio_task
@@ -333,11 +375,48 @@ class AutomationScheduler:
         self.logger.error(f"执行失败，已达最大重试次数 {max_retries}")
         raise last_exception
 
+    def _make_phase_reporter(self, task_id: str):
+        async def _report(phase: SessionPhase, message: str):
+            context = self._task_contexts.get(task_id)
+            if context:
+                context.session_phase = phase.value
+            await self._platform_client.report_progress(
+                task_id,
+                "SESSION",
+                "RUNNING",
+                message,
+                scope="session",
+                phase=phase.value,
+            )
+        return _report
+
+    @property
+    def task_control_handler(self) -> TaskControlHandler:
+        return self._task_control
+
+    async def start_automation(
+        self,
+        task_id: str,
+        game_action_type: Optional[str] = None,
+    ) -> bool:
+        runtime = self._registry.get(task_id)
+        if not runtime:
+            return False
+        if game_action_type:
+            runtime.context.game_action_type = game_action_type
+            runtime.context.automation_started = True
+        event = runtime.modules.get("automation_start_event")
+        if event:
+            event.set()
+        return True
+
     async def _run_task(
         self,
         task_id: str,
-        context: AgentTaskContext,
-        cancel_event: asyncio.Event
+        runtime: StreamingAccountTaskRuntime,
+        cancel_event: asyncio.Event,
+        two_phase: bool = True,
+        game_action_type: str = "",
     ):
         """
         运行单个任务的内部协程
@@ -348,12 +427,15 @@ class AutomationScheduler:
         - cancel_event: 取消事件
         """
         task = None
+        context = runtime.context
 
         try:
-            task = AgentAutomationTask(
-                context=context,
+            task = StreamingAccountTask(
+                runtime=runtime,
                 window_manager=self._window_manager,
-                platform_client=self._platform_client
+                platform_client=self._platform_client,
+                two_phase=two_phase,
+                game_action_type=game_action_type or None,
             )
 
             with self._lock:
@@ -407,12 +489,17 @@ class AutomationScheduler:
                 self._running_tasks.pop(task_id, None)
                 self._task_objects.pop(task_id, None)
                 self._cancel_events.pop(task_id, None)
+            self._registry.unregister(task_id)
 
             self._semaphore.release()
 
             self.logger.info(f"任务 {task_id} 协程结束")
 
-    async def pause_task(self, task_id: str) -> bool:
+    async def pause_task(
+        self,
+        task_id: str,
+        mode: PauseMode = PauseMode.IMMEDIATE,
+    ) -> bool:
         """
         暂停指定任务
 
@@ -422,10 +509,13 @@ class AutomationScheduler:
         返回：
         - bool: 是否成功
         """
-        task = self._task_objects.get(task_id)
-        if task:
-            await task.pause()
-            self.logger.info(f"任务 {task_id} 已暂停")
+        runtime = self._registry.get(task_id)
+        if runtime:
+            runtime.pause_mode = mode
+            runtime.pause_after_match = mode == PauseMode.AFTER_MATCH
+            runtime.context.pause_mode = mode.value
+            runtime.context.pause()
+            self.logger.info(f"任务 {task_id} 已暂停 ({mode.value})")
             return True
         return False
 
@@ -439,29 +529,114 @@ class AutomationScheduler:
         返回：
         - bool: 是否成功
         """
-        task = self._task_objects.get(task_id)
-        if task:
-            await task.resume()
+        runtime = self._registry.get(task_id)
+        if runtime:
+            runtime.pause_mode = None
+            runtime.pause_after_match = False
+            runtime.context.pause_mode = None
+            runtime.context.resume()
             self.logger.info(f"任务 {task_id} 已恢复")
             return True
         return False
 
     async def stop_task(self, task_id: str) -> bool:
-        """
-        停止指定任务
+        """Stop task and release stream/window resources."""
+        return await self.force_terminate_task(task_id)
 
-        参数：
-        - task_id: 任务ID
+    async def close_display_window(self, task_id: str) -> bool:
+        """Close SDL display only; keep stream and automation running."""
+        context = self._task_contexts.get(task_id)
+        if not context:
+            return False
 
-        返回：
-        - bool: 是否成功
-        """
+        from ..automation.step3_streaming_init import step3_close_display
+
+        await step3_close_display(context)
+        runtime = self._registry.get(task_id)
+        if runtime:
+            runtime.window_visible = False
+        self.logger.info("任务 %s 显示窗口已关闭（自动化继续）", task_id)
+        return True
+
+    async def reopen_display_window(self, task_id: str) -> bool:
+        """Recreate SDL window from existing stream context (no re-auth)."""
+        context = self._task_contexts.get(task_id)
+        if not context:
+            self.logger.warning("reopen_display_window: no context for %s", task_id)
+            return False
+
+        from ..automation.step3_streaming_init import step3_reopen_display
+
+        ok = await step3_reopen_display(context)
+        runtime = self._registry.get(task_id)
+        if runtime and ok:
+            runtime.window_visible = True
+        if ok:
+            self.logger.info("任务 %s 显示窗口已重新打开", task_id)
+        else:
+            self.logger.warning("任务 %s 显示窗口重新打开失败", task_id)
+        return ok
+
+    async def force_terminate_task(self, task_id: str) -> bool:
+        """Cancel task, destroy SDL window, and disconnect stream."""
+        await self._cleanup_task_resources(task_id)
+
         cancel_event = self._cancel_events.get(task_id)
         if cancel_event:
             cancel_event.set()
-            self.logger.info(f"任务 {task_id} 停止请求已发送")
+
+        asyncio_task = self._running_tasks.get(task_id)
+        if asyncio_task and not asyncio_task.done():
+            asyncio_task.cancel()
+
+        if cancel_event or asyncio_task:
+            self.logger.info("任务 %s 已终止（窗口与串流资源已清理）", task_id)
             return True
+
+        self.logger.warning("任务 %s 未在运行，仅执行资源清理", task_id)
         return False
+
+    async def _cleanup_task_resources(self, task_id: str) -> None:
+        context = self._task_contexts.get(task_id)
+        if context:
+            try:
+                from ..automation.step3_streaming_init import _stop_sdl_display_pump
+
+                await _stop_sdl_display_pump(context)
+            except Exception as exc:
+                self.logger.debug("stop sdl pump: %s", exc)
+
+            sdl = getattr(context, "sdl_window", None)
+            if sdl:
+                try:
+                    if hasattr(sdl, "destroy"):
+                        await sdl.destroy()
+                    elif hasattr(sdl, "close"):
+                        sdl.close()
+                except Exception as exc:
+                    self.logger.debug("destroy sdl window: %s", exc)
+                context.sdl_window = None
+
+            cloud = getattr(context, "_cloud_stream_session", None) or getattr(
+                context, "xbox_session", None
+            )
+            if cloud and hasattr(cloud, "disconnect"):
+                try:
+                    await cloud.disconnect()
+                except Exception as exc:
+                    self.logger.debug("disconnect cloud session: %s", exc)
+
+            play_mgr = getattr(context, "_play_session_manager", None)
+            if play_mgr and hasattr(play_mgr, "close"):
+                try:
+                    await play_mgr.close()
+                except Exception as exc:
+                    self.logger.debug("close play session: %s", exc)
+
+        try:
+            await self._window_manager.destroy_by_task(task_id)
+        except Exception as exc:
+            self.logger.debug("destroy window manager entry: %s", exc)
 
     def get_task_status(self, task_id: str) -> Optional[str]:
         """
@@ -496,8 +671,11 @@ class AutomationScheduler:
 
     def get_all_task_ids(self) -> List[str]:
         """获取所有任务ID列表"""
-        with self._lock:
-            return list(self._task_contexts.keys())
+        return self._registry.list_active_task_ids()
+
+    async def handle_task_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Entry point for WS task_control messages."""
+        return await self._task_control.handle(data)
 
     async def stop_all_tasks(self):
         """停止所有任务"""
@@ -545,15 +723,23 @@ class AutomationScheduler:
                 token = encrypted_password[6:] if encrypted_password.startswith('token:') else encrypted_password
                 self.logger.info(f"流媒体账号正在兑换凭证令牌获取密码: {token[:8]}...")
 
-                if not self._platform_client:
-                    self.logger.error("无法进行令牌交换：没有API客户端")
-                    return None
+                exchanged = None
+                if self._platform_client:
+                    exchanged = await self._platform_client.exchange_credential_token(token)
 
-                encrypted_password = await self._platform_client.exchange_credential_token(token)
-                if not encrypted_password:
+                if exchanged:
+                    encrypted_password = exchanged
+                    self.logger.info("流媒体账号令牌兑换成功")
+                else:
+                    try:
+                        decrypted = decrypt_password(encrypted_password)
+                        if decrypted:
+                            self.logger.info("令牌兑换失败，使用直接AES解密成功")
+                            return decrypted
+                    except Exception:
+                        pass
                     self.logger.error("流媒体账号令牌兑换失败")
                     return None
-                self.logger.info("流媒体账号令牌兑换成功")
 
             # 如果是DISABLED格式，返回空（账号被禁用）
             if encrypted_password.startswith('DISABLED:'):
@@ -593,16 +779,23 @@ class AutomationScheduler:
                 token = password_token[6:] if password_token.startswith('token:') else password_token
                 self.logger.info(f"游戏账号 {gamertag} 正在兑换凭证令牌获取密码: {token[:8]}...")
 
-                if not self._platform_client:
-                    self.logger.error("无法进行令牌交换：没有API客户端")
-                    return None
+                exchanged = None
+                if self._platform_client:
+                    exchanged = await self._platform_client.exchange_credential_token(token)
 
-                encrypted_password = await self._platform_client.exchange_credential_token(token)
-                if not encrypted_password:
+                if exchanged:
+                    password_token = exchanged
+                    self.logger.info(f"游戏账号 {gamertag} 令牌兑换成功")
+                else:
+                    try:
+                        decrypted = decrypt_password(password_token)
+                        if decrypted:
+                            self.logger.info(f"游戏账号 {gamertag} 令牌兑换失败，使用直接AES解密成功")
+                            return decrypted
+                    except Exception:
+                        pass
                     self.logger.error(f"游戏账号 {gamertag} 令牌兑换失败")
                     return None
-                password_token = encrypted_password
-                self.logger.info(f"游戏账号 {gamertag} 令牌兑换成功")
 
             # 如果是DISABLED格式，返回空（账号被禁用）
             if password_token.startswith('DISABLED:'):

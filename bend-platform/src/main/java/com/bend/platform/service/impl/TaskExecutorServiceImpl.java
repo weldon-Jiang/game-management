@@ -113,7 +113,8 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
             loadControlService.incrementTaskCount(agentId, task.getId());
 
             statusService.createStatusRecords(
-                    task.getId(), selection.ids, selection.dailyLimits, task.getStreamingAccountId());
+                    task.getId(), selection.ids, selection.dailyLimits,
+                    task.getStreamingAccountId(), task.getSessionId());
 
             ObjectNode taskData = buildTaskData(task, selection);
             Map<String, Object> taskDataMap = objectMapper.convertValue(
@@ -220,8 +221,8 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
                 }
             }
 
-            AgentWebSocketEndpoint.sendCancelTaskToAgent(task.getTargetAgentId(), taskId);
-            log.info("任务已取消并通知Agent - TaskID: {}, AgentID: {}", taskId, task.getTargetAgentId());
+            log.info("任务已取消 - TaskID: {}, AgentID: {} (WS 由 TaskControl 下发)",
+                    taskId, task.getTargetAgentId());
         }
     }
 
@@ -230,8 +231,13 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
         taskData.put("taskId", task.getId());
         taskData.put("type", task.getType());
         taskData.put("streamingAccountId", task.getStreamingAccountId());
-        if (task.getGameActionType() != null && !task.getGameActionType().isEmpty()) {
+        if (Boolean.TRUE.equals(task.getGameActionPending())) {
+            taskData.put("phase", "streaming_only");
+        } else if (task.getGameActionType() != null && !task.getGameActionType().isEmpty()) {
             taskData.put("gameActionType", task.getGameActionType());
+        }
+        if (task.getSessionId() != null) {
+            taskData.put("sessionId", task.getSessionId());
         }
 
         com.fasterxml.jackson.databind.node.ArrayNode gameAccountList = objectMapper.createArrayNode();

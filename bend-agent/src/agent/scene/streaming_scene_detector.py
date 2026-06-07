@@ -121,6 +121,33 @@ class StreamingSceneDetector:
 
         return configs
 
+    def _load_template_from_streaming_dat(
+        self, scene_id: int, template_id: int
+    ) -> Optional[np.ndarray]:
+        """Fallback to streaming/data/templates.dat when PNG is unavailable."""
+        try:
+            from ..vision.template_manager import StreamingTemplateManager
+
+            streaming_dat = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+                "..", "..", "streaming", "data", "templates.dat"
+            )
+            streaming_dat = os.path.normpath(streaming_dat)
+            alt_dat = os.path.normpath(r"D:\auto-xbox\streaming\data\templates.dat")
+
+            manager = StreamingTemplateManager(template_dir=self.template_dir)
+            for dat_path in (streaming_dat, alt_dat):
+                if os.path.exists(dat_path):
+                    manager.load_serialized(os.path.basename(dat_path))
+                    manager.data_dir = os.path.dirname(dat_path)
+                    manager.load_serialized(os.path.basename(dat_path))
+                    template = manager.get_template(scene_id, template_id, use_serialized=True)
+                    if template is not None:
+                        return template
+        except Exception as exc:
+            self.logger.debug(f"templates.dat fallback failed: {exc}")
+        return None
+
     def _get_template_path(self, scene_id: int, template_id: int) -> str:
         """
         获取模板文件路径
@@ -155,6 +182,11 @@ class StreamingSceneDetector:
         template_path = self._get_template_path(scene_id, template_id)
 
         if not os.path.exists(template_path):
+            fallback = self._load_template_from_streaming_dat(scene_id, template_id)
+            if fallback is not None:
+                if self.cache_enabled:
+                    self._template_cache[cache_key] = fallback
+                return fallback
             self.logger.warning(f"模板文件不存在: {template_path}")
             return None
 
@@ -236,6 +268,18 @@ class StreamingSceneDetector:
         else:
             return self._recognize_all_scenes(frame, threshold)
 
+    def _normalize_frame(self, frame: np.ndarray, scene_id: int) -> np.ndarray:
+        """Resize frame to schema scene size (templates are authored at 960x540)."""
+        configs = self._scene_configs.get(scene_id)
+        if not configs:
+            return frame
+        target_w = int(configs[0]["scene_width"])
+        target_h = int(configs[0]["scene_height"])
+        h, w = frame.shape[:2]
+        if w == target_w and h == target_h:
+            return frame
+        return cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
     def _recognize_single_scene(
         self,
         frame: np.ndarray,
@@ -243,16 +287,10 @@ class StreamingSceneDetector:
         threshold: float
     ) -> SceneMatchResult:
         """
-        识别单个场景
-
-        参数说明：
-        - frame: 当前帧图像
-        - scene_id: 场景ID
-        - threshold: 相似度阈值
-
-        返回值：
-        - SceneMatchResult: 匹配结果
+        识别单个场景（按 search_id 分组，对齐 streaming/xsrpst.py）
         """
+        frame = self._normalize_frame(frame, scene_id)
+
         if scene_id not in self._scene_configs:
             self.logger.warning(f"场景ID不存在: {scene_id}")
             return SceneMatchResult(
@@ -263,67 +301,86 @@ class StreamingSceneDetector:
             )
 
         configs = self._scene_configs[scene_id]
-        template_results = []
-        all_matched = True
-        total_similarity = 0.0
-
+        search_groups: Dict[int, List[Dict]] = {}
         for config in configs:
-            template_id = int(config['template_id'])
+            search_id = int(config['search_id'])
+            search_groups.setdefault(search_id, []).append(config)
 
-            template = self._load_template(scene_id, template_id)
-            if template is None:
-                all_matched = False
-                template_results.append({
+        best_confidence = 0.0
+        best_template_results: List[Dict] = []
+        scene_matched = False
+
+        for search_id, group_configs in search_groups.items():
+            templates_in_group: Dict[int, List[Dict]] = {}
+            for config in group_configs:
+                templates_in_group.setdefault(int(config['template_id']), []).append(config)
+
+            group_results = []
+            likeness_values = []
+            group_matched = True
+
+            for template_id, template_configs in templates_in_group.items():
+                template = self._load_template(scene_id, template_id)
+                if template is None:
+                    group_matched = False
+                    group_results.append({
+                        'template_id': template_id,
+                        'search_id': search_id,
+                        'matched': False,
+                        'similarity': 0.0,
+                    })
+                    continue
+
+                template_matched = False
+                best_similarity = 0.0
+                for config in template_configs:
+                    search_region = frame[
+                        int(config['search_top']):int(config['search_bottom']),
+                        int(config['search_left']):int(config['search_right']),
+                    ]
+                    if search_region.size == 0:
+                        continue
+
+                    # 对齐 streaming/xsrpst.py：默认使用 schema 相似度；仅 Xbox 系统 UI(<=64) 允许运行时降低阈值
+                    schema_threshold = float(config['likeness']) / 100.0
+                    if threshold < schema_threshold and scene_id <= 64:
+                        match_threshold = threshold
+                    else:
+                        match_threshold = schema_threshold
+                    matched, similarity = self._match_single_template(
+                        search_region,
+                        template,
+                        int(config['algorithm']),
+                        match_threshold,
+                    )
+                    if matched:
+                        template_matched = True
+                        best_similarity = max(best_similarity, similarity)
+
+                if not template_matched:
+                    group_matched = False
+                else:
+                    likeness_values.append(best_similarity)
+
+                group_results.append({
                     'template_id': template_id,
-                    'matched': False,
-                    'similarity': 0.0
+                    'search_id': search_id,
+                    'matched': template_matched,
+                    'similarity': best_similarity,
                 })
-                continue
 
-            search_left = int(config['search_left'])
-            search_top = int(config['search_top'])
-            search_right = int(config['search_right'])
-            search_bottom = int(config['search_bottom'])
-
-            search_region = frame[
-                search_top:search_bottom,
-                search_left:search_right
-            ]
-
-            if search_region.size == 0:
-                all_matched = False
-                template_results.append({
-                    'template_id': template_id,
-                    'matched': False,
-                    'similarity': 0.0
-                })
-                continue
-
-            likeness = float(config['likeness']) / 100.0
-            algorithm_id = int(config['algorithm'])
-
-            matched, similarity = self._match_single_template(
-                search_region, template, algorithm_id, likeness
-            )
-
-            template_results.append({
-                'template_id': template_id,
-                'matched': matched,
-                'similarity': similarity
-            })
-
-            if not matched:
-                all_matched = False
-            else:
-                total_similarity += similarity
-
-        avg_similarity = total_similarity / len(template_results) if template_results else 0.0
+            if group_matched and likeness_values:
+                scene_matched = True
+                avg_confidence = sum(likeness_values) / len(likeness_values)
+                if avg_confidence >= best_confidence:
+                    best_confidence = avg_confidence
+                    best_template_results = group_results
 
         return SceneMatchResult(
             scene_id=scene_id,
-            matched=all_matched,
-            confidence=avg_similarity,
-            template_results=template_results
+            matched=scene_matched,
+            confidence=best_confidence,
+            template_results=best_template_results,
         )
 
     def _recognize_all_scenes(

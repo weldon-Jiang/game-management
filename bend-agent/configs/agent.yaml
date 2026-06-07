@@ -48,6 +48,15 @@ template:
   cache_enabled: true
 
 # ----------------------------------------------
+# FC Server 远程场景识别（可选，对齐 streaming 生产路径）
+# ----------------------------------------------
+fc_server:
+  enabled: false
+  host: "127.0.0.1"
+  port: 8080
+  prefer_remote_scene: false
+
+# ----------------------------------------------
 # 场景检测配置
 # ----------------------------------------------
 scene:
@@ -75,12 +84,30 @@ automation:
 # ----------------------------------------------
 auth:
   device_code_timeout: 300   # 设备码认证总超时（秒），默认 5 分钟
+  xhome_token_ttl_sec: 14340
+  xsts_token_ttl_sec: 57540
+  prefetch_console_discovery: true
+
+discovery:
+  cache_ttl_sec: 60
+  ssdp_enrich_enabled: false
+  wakeup_timeout_sec: 30
+  smartglass_wake_fallback: true
+
+xhome_stream:
+  connection_timeout_sec: 30
+  enable_teredo_ice_rewrite: true
+  default_play_path: v5/sessions/home/play
+
+vision:
+  decode_mode: auto
 
 # ----------------------------------------------
 # 任务执行器配置（高并发支持）
 # ----------------------------------------------
 task:
-  max_concurrent: 100
+  max_concurrent: 10
+  max_concurrent_gpu: 3
   max_xbox_sessions: 100
   result_ttl: 3600
   cleanup_interval: 300
@@ -102,3 +129,5 @@ window:
   default_height: 720
   min_width: 800
   min_height: 600
+  fit_aspect: true
+  close_terminates_task: true

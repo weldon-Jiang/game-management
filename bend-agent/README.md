@@ -109,8 +109,17 @@ bend-agent/
 ### 1. 安装依赖
 
 ```bash
+# 推荐：使用安装脚本（PyPI 失败时自动切换阿里云镜像）
+scripts\install-deps.bat
+
+# 或手动安装
 pip install -r requirements.txt
 ```
+
+云端串流相关依赖（已包含在 `requirements.txt`）：
+- `aiortc` — WebRTC 媒体连接
+- `av` — 视频帧解码
+- `compress-pickle` — 模板 `templates.dat` 加载
 
 ### 2. 配置 Agent
 

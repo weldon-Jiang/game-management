@@ -121,6 +121,11 @@ class KeyboardMapper:
 
         self._bindings = self.DEFAULT_BINDINGS.copy()
         self.logger.info("使用默认按键绑定")
+        self._on_window_close: Optional[Callable[[], None]] = None
+
+    def set_window_close_handler(self, handler: Optional[Callable[[], None]]) -> None:
+        """Called when user clicks the SDL window close button (hide, not quit)."""
+        self._on_window_close = handler
 
     def register_action_callback(self, callback: Callable[[KeyAction, bool], None]):
         """
@@ -138,8 +143,10 @@ class KeyboardMapper:
 
         try:
             pygame.init()
-            pygame.display.set_mode((100, 100))
-        except:
+            # Reuse the SDL stream window if step3 already created one.
+            if pygame.display.get_surface() is None:
+                pygame.display.set_mode((1, 1), pygame.NOFRAME)
+        except Exception:
             pass
 
         self._running = True
@@ -151,6 +158,13 @@ class KeyboardMapper:
         while self._running:
             try:
                 for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        if self._on_window_close:
+                            try:
+                                self._on_window_close()
+                            except Exception as exc:
+                                self.logger.warning("窗口关闭回调失败: %s", exc)
+                        continue
                     if event.type == pygame.KEYDOWN:
                         key_name = pygame.key.name(event.key)
                         if key_name not in self._pressed_keys:
@@ -211,7 +225,7 @@ class KeyboardMapper:
             except asyncio.CancelledError:
                 pass
 
-        pygame.display.quit()
+        # Do not call pygame.display.quit(); it would destroy the SDL stream window.
         self.logger.info("键盘映射已停止")
 
     def map_key_to_action(self, key: str) -> Optional[KeyAction]:

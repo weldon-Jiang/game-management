@@ -44,6 +44,19 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="positionIndex" label="档案位置" width="90" align="center">
+          <template #default="{ row }">
+            <span v-if="row.positionIndex != null && row.positionIndex >= 0">{{ row.positionIndex }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="profileBound" label="档案绑定" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.profileBound ? 'success' : 'info'" size="small">
+              {{ row.profileBound ? '已绑定' : '未绑定' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="totalMatchCount" label="总场次" width="80" align="center">
           <template #default="{ row }">
             {{ row.totalMatchCount ?? 0 }}
@@ -155,6 +168,18 @@
               :value="item.code"
             />
           </el-select>
+        </el-form-item>
+        <el-form-item label="档案位置" prop="positionIndex">
+          <el-input-number
+            v-model="formData.positionIndex"
+            :min="-1"
+            :max="10"
+            placeholder="Xbox 档案槽位，-1 表示未设置"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="档案绑定" prop="profileBound">
+          <el-switch v-model="formData.profileBound" active-text="已绑定" inactive-text="未绑定" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -307,7 +332,9 @@ const formData = reactive({
   gameName: '',
   email: '',
   password: '',
-  platform: 'xbox'
+  platform: 'xbox',
+  positionIndex: -1,
+  profileBound: false
 })
 
 /**
@@ -361,6 +388,8 @@ const showAddDialog = async () => {
   formData.email = ''
   formData.password = ''
   formData.platform = 'xbox'
+  formData.positionIndex = -1
+  formData.profileBound = false
   passwordVisible.value = false
   passwordLoaded.value = false
   if (authStore.isPlatformAdmin && merchantList.value.length === 0) {
@@ -381,6 +410,8 @@ const showEditDialog = async (row) => {
   formData.email = row.email
   formData.password = ''
   formData.platform = row.platform || 'xbox'
+  formData.positionIndex = row.positionIndex ?? -1
+  formData.profileBound = !!row.profileBound
   passwordVisible.value = false
   passwordLoaded.value = false
 
@@ -448,9 +479,12 @@ const handleSubmit = async () => {
     } else {
       const updateData = {
         merchantId: formData.merchantId,
+        gameName: formData.gameName,
         email: formData.email,
         password: formData.password || undefined,
-        platform: formData.platform
+        platform: formData.platform,
+        positionIndex: formData.positionIndex,
+        profileBound: formData.profileBound
       }
       await gameAccountApi.update(formData.id, updateData)
       ElMessage.success('更新成功')
@@ -778,6 +812,10 @@ onMounted(() => {
 
 .import-result {
   margin-top: 20px;
+}
+
+.text-muted {
+  color: #909399;
 }
 
 .error-item {

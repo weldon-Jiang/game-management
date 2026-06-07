@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS `game_account` (
     `is_primary` TINYINT(1) DEFAULT 0 COMMENT '是否为主账号',
     `is_active` TINYINT(1) DEFAULT 1 COMMENT '是否激活',
     `priority` INT DEFAULT 0 COMMENT '使用优先级',
+    `position_index` INT DEFAULT NULL COMMENT 'Xbox「您是谁」列表位置，0=最上方',
+    `profile_bound` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '档案已在Xbox主机绑定',
     `daily_match_limit` INT DEFAULT 3 COMMENT '每日比赛限制场次',
     `today_match_count` INT DEFAULT 0 COMMENT '今日已完成场次',
     `total_match_count` INT DEFAULT 0 COMMENT '总比赛场次',
@@ -162,6 +164,7 @@ CREATE TABLE IF NOT EXISTS `agent_version` (
 CREATE TABLE IF NOT EXISTS `agent_instance` (
     `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
     `agent_id` VARCHAR(64) NOT NULL COMMENT 'Agent唯一标识符',
+    `agent_name` VARCHAR(64) DEFAULT NULL COMMENT 'Agent显示名称',
     `agent_secret` VARCHAR(255) DEFAULT NULL COMMENT 'Agent密钥',
     `merchant_id` VARCHAR(64) DEFAULT NULL COMMENT '所属商户ID',
     `registration_code` VARCHAR(64) DEFAULT NULL COMMENT '注册码',
@@ -181,6 +184,7 @@ CREATE TABLE IF NOT EXISTS `agent_instance` (
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_agent_id` (`agent_id`),
+    UNIQUE KEY `uk_merchant_agent_name` (`merchant_id`, `agent_name`),
     KEY `idx_merchant_id` (`merchant_id`),
     KEY `idx_status` (`status`),
     KEY `idx_deleted` (`deleted`)
@@ -200,9 +204,14 @@ CREATE TABLE IF NOT EXISTS `task` (
     `game_action_type` VARCHAR(50) DEFAULT 'daily_match' COMMENT '游戏操作类型 daily_match-每日比赛 training-训练模式 mission-任务挑战 custom-自定义操作',
     `target_agent_id` VARCHAR(64) DEFAULT NULL COMMENT '目标Agent ID',
     `streaming_account_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的流媒体账号ID',
+    `session_id` VARCHAR(64) DEFAULT NULL COMMENT '串流会话ID',
+    `session_phase` VARCHAR(32) DEFAULT NULL COMMENT '会话阶段快照',
+    `game_action_pending` TINYINT(1) DEFAULT 0 COMMENT '等待选手动化类型',
+    `pause_mode` VARCHAR(32) DEFAULT NULL COMMENT '暂停模式',
+    `window_visible` TINYINT(1) DEFAULT 1 COMMENT '窗口可见快照',
     `game_account_id` VARCHAR(64) DEFAULT NULL COMMENT '关联的游戏账号ID',
     `xbox_host_id` VARCHAR(36) DEFAULT NULL COMMENT '使用的Xbox主机ID',
-    `status` VARCHAR(16) DEFAULT 'pending' COMMENT '状态：pending-待执行,running-执行中,completed-已完成,failed-失败,cancelled-已取消',
+    `status` VARCHAR(16) DEFAULT 'pending' COMMENT '状态：pending-待执行,running-执行中,paused-已暂停,completed-已完成,failed-失败,cancelled-已取消,stopped-已停止',
     `priority` INT DEFAULT 0 COMMENT '优先级',
     `params` TEXT DEFAULT NULL COMMENT '任务参数JSON',
     `result` TEXT DEFAULT NULL COMMENT '任务结果JSON',
@@ -230,6 +239,58 @@ CREATE TABLE IF NOT EXISTS `task` (
     KEY `idx_created_time` (`created_time`),
     KEY `idx_deleted` (`deleted`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务表';
+
+-- ---------------------------------------------
+-- 串流会话表
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS `streaming_session` (
+    `id` VARCHAR(64) NOT NULL COMMENT '会话ID',
+    `task_id` VARCHAR(64) NOT NULL COMMENT '关联任务ID',
+    `merchant_id` VARCHAR(64) NOT NULL COMMENT '商户ID',
+    `streaming_account_id` VARCHAR(64) NOT NULL COMMENT '串流账号ID',
+    `xbox_host_id` VARCHAR(36) DEFAULT NULL COMMENT '平台主机ID',
+    `console_server_id` VARCHAR(64) DEFAULT NULL COMMENT 'GSSV serverId',
+    `target_agent_id` VARCHAR(64) DEFAULT NULL COMMENT '执行Agent',
+    `phase` VARCHAR(32) DEFAULT 'opening' COMMENT '会话阶段',
+    `input_mode` VARCHAR(16) DEFAULT 'virtual' COMMENT 'physical/virtual',
+    `decode_mode` VARCHAR(16) DEFAULT 'auto' COMMENT 'gpu/cpu/auto',
+    `power_state` VARCHAR(32) DEFAULT NULL COMMENT '电源状态',
+    `game_action_type` VARCHAR(50) DEFAULT NULL COMMENT '就绪后选择的自动化类型',
+    `game_action_locked_at` DATETIME DEFAULT NULL COMMENT '开始自动化时间',
+    `error_code` VARCHAR(64) DEFAULT NULL,
+    `error_message` VARCHAR(512) DEFAULT NULL,
+    `started_time` DATETIME DEFAULT NULL,
+    `ready_time` DATETIME DEFAULT NULL,
+    `closed_time` DATETIME DEFAULT NULL,
+    `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_streaming_account` (`streaming_account_id`),
+    KEY `idx_task_id` (`task_id`),
+    KEY `idx_phase` (`phase`),
+    KEY `idx_agent` (`target_agent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='串流会话表';
+
+-- ---------------------------------------------
+-- 任务事件时间线
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS `task_event` (
+    `id` VARCHAR(64) NOT NULL COMMENT '事件ID',
+    `task_id` VARCHAR(64) NOT NULL COMMENT '任务ID',
+    `merchant_id` VARCHAR(64) DEFAULT NULL COMMENT '商户ID',
+    `scope` VARCHAR(32) DEFAULT 'task' COMMENT 'task/session/game_account/module',
+    `phase` VARCHAR(64) DEFAULT NULL COMMENT '阶段',
+    `status` VARCHAR(32) DEFAULT NULL COMMENT '状态',
+    `message` VARCHAR(512) DEFAULT NULL COMMENT '消息',
+    `game_account_id` VARCHAR(64) DEFAULT NULL COMMENT '游戏账号ID',
+    `module` VARCHAR(64) DEFAULT NULL COMMENT '模块名',
+    `payload` JSON DEFAULT NULL COMMENT '扩展数据',
+    `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_task_id` (`task_id`),
+    KEY `idx_scope` (`scope`),
+    KEY `idx_created_time` (`created_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务事件时间线';
 
 -- ---------------------------------------------
 -- 激活码批次表
@@ -490,7 +551,17 @@ CREATE TABLE IF NOT EXISTS `task_game_account_status` (
     `task_id` VARCHAR(64) NOT NULL COMMENT '任务ID',
     `game_account_id` VARCHAR(64) NOT NULL COMMENT '游戏账号ID',
     `streaming_account_id` VARCHAR(64) DEFAULT NULL COMMENT '流媒体账号ID',
+    `session_id` VARCHAR(64) DEFAULT NULL COMMENT '串流会话ID',
     `status` VARCHAR(20) DEFAULT 'pending' COMMENT '状态：pending-待执行,running-执行中,completed-已完成,failed-失败,cancelled-已取消,skipped-跳过,game_preparing-游戏准备,gaming-游戏中',
+    `phase` VARCHAR(32) DEFAULT 'pending' COMMENT '执行阶段',
+    `game_action_type` VARCHAR(50) DEFAULT NULL,
+    `match_index` INT DEFAULT 0,
+    `match_total` INT DEFAULT 0,
+    `provisioning_phase` VARCHAR(32) DEFAULT NULL,
+    `provisioning_step` INT DEFAULT NULL,
+    `provisioning_step_total` INT DEFAULT NULL,
+    `provisioning_message` VARCHAR(512) DEFAULT NULL,
+    `active_module` VARCHAR(64) DEFAULT NULL,
     `completed_count` INT DEFAULT 0 COMMENT '已完成场次',
     `failed_count` INT DEFAULT 0 COMMENT '失败场次',
     `total_matches` INT DEFAULT 0 COMMENT '总场次',

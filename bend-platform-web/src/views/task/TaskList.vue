@@ -10,6 +10,54 @@
     <div class="content-card">
       <div class="toolbar">
         <el-select
+          v-if="authStore.isPlatformAdmin"
+          v-model="filterMerchantId"
+          placeholder="商户筛选"
+          style="width: 160px"
+          clearable
+          filterable
+          @change="handleMerchantChange"
+        >
+          <el-option
+            v-for="merchant in merchantList"
+            :key="merchant.id"
+            :label="merchant.name"
+            :value="merchant.id"
+          />
+        </el-select>
+        <el-select
+          v-model="filterAgentId"
+          placeholder="Agent筛选"
+          style="width: 220px"
+          clearable
+          filterable
+          :disabled="authStore.isPlatformAdmin && !filterMerchantId"
+          @change="handleSearch"
+        >
+          <el-option
+            v-for="agent in agentOptions"
+            :key="agent.agentId"
+            :label="formatAgentLabel(agent)"
+            :value="agent.agentId"
+          />
+        </el-select>
+        <el-select
+          v-model="filterStreamingAccountId"
+          placeholder="串流账号筛选"
+          style="width: 200px"
+          clearable
+          filterable
+          :disabled="authStore.isPlatformAdmin && !filterMerchantId"
+          @change="handleSearch"
+        >
+          <el-option
+            v-for="account in streamingAccountOptions"
+            :key="account.id"
+            :label="formatStreamingLabel(account)"
+            :value="account.id"
+          />
+        </el-select>
+        <el-select
           v-model="filterStatus"
           placeholder="状态筛选"
           style="width: 140px"
@@ -19,24 +67,11 @@
           <el-option label="全部" value="" />
           <el-option label="待执行" value="pending" />
           <el-option label="执行中" value="running" />
+          <el-option label="已暂停" value="paused" />
           <el-option label="已完成" value="completed" />
           <el-option label="已失败" value="failed" />
           <el-option label="已取消" value="cancelled" />
-        </el-select>
-        <el-select
-          v-model="filterType"
-          placeholder="类型筛选"
-          style="width: 140px"
-          clearable
-          @change="handleSearch"
-        >
-          <el-option label="全部" value="" />
-          <el-option label="模板匹配" value="template_match" />
-          <el-option label="输入序列" value="input_sequence" />
-          <el-option label="场景检测" value="scene_detection" />
-          <el-option label="账号切换" value="account_switch" />
-          <el-option label="串流控制" value="stream_control" />
-          <el-option label="自动化任务" value="automation" />
+          <el-option label="已停止" value="stopped" />
         </el-select>
         <el-button @click="handleSearch">
           <el-icon><Refresh /></el-icon>
@@ -50,20 +85,36 @@
           class="data-table"
           scrollbar-always-on
         >
-        <el-table-column prop="name" label="任务名称" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="gameActionType" label="游戏操作" width="120" align="center" show-overflow-tooltip>
+        <el-table-column prop="streamingAccountName" label="串流账号" width="108" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag size="small" type="info">{{ getGameActionTypeText(row.gameActionType) }}</el-tag>
+            {{ row.streamingAccountName || row.streamingAccountId || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column prop="name" label="任务名称" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="status" label="状态" width="88" align="center">
           <template #default="{ row }">
             <el-tag :type="getTaskStatusType(row.status)" size="small">
               {{ getTaskStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="游戏账号进度" width="140" align="center" show-overflow-tooltip>
+        <el-table-column prop="gameActionType" label="游戏操作" width="96" align="center" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tag v-if="row.gameActionType" size="small" type="info">
+              {{ getGameActionTypeText(row.gameActionType) }}
+            </el-tag>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="sessionPhase" label="会话阶段" width="132" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.sessionPhase" size="small" :type="getSessionPhaseType(row.sessionPhase)">
+              {{ getSessionPhaseText(row.sessionPhase) }}
+            </el-tag>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="账号进度" width="88" align="center" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.result && row.result.includes('/')">
               {{ row.result }}
@@ -71,41 +122,28 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="targetAgentId" label="执行Agent" width="300">
+        <el-table-column prop="targetAgentId" label="执行Agent" width="120" show-overflow-tooltip>
           <template #default="{ row }">
-            <span v-if="row.targetAgentId" class="agent-id-text">{{ row.targetAgentId }}</span>
+            <span v-if="row.targetAgentId">{{ row.targetAgentName || row.targetAgentId }}</span>
             <span v-else class="text-muted">未分配</span>
           </template>
         </el-table-column>
-        <el-table-column prop="priority" label="优先级" width="80" align="center">
-          <template #default="{ row }">
-            <span :class="'priority-' + row.priority">{{ row.priority }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="result" label="结果" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span v-if="row.result" class="text-muted">{{ row.result }}</span>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="errorMessage" label="错误信息" min-width="200" show-overflow-tooltip>
+        <el-table-column prop="errorMessage" label="错误信息" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.errorMessage" class="text-danger">{{ row.errorMessage }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdTime" label="创建时间" width="170" show-overflow-tooltip>
+        <el-table-column prop="createdTime" label="创建时间" width="168" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.createdTime ? formatDate(row.createdTime) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="assignedTime" label="分配时间" width="170" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.assignedTime ? formatDate(row.assignedTime) : '-' }}
-          </template>
-        </el-table-column>
         <el-table-column label="操作" width="200" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="goDetail(row)">
+              详情
+            </el-button>
             <el-button
               v-if="row.status === 'pending'"
               type="primary"
@@ -245,7 +283,7 @@
             <el-option
               v-for="agent in onlineAgents"
               :key="agent.agentId"
-              :label="agent.agentId.substring(0, 8) + '... - ' + (agent.merchantName || '未知商户')"
+              :label="getAgentDisplayName(agent)"
               :value="agent.agentId"
             />
           </el-select>
@@ -260,17 +298,39 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, nextTick } from 'vue'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { ref, reactive, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { taskApi, agentApi } from '@/api'
-import { getTaskTypeText, getTaskStatusText, getTaskStatusType, getGameActionTypeText } from '@/utils/constants'
+import { taskApi, agentApi, streamingApi, merchantApi } from '@/api'
+import { useAuthStore } from '@/stores/auth'
+import {
+  getAgentDisplayName,
+  getTaskStatusText,
+  getTaskStatusType,
+  getGameActionTypeText,
+  getSessionPhaseText,
+  getSessionPhaseType
+} from '@/utils/constants'
 
+const router = useRouter()
+const route = useRoute()
+const authStore = useAuthStore()
+
+const goDetail = (row) => {
+  router.push(`/tasks/${row.id}`)
+}
+
+const filterMerchantId = ref('')
+const filterAgentId = ref('')
+const filterStreamingAccountId = ref('')
 const filterStatus = ref('')
-const filterType = ref('')
 const loading = ref(false)
 const tableData = ref([])
 const onlineAgents = ref([])
+const agentOptions = ref([])
+const streamingAccountOptions = ref([])
+const merchantList = ref([])
 
 const pagination = reactive({
   pageNum: 1,
@@ -305,6 +365,31 @@ const formatDate = (dateStr) => {
   })
 }
 
+const formatAgentLabel = (agent) => getAgentDisplayName(agent)
+
+const formatStreamingLabel = (account) => {
+  const name = account.name || account.email || account.id
+  if (authStore.isPlatformAdmin && account.merchantName) {
+    return `${name} - ${account.merchantName}`
+  }
+  return name
+}
+
+const getMerchantScope = () => {
+  if (authStore.isPlatformAdmin) {
+    return filterMerchantId.value || undefined
+  }
+  return authStore.merchantId
+}
+
+const handleMerchantChange = async () => {
+  filterAgentId.value = ''
+  filterStreamingAccountId.value = ''
+  await loadFilterOptions()
+  await loadOnlineAgents()
+  handleSearch()
+}
+
 const handleSearch = () => {
   pagination.pageNum = 1
   loadData()
@@ -317,11 +402,18 @@ const loadData = async () => {
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize
     }
+    const merchantId = getMerchantScope()
+    if (merchantId) {
+      params.merchantId = merchantId
+    }
     if (filterStatus.value) {
       params.status = filterStatus.value
     }
-    if (filterType.value) {
-      params.type = filterType.value
+    if (filterAgentId.value) {
+      params.targetAgentId = filterAgentId.value
+    }
+    if (filterStreamingAccountId.value) {
+      params.streamingAccountId = filterStreamingAccountId.value
     }
     const res = await taskApi.list(params)
     if (res.code === 0 || res.code === 200) {
@@ -335,14 +427,80 @@ const loadData = async () => {
   }
 }
 
+const loadMerchants = async () => {
+  if (!authStore.isPlatformAdmin) return
+  try {
+    const res = await merchantApi.listAll()
+    if (res.code === 0 || res.code === 200) {
+      merchantList.value = res.data || []
+    }
+  } catch (error) {
+    console.error('Failed to load merchants:', error)
+  }
+}
+
+const loadFilterOptions = async () => {
+  const merchantId = getMerchantScope()
+  if (authStore.isPlatformAdmin && !merchantId) {
+    agentOptions.value = []
+    streamingAccountOptions.value = []
+    return
+  }
+
+  const params = { pageSize: 100 }
+  if (merchantId) {
+    params.merchantId = merchantId
+  }
+
+  try {
+    const [agentRes, streamingRes] = await Promise.all([
+      agentApi.list(params),
+      streamingApi.list(params)
+    ])
+    if (agentRes.code === 0 || agentRes.code === 200) {
+      agentOptions.value = agentRes.data?.records || []
+    }
+    if (streamingRes.code === 0 || streamingRes.code === 200) {
+      streamingAccountOptions.value = streamingRes.data?.records || []
+    }
+  } catch (error) {
+    console.error('Failed to load filter options:', error)
+  }
+}
+
 const loadOnlineAgents = async () => {
   try {
-    const res = await agentApi.list({ status: 'online', pageSize: 100 })
+    const params = { status: 'online', pageSize: 100 }
+    const merchantId = getMerchantScope()
+    if (merchantId) {
+      params.merchantId = merchantId
+    }
+    const res = await agentApi.list(params)
     if (res.code === 0 || res.code === 200) {
       onlineAgents.value = res.data?.records || []
     }
   } catch (error) {
     console.error('Failed to load online agents:', error)
+  }
+}
+
+const initFromRoute = async () => {
+  if (route.query.status) {
+    filterStatus.value = route.query.status
+  }
+
+  if (route.query.agentId) {
+    filterAgentId.value = route.query.agentId
+    if (authStore.isPlatformAdmin) {
+      try {
+        const res = await agentApi.getById(route.query.agentId)
+        if ((res.code === 0 || res.code === 200) && res.data?.merchantId) {
+          filterMerchantId.value = res.data.merchantId
+        }
+      } catch (error) {
+        console.error('Failed to resolve agent merchant:', error)
+      }
+    }
   }
 }
 
@@ -393,9 +551,10 @@ const handleCreate = async () => {
   }
 }
 
-const showAssignDialog = (task) => {
+const showAssignDialog = async (task) => {
   currentTask.value = task
   selectedAgentId.value = ''
+  await loadOnlineAgents()
   assignDialogVisible.value = true
 }
 
@@ -495,7 +654,10 @@ const handleDelete = async (task) => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadMerchants()
+  await initFromRoute()
+  await loadFilterOptions()
   loadData()
   loadOnlineAgents()
 })
@@ -534,6 +696,7 @@ onMounted(() => {
   display: flex;
   gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 :deep(.el-table) {
@@ -575,6 +738,10 @@ onMounted(() => {
 .text-muted {
   color: #6b7280;
   font-size: 12px;
+}
+
+.text-danger {
+  color: #f56c6c;
 }
 
 .agent-id-text {

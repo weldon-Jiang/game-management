@@ -3,65 +3,36 @@ Xbox 主机智能匹配器
 ==================
 
 功能说明：
-- 通过云端 API 获取流媒体账号授权的 Xbox 主机列表
-- 发现局域网内的 Xbox 主机
-- 智能匹配云端授权列表和本地在线主机
-- 自动唤醒待机的 Xbox 主机
+- 通过云端 API 获取流媒体账号授权的 Xbox 主机列表（对齐 streaming/xsplayer.py）
+- 自动唤醒待机的 Xbox 主机（云端 Power API）
 - 优先选择已开机的 Xbox
 
-匹配策略：
-1. 账号授权 + 本地在线 + 已开机 → 最高优先级，直接连接
-2. 账号授权 + 本地在线 + 待唤醒 → 次高优先级，自动唤醒
-3. 账号授权 + 本地离线 → 低优先级，尝试唤醒
-4. 未授权的 Xbox → 不使用
+匹配策略（v4.0 streaming 风格）：
+1. 仅通过 GET /v6/servers/home 获取云端授权列表（必须存在）
+2. 指定主机：校验云端授权 → 占用检测 → 唤醒
+3. 自动匹配：从云端列表按电源状态筛选，过滤占用后随机选择
+4. 不依赖局域网 SSDP / SmartGlass
 
 唤醒策略：
-- 优先使用 Xbox Live API 唤醒
-- 备用 SmartGlass 协议唤醒
+- 使用 Xbox Live 云端 Power API
 - 等待 30 秒确认开机成功
 - 最多重试 2 次
 
 作者：技术团队
-版本：3.0
-
-版本历史：
-- 2.0: 集成 PlaySession 管理和 SDP 握手功能
-- 3.0: 优化 Xbox 发现逻辑（云端授权必须存在 + 局域网在线必须存在 + 随机选择）
+版本：4.0
 """
 
 import asyncio
-import json
 import random
-import time
-from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Awaitable, Callable, List, Optional, Dict, Any
 from dataclasses import dataclass, field
 from enum import Enum
-import socket
 
 import aiohttp
 
 from ..core.logger import get_logger
+from ..gssv.base_uri import DEFAULT_GSSV_BASE_URI, normalize_gssv_base_uri
 from .xbox_discovery import XboxDiscovery, XboxInfo as DiscoveredXboxInfo
-
-
-def _write_debug_log(hypothesis_id: str, location: str, message: str, data: Dict[str, Any]) -> None:
-    """Write debug-mode NDJSON logs for session ba0362."""
-    try:
-        cwd = Path.cwd().resolve()
-        log_path = cwd.parent / "debug-ba0362.log" if cwd.name == "bend-agent" else cwd / "debug-ba0362.log"
-        payload = {
-            "sessionId": "ba0362",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with log_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
 
 
 class XboxMatchPriority(Enum):
@@ -74,16 +45,12 @@ class XboxMatchPriority(Enum):
 
 @dataclass
 class XboxInfo:
-    """Xbox 主机信息
-    
-    兼容 task_context.XboxInfo 和 XboxHostMatcher 使用的扩展字段
-    """
-    id: str = ""  # Xbox主机唯一标识（兼容 task_context.XboxInfo）
+    """Xbox 主机信息（兼容 task_context.XboxInfo 扩展字段）"""
+    id: str = ""
     name: str = ""
     ip_address: str = ""
     live_id: str = ""
     mac_address: str = ""
-    # 扩展字段（XboxHostMatcher 专用）
     device_id: str = ""
     port: int = 5050
     power_state: str = "Unknown"
@@ -118,34 +85,38 @@ class XboxWakeupResult:
 
 class XboxHostMatcher:
     """
-    Xbox 主机智能匹配器
-    
-    功能：
-    1. 获取云端授权的 Xbox 主机列表
-    2. 发现本地在线的 Xbox 主机
-    3. 智能匹配并返回最优选择
-    4. 自动唤醒待机的 Xbox 主机
-    
+    Xbox 主机智能匹配器（云端单路径，参考 streaming xsplayer.py）
+
     使用方式：
     matcher = XboxHostMatcher(gs_token)
     match_result = await matcher.find_best_match(wakeup=True)
     """
-    
+
     WAKUP_MAX_RETRIES = 2
     WAKUP_WAIT_SECONDS = 30
     WAKUP_CHECK_INTERVAL = 3
-    
-    def __init__(self, gs_token: str):
+    DEFAULT_PLAY_PATH = "v5/sessions/home/play"
+    STANDBY_POWER_STATES = frozenset({"Standby", "ConnectedStandby", "Off"})
+
+    def __init__(self, gs_token: str, gssv_base_uri: Optional[str] = None):
         self.logger = get_logger('xbox_matcher')
         self._gs_token = gs_token
-        
+        self._gssv_base_uri = normalize_gssv_base_uri(gssv_base_uri)
         self._authorized_xboxes: List[XboxInfo] = []
         self._local_xboxes: Dict[str, XboxInfo] = {}
-    
+
+    @staticmethod
+    def _is_powered_on(power_state: str) -> bool:
+        return (power_state or "").strip() == "On"
+
+    @classmethod
+    def _can_wakeup(cls, power_state: str) -> bool:
+        return (power_state or "").strip() in cls.STANDBY_POWER_STATES
+
     async def discover_authorized_xboxes(self) -> List[XboxInfo]:
         """通过云端 API 获取账号授权的 Xbox 主机列表"""
         self.logger.info("正在获取云端授权的 Xbox 主机列表...")
-        
+
         try:
             headers = {
                 'Authorization': f'Bearer {self._gs_token}',
@@ -153,100 +124,85 @@ class XboxHostMatcher:
                 'Accept': 'application/json',
                 'x-xbl-contract-version': '1'
             }
-            
-            url = "https://uks.core.gssv-play-prodxhome.xboxlive.com/v6/servers/home"
-            
+
+            url = f"{self._gssv_base_uri}/v6/servers/home"
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    url, 
-                    headers=headers, 
+                    url,
+                    headers=headers,
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         results = data.get('results', [])
-                        
+
                         self._authorized_xboxes = []
                         for server in results:
                             server_id = server.get('serverId', '')
+                            play_path = server.get('playPath', '') or self.DEFAULT_PLAY_PATH
                             xbox_info = XboxInfo(
-                                id=server_id,  # 兼容 task_context.XboxInfo
-                                device_id=server_id,  # XboxHostMatcher 专用
+                                id=server_id,
+                                device_id=server_id,
                                 name=server.get('deviceName', 'Xbox'),
                                 ip_address="",
                                 port=5050,
-                                live_id=server_id,
+                                live_id=server.get('liveId', '') or server_id,
                                 power_state=server.get('powerState', 'Unknown'),
                                 console_type=server.get('consoleType', 'Unknown'),
-                                play_path=server.get('playPath', '')
+                                play_path=play_path,
                             )
                             self._authorized_xboxes.append(xbox_info)
-                        
+
                         self.logger.info(f"✓ 获取到 {len(self._authorized_xboxes)} 台授权 Xbox 主机")
-                        
+
                         for xbox in self._authorized_xboxes:
                             self.logger.info(
                                 f"  - {xbox.name} ({xbox.device_id[:16]}...): "
-                                f"Power={xbox.power_state}, Type={xbox.console_type}"
+                                f"Power={xbox.power_state}, Type={xbox.console_type}, "
+                                f"PlayPath={xbox.play_path}"
                             )
-                        
+
                         return self._authorized_xboxes
-                    else:
-                        text = await resp.text()
-                        self.logger.error(f"获取授权 Xbox 列表失败: {resp.status} - {text}")
-                        return []
-                        
+
+                    text = await resp.text()
+                    self.logger.error(f"获取授权 Xbox 列表失败: {resp.status} - {text}")
+                    return []
+
         except Exception as e:
             self.logger.error(f"获取授权 Xbox 列表异常: {e}", exc_info=True)
             return []
-    
+
     async def discover_local_xboxes(self) -> Dict[str, XboxInfo]:
-        """发现局域网内在线的 Xbox 主机"""
-        self.logger.info("正在发现局域网内的 Xbox 主机...")
-        
+        """发现局域网内在线的 Xbox 主机（可选，不参与匹配决策）"""
+        self.logger.info("正在发现局域网内的 Xbox 主机（可选，不参与匹配）...")
+
         try:
             local_xboxes = await self._discover_via_ssdp()
-            
+
             if not local_xboxes:
                 self.logger.warning("SSDP 发现失败，尝试备用扫描...")
                 local_xboxes = await self._discover_via_ip_scan()
-            
+
             self._local_xboxes = {xbox.device_id: xbox for xbox in local_xboxes}
-            # region agent log
-            _write_debug_log(
-                "H4",
-                "xbox_host_matcher.discover_local_xboxes",
-                "local_discovery_completed",
-                {"localCount": len(self._local_xboxes)},
-            )
-            # endregion
-            
+
             self.logger.info(f"✓ 发现 {len(self._local_xboxes)} 台本地 Xbox 主机")
-            
+
             for device_id, xbox in self._local_xboxes.items():
                 self.logger.info(f"  - {xbox.name} @ {xbox.ip_address}")
-            
+
             return self._local_xboxes
-            
+
         except Exception as e:
             self.logger.error(f"本地 Xbox 发现异常: {e}", exc_info=True)
             return {}
-    
+
     async def _discover_via_ssdp(self) -> List[XboxInfo]:
         """通过 SSDP 发现 Xbox"""
         discovery = XboxDiscovery()
         devices = await discovery.discover(use_cloud_first=False)
-        xboxes = [self._from_discovered_xbox(device) for device in devices]
-        # region agent log
-        _write_debug_log(
-            "H4",
-            "xbox_host_matcher._discover_via_ssdp",
-            "ssdp_discovery_result",
-            {"count": len(xboxes), "hasIp": [bool(xbox.ip_address) for xbox in xboxes]},
-        )
-        # endregion
-        return xboxes
-    
+        return [self._from_discovered_xbox(device) for device in devices]
+
     async def _discover_via_ip_scan(self) -> List[XboxInfo]:
         """通过 IP 扫描发现 Xbox"""
         discovery = XboxDiscovery()
@@ -265,14 +221,6 @@ class XboxHostMatcher:
                     power_state=verified.get('power_state', 'On'),
                     console_type=verified.get('console_type', 'Xbox')
                 ))
-        # region agent log
-        _write_debug_log(
-            "H4",
-            "xbox_host_matcher._discover_via_ip_scan",
-            "ip_scan_result",
-            {"candidateIpCount": len(ips), "verifiedCount": len(xboxes)},
-        )
-        # endregion
         return xboxes
 
     def _from_discovered_xbox(self, discovered: DiscoveredXboxInfo) -> XboxInfo:
@@ -286,43 +234,33 @@ class XboxHostMatcher:
             live_id=discovered.live_id,
             power_state=discovered.power_state,
             console_type=discovered.console_type,
-            play_path=discovered.play_path
+            play_path=discovered.play_path or self.DEFAULT_PLAY_PATH,
         )
-    
+
     async def find_best_match(
-        self, 
+        self,
+        assigned_xbox: Optional[XboxInfo] = None,
+        check_occupancy: Optional[Callable[[XboxInfo], Awaitable[bool]]] = None,
         wakeup: bool = True,
         wakeup_timeout: int = 30
     ) -> XboxMatchResult:
         """
-        查找最优的 Xbox 主机匹配
-        
-        优化后的匹配流程：
+        查找最优的 Xbox 主机匹配（纯云端路径）
+
+        匹配流程（v4.0）：
         1. 获取云端授权的 Xbox 主机列表（必须至少有一个）
-        2. 发现局域网内的在线 Xbox 主机
-        3. 过滤出同时在云端授权和局域网在线的 Xbox 主机（必须至少有一个）
-        4. 如果有多个符合条件的主机，随机选择一个
-        5. 如果选中的是待机状态且 wakeup=True，自动唤醒
-        
-        Args:
-            wakeup: 是否启用自动唤醒
-            wakeup_timeout: 唤醒超时时间（秒）
-            
-        Returns:
-            XboxMatchResult: 包含匹配结果或详细错误信息的对象
+        2. 指定主机：云端授权校验 → 占用校验 → 唤醒
+        3. 自动匹配：云端列表筛选电源状态 → 过滤占用 → 随机选择
         """
         self.logger.info("=" * 60)
-        self.logger.info("Xbox 主机智能匹配流程")
+        self.logger.info("Xbox 主机智能匹配流程（云端单路径）")
         self.logger.info("=" * 60)
-        
-        # 步骤1: 获取云端授权的 Xbox 主机列表
+
         if not self._authorized_xboxes:
             await self.discover_authorized_xboxes()
-        
-        # 步骤1.1: 检查云端是否有授权主机（必须至少有一个）
+
         if not self._authorized_xboxes:
             self.logger.error("✗ 云端未发现任何已授权的 Xbox 主机")
-            self.logger.error("  可能原因：流媒体账号未绑定 Xbox 主机，或账号权限不足")
             return XboxMatchResult(
                 xbox_info=None,
                 priority=XboxMatchPriority.UNAUTHORIZED,
@@ -337,36 +275,118 @@ class XboxHostMatcher:
                     "suggestion": "请在 Xbox 应用中添加并授权此流媒体账号"
                 }
             )
-        
+
         self.logger.info(f"✓ 云端发现 {len(self._authorized_xboxes)} 台已授权的 Xbox 主机")
-        
-        # 步骤2: 发现局域网内的在线 Xbox 主机
-        await self.discover_local_xboxes()
-        
-        # 步骤3: 过滤出同时在云端授权和局域网在线的 Xbox 主机
-        matches = await self._build_match_results()
-        
-        # 筛选出本地在线的主机（已授权且局域网在线）
-        local_online_matches = [
-            m for m in matches 
-            if m.is_local_online and (m.is_powered_on or (wakeup and m.xbox_info.power_state == "Standby"))
+
+        if assigned_xbox is not None:
+            return await self._match_assigned_xbox(
+                assigned_xbox,
+                check_occupancy=check_occupancy,
+                wakeup=wakeup,
+                wakeup_timeout=wakeup_timeout,
+            )
+
+        return await self._match_auto_xbox(
+            check_occupancy=check_occupancy,
+            wakeup=wakeup,
+            wakeup_timeout=wakeup_timeout,
+        )
+
+    async def _match_assigned_xbox(
+        self,
+        assigned_xbox: XboxInfo,
+        check_occupancy: Optional[Callable[[XboxInfo], Awaitable[bool]]],
+        wakeup: bool,
+        wakeup_timeout: int,
+    ) -> XboxMatchResult:
+        """校验并匹配任务指定的 Xbox 主机（仅云端授权）。"""
+        self.logger.info(
+            f"开始校验指定 Xbox: {assigned_xbox.name} "
+            f"(id={assigned_xbox.id or assigned_xbox.live_id})"
+        )
+
+        cloud_match = self._find_authorized_match(assigned_xbox)
+        if cloud_match is None:
+            cloud_ids = [f"{x.name}({x.id or x.device_id})" for x in self._authorized_xboxes]
+            self.logger.error("✗ 指定的 Xbox 主机不在云端授权列表中")
+            return XboxMatchResult(
+                xbox_info=None,
+                priority=XboxMatchPriority.UNAUTHORIZED,
+                is_authorized=False,
+                is_local_online=False,
+                is_powered_on=False,
+                success=False,
+                match_reason="指定的 Xbox 主机不在云端授权列表中",
+                error_code="ASSIGNED_NOT_AUTHORIZED",
+                error_details={
+                    "assigned_xbox_name": assigned_xbox.name,
+                    "assigned_xbox_id": assigned_xbox.id or assigned_xbox.live_id or assigned_xbox.mac_address,
+                    "cloud_authorized": [{"id": x.id, "name": x.name} for x in self._authorized_xboxes],
+                    "suggestion": "请在 Xbox 应用中授权该主机，或使用智能匹配让系统自动选择"
+                }
+            )
+
+        self.logger.info(f"✓ 指定主机在云端授权列表中: {cloud_match.name}")
+        final_xbox = cloud_match
+
+        if check_occupancy is not None:
+            try:
+                occupied = await check_occupancy(final_xbox)
+            except Exception as e:
+                self.logger.warning(f"占用检测异常，按未占用处理: {e}")
+                occupied = False
+
+            if occupied:
+                return XboxMatchResult(
+                    xbox_info=None,
+                    priority=XboxMatchPriority.AUTHORIZED_ONLINE_POWERED,
+                    is_authorized=True,
+                    is_local_online=False,
+                    is_powered_on=self._is_powered_on(final_xbox.power_state),
+                    success=False,
+                    match_reason="指定的 Xbox 主机正在被其他串流账号使用",
+                    error_code="ASSIGNED_OCCUPIED",
+                    error_details={
+                        "assigned_xbox_name": final_xbox.name,
+                        "assigned_xbox_id": final_xbox.id,
+                        "suggestion": "请等待其他任务结束后重试，或重新指派空闲的 Xbox 主机"
+                    }
+                )
+            self.logger.info(f"✓ 指定主机未被占用: {final_xbox.name}")
+
+        wakeup_result_payload = await self._ensure_powered_on(
+            final_xbox, wakeup=wakeup, wakeup_timeout=wakeup_timeout
+        )
+        if not wakeup_result_payload["ok"]:
+            return wakeup_result_payload["result"]
+
+        return self._build_success_result(
+            final_xbox,
+            priority=XboxMatchPriority.AUTHORIZED_ONLINE_POWERED,
+            reason="使用指定的 Xbox 主机（云端授权 + 未占用）",
+            is_powered_on=self._is_powered_on(final_xbox.power_state),
+        )
+
+    async def _match_auto_xbox(
+        self,
+        check_occupancy: Optional[Callable[[XboxInfo], Awaitable[bool]]],
+        wakeup: bool,
+        wakeup_timeout: int,
+    ) -> XboxMatchResult:
+        """自动匹配 Xbox 主机：从云端授权列表筛选后随机选择。"""
+        matches = self._build_match_results()
+        candidates: List[XboxMatchResult] = [
+            m for m in matches
+            if m.is_powered_on or (wakeup and self._can_wakeup(m.xbox_info.power_state))
         ]
-        
-        if not local_online_matches:
-            # 检查是否有任何已授权但本地离线的主机
-            offline_count = sum(1 for m in matches if not m.is_local_online)
-            online_count = sum(1 for m in matches if m.is_local_online)
-            standby_count = sum(1 for m in matches if m.is_local_online and not m.is_powered_on)
-            
-            self.logger.error("✗ 没有找到符合条件（云端授权 + 局域网在线）的 Xbox 主机")
-            self.logger.error(f"  云端授权: {len(self._authorized_xboxes)} 台")
-            self.logger.error(f"  局域网在线: {online_count} 台")
-            self.logger.error(f"  待唤醒（局域网在线）: {standby_count} 台")
-            self.logger.error(f"  本地离线: {offline_count} 台")
-            
-            suggestion = "请确保 Xbox 主机已开机并连接到局域网" if offline_count > 0 else "检查网络连接，确保 Xbox 和 PC 在同一局域网"
-            self.logger.error(f"  建议：{suggestion}")
-            
+
+        if not candidates:
+            cloud_count = len(self._authorized_xboxes)
+            powered_count = sum(1 for m in matches if m.is_powered_on)
+            standby_count = sum(
+                1 for m in matches if self._can_wakeup(m.xbox_info.power_state)
+            )
+            self.logger.error("✗ 没有找到符合电源状态条件的云端授权 Xbox 主机")
             return XboxMatchResult(
                 xbox_info=None,
                 priority=XboxMatchPriority.UNAUTHORIZED,
@@ -374,212 +394,251 @@ class XboxHostMatcher:
                 is_local_online=False,
                 is_powered_on=False,
                 success=False,
-                match_reason="没有找到云端授权且局域网在线的 Xbox 主机",
-                error_code="NO_LOCAL_MATCH",
+                match_reason="没有找到可用的云端授权 Xbox 主机",
+                error_code="NO_AVAILABLE_HOST",
                 error_details={
-                    "cloud_authorized_count": len(self._authorized_xboxes),
-                    "local_online_count": online_count,
-                    "local_standby_count": standby_count,
-                    "local_offline_count": offline_count,
-                    "suggestion": suggestion
+                    "cloud_authorized_count": cloud_count,
+                    "powered_on_count": powered_count,
+                    "standby_count": standby_count,
+                    "suggestion": "请确保 Xbox 主机已开机或启用自动唤醒后重试"
                 }
             )
-        
-        self.logger.info(f"✓ 找到 {len(local_online_matches)} 台符合条件（云端授权 + 局域网在线）的 Xbox 主机")
-        
-        # 步骤4: 随机选择一个主机
-        if len(local_online_matches) > 1:
-            selected_match = random.choice(local_online_matches)
-            self.logger.info(f"  从 {len(local_online_matches)} 台候选主机中随机选择")
-        else:
-            selected_match = local_online_matches[0]
-        
-        # 步骤5: 如果是待机状态，自动唤醒
-        if selected_match.xbox_info.power_state == "Standby":
-            if wakeup:
-                self.logger.info(f"Xbox {selected_match.xbox_info.name} 处于待机模式，尝试唤醒...")
-                wakeup_result = await self._wakeup_xbox(
-                    selected_match.xbox_info,
-                    timeout=wakeup_timeout
+
+        available: List[XboxMatchResult] = []
+        for candidate in candidates:
+            if check_occupancy is None:
+                available.append(candidate)
+                continue
+            try:
+                occupied = await check_occupancy(candidate.xbox_info)
+            except Exception as e:
+                self.logger.warning(f"占用检测异常，按未占用处理: {e}")
+                occupied = False
+            if occupied:
+                self.logger.warning(
+                    f"  - {candidate.xbox_info.name} 正在被其他串流账号占用，跳过"
                 )
-                
-                if wakeup_result.success:
-                    selected_match.xbox_info.power_state = "On"
-                    selected_match.is_powered_on = True
-                    selected_match.match_reason = "已唤醒 + 开机成功"
-                    selected_match.priority = XboxMatchPriority.AUTHORIZED_ONLINE_POWERED
-                    selected_match.success = True
-                    self.logger.info(f"✓ Xbox 唤醒成功: {selected_match.xbox_info.name}")
-                else:
-                    self.logger.error(f"✗ 唤醒失败: {wakeup_result.error_message}")
-                    return XboxMatchResult(
-                        xbox_info=None,
-                        priority=XboxMatchPriority.UNAUTHORIZED,
-                        is_authorized=True,
-                        is_local_online=True,
-                        is_powered_on=False,
-                        success=False,
-                        match_reason=f"唤醒 Xbox 失败: {wakeup_result.error_message}",
-                        error_code="WAKEUP_FAILED",
-                        error_details={
-                            "xbox_name": selected_match.xbox_info.name,
-                            "error_message": wakeup_result.error_message
-                        }
-                    )
-            else:
-                self.logger.warning(f"Xbox {selected_match.xbox_info.name} 处于待机模式，但唤醒功能已禁用")
-                return XboxMatchResult(
+                continue
+            available.append(candidate)
+
+        if not available:
+            return XboxMatchResult(
+                xbox_info=None,
+                priority=XboxMatchPriority.AUTHORIZED_ONLINE_POWERED,
+                is_authorized=True,
+                is_local_online=False,
+                is_powered_on=False,
+                success=False,
+                match_reason="所有候选 Xbox 主机均被其他串流账号占用",
+                error_code="ALL_OCCUPIED",
+                error_details={
+                    "candidate_count": len(candidates),
+                    "occupied_candidates": [
+                        {"id": c.xbox_info.id, "name": c.xbox_info.name}
+                        for c in candidates
+                    ],
+                    "suggestion": "请等待其他任务结束或释放主机后再重试"
+                }
+            )
+
+        if len(available) == 1:
+            selected = available[0]
+            self.logger.info(f"✓ 唯一可用主机: {selected.xbox_info.name}")
+        else:
+            selected = random.choice(available)
+            self.logger.info(
+                f"✓ 从 {len(available)} 台空闲主机中随机选择: {selected.xbox_info.name}"
+            )
+
+        wakeup_result_payload = await self._ensure_powered_on(
+            selected.xbox_info, wakeup=wakeup, wakeup_timeout=wakeup_timeout
+        )
+        if not wakeup_result_payload["ok"]:
+            return wakeup_result_payload["result"]
+
+        if self._is_powered_on(selected.xbox_info.power_state):
+            selected.is_powered_on = True
+            selected.priority = XboxMatchPriority.AUTHORIZED_ONLINE_POWERED
+        return selected
+
+    async def _ensure_powered_on(
+        self,
+        xbox: XboxInfo,
+        wakeup: bool,
+        wakeup_timeout: int,
+    ) -> Dict[str, Any]:
+        """确保 Xbox 处于开机状态。"""
+        if self._is_powered_on(xbox.power_state):
+            return {"ok": True}
+
+        if not self._can_wakeup(xbox.power_state):
+            return {"ok": True}
+
+        if not wakeup:
+            self.logger.warning(f"Xbox {xbox.name} 处于 {xbox.power_state}，但唤醒功能已禁用")
+            return {
+                "ok": False,
+                "result": XboxMatchResult(
                     xbox_info=None,
                     priority=XboxMatchPriority.UNAUTHORIZED,
                     is_authorized=True,
-                    is_local_online=True,
+                    is_local_online=False,
                     is_powered_on=False,
                     success=False,
-                    match_reason="Xbox 处于待机模式，但唤醒功能已禁用",
+                    match_reason="Xbox 处于待机/关机状态，但唤醒功能已禁用",
                     error_code="WAKEUP_DISABLED",
-                    error_details={
-                        "xbox_name": selected_match.xbox_info.name
-                    }
+                    error_details={"xbox_name": xbox.name, "power_state": xbox.power_state}
                 )
-        
-        # 记录最终选择
+            }
+
+        self.logger.info(f"Xbox {xbox.name} 处于 {xbox.power_state}，尝试云端唤醒...")
+        wakeup_result = await self._wakeup_xbox(xbox, timeout=wakeup_timeout)
+        if wakeup_result.success:
+            xbox.power_state = "On"
+            self.logger.info(f"✓ Xbox 唤醒成功: {xbox.name}")
+            return {"ok": True}
+
+        self.logger.error(f"✗ 唤醒失败: {wakeup_result.error_message}")
+        return {
+            "ok": False,
+            "result": XboxMatchResult(
+                xbox_info=None,
+                priority=XboxMatchPriority.UNAUTHORIZED,
+                is_authorized=True,
+                is_local_online=False,
+                is_powered_on=False,
+                success=False,
+                match_reason=f"唤醒 Xbox 失败: {wakeup_result.error_message}",
+                error_code="WAKEUP_FAILED",
+                error_details={
+                    "xbox_name": xbox.name,
+                    "error_message": wakeup_result.error_message,
+                }
+            )
+        }
+
+    def _build_success_result(
+        self,
+        xbox: XboxInfo,
+        priority: XboxMatchPriority,
+        reason: str,
+        is_powered_on: bool,
+    ) -> XboxMatchResult:
+        """构建成功的匹配结果并打印日志。"""
         self.logger.info("")
         self.logger.info("=" * 60)
         self.logger.info("Xbox 主机匹配结果")
         self.logger.info("=" * 60)
-        self.logger.info(f"✓ 选择: {selected_match.xbox_info.name}")
-        self.logger.info(f"  设备 ID: {selected_match.xbox_info.device_id[:16]}...")
-        self.logger.info(f"  本地 IP: {selected_match.xbox_info.ip_address}")
-        self.logger.info(f"  主机类型: {selected_match.xbox_info.console_type}")
-        self.logger.info(f"  电源状态: {selected_match.xbox_info.power_state}")
-        self.logger.info(f"  匹配原因: {selected_match.match_reason}")
+        self.logger.info(f"✓ 选择: {xbox.name}")
+        self.logger.info(f"  设备 ID: {xbox.device_id[:16]}...")
+        self.logger.info(f"  主机类型: {xbox.console_type}")
+        self.logger.info(f"  电源状态: {xbox.power_state}")
+        self.logger.info(f"  PlayPath: {xbox.play_path}")
+        self.logger.info(f"  匹配原因: {reason}")
         self.logger.info("=" * 60)
-        
-        return selected_match
-    
-    async def _build_match_results(self) -> List[XboxMatchResult]:
-        """构建匹配结果列表"""
-        matches = []
-        
+        return XboxMatchResult(
+            xbox_info=xbox,
+            priority=priority,
+            is_authorized=True,
+            is_local_online=False,
+            is_powered_on=is_powered_on,
+            success=True,
+            match_reason=reason,
+        )
+
+    def _find_authorized_match(self, xbox: XboxInfo) -> Optional[XboxInfo]:
+        """在云端授权列表中查找与给定 Xbox 匹配的条目。"""
+        candidates_id_keys = [
+            (xbox.id or "").strip(),
+            (xbox.device_id or "").strip(),
+            (xbox.live_id or "").strip(),
+            (xbox.mac_address or "").strip(),
+        ]
+        candidates_id_keys = [k for k in candidates_id_keys if k]
+
+        for authorized in self._authorized_xboxes:
+            authorized_keys = [
+                (authorized.id or "").strip(),
+                (authorized.device_id or "").strip(),
+                (authorized.live_id or "").strip(),
+            ]
+            authorized_keys = [k for k in authorized_keys if k]
+            if any(k in authorized_keys for k in candidates_id_keys):
+                return authorized
+
+        assigned_name = (xbox.name or "").strip().lower()
+        if assigned_name:
+            for authorized in self._authorized_xboxes:
+                if assigned_name == (authorized.name or "").strip().lower():
+                    return authorized
+
+        return None
+
+    def _build_match_results(self) -> List[XboxMatchResult]:
+        """基于云端授权列表构建匹配结果。"""
+        matches: List[XboxMatchResult] = []
+
         for authorized_xbox in self._authorized_xboxes:
-            device_id = authorized_xbox.device_id
-            local_xbox = self._find_local_match(authorized_xbox)
-            is_local_online = local_xbox is not None
-            is_powered_on = authorized_xbox.power_state == 'On'
-            
-            if is_local_online and is_powered_on:
+            is_powered_on = self._is_powered_on(authorized_xbox.power_state)
+
+            if is_powered_on:
                 priority = XboxMatchPriority.AUTHORIZED_ONLINE_POWERED
-                reason = "已授权 + 本地在线 + 已开机"
-            elif is_local_online and not is_powered_on:
+                reason = "云端授权 + 已开机"
+            elif self._can_wakeup(authorized_xbox.power_state):
                 priority = XboxMatchPriority.AUTHORIZED_ONLINE_STANDBY
-                reason = "已授权 + 本地在线 + 待唤醒"
+                reason = "云端授权 + 待唤醒"
             else:
                 priority = XboxMatchPriority.AUTHORIZED_OFFLINE
-                reason = "已授权 + 本地离线"
-            
-            final_xbox = authorized_xbox
-            if local_xbox:
-                final_xbox.ip_address = local_xbox.ip_address
-                final_xbox.port = local_xbox.port
-            
+                reason = "云端授权 + 电源状态不可用"
+
             match = XboxMatchResult(
-                xbox_info=final_xbox,
+                xbox_info=authorized_xbox,
                 priority=priority,
                 is_authorized=True,
-                is_local_online=is_local_online,
+                is_local_online=False,
                 is_powered_on=is_powered_on,
                 success=True,
-                match_reason=reason
+                match_reason=reason,
             )
-            
             matches.append(match)
-            
+
             self.logger.info(
-                f"  [{priority.value}] {final_xbox.name}: {reason}, "
-                f"IP={final_xbox.ip_address or '未知'}"
+                f"  [{priority.value}] {authorized_xbox.name}: {reason}, "
+                f"serverId={authorized_xbox.device_id[:16]}..."
             )
-        
+
         return matches
 
-    def _find_local_match(self, authorized_xbox: XboxInfo) -> Optional[XboxInfo]:
-        """Find a local Xbox that likely corresponds to the cloud-authorized console."""
-        direct = self._local_xboxes.get(authorized_xbox.device_id)
-        if direct:
-            return direct
-
-        authorized_name = (authorized_xbox.name or "").strip().lower()
-        for local in self._local_xboxes.values():
-            if authorized_name and authorized_name == (local.name or "").strip().lower():
-                return local
-
-        if len(self._authorized_xboxes) == 1 and len(self._local_xboxes) == 1:
-            local = next(iter(self._local_xboxes.values()))
-            # region agent log
-            _write_debug_log(
-                "H5",
-                "xbox_host_matcher._find_local_match",
-                "single_candidate_fallback",
-                {"authorizedCount": 1, "localCount": 1, "hasLocalIp": bool(local.ip_address)},
-            )
-            # endregion
-            return local
-
-        # region agent log
-        _write_debug_log(
-            "H5",
-            "xbox_host_matcher._find_local_match",
-            "no_local_identity_match",
-            {"authorizedCount": len(self._authorized_xboxes), "localCount": len(self._local_xboxes)},
-        )
-        # endregion
-        return None
-    
-    async def _wakeup_xbox(
-        self,
-        xbox: XboxInfo,
-        timeout: int = 30
-    ) -> XboxWakeupResult:
-        """唤醒 Xbox 主机"""
+    async def _wakeup_xbox(self, xbox: XboxInfo, timeout: int = 30) -> XboxWakeupResult:
+        """通过云端 API 唤醒 Xbox 主机"""
         self.logger.info(f"开始唤醒 Xbox: {xbox.name} ({xbox.device_id})")
-        
+
         start_time = asyncio.get_event_loop().time()
         attempts = 0
         last_error = None
-        
+
         for attempt in range(self.WAKUP_MAX_RETRIES):
             attempts += 1
             self.logger.info(f"唤醒尝试 {attempt + 1}/{self.WAKUP_MAX_RETRIES}")
-            
-            wakeup_method = None
-            
-            if xbox.ip_address:
-                success = await self._wakeup_via_smartglass(xbox)
-                if success:
-                    wakeup_method = "smartglass"
-                    self.logger.info("✓ SmartGlass 唤醒成功")
-            
+
             success = await self._wakeup_via_api(xbox.device_id)
             if success:
-                wakeup_method = "api"
-                self.logger.info("✓ API 唤醒命令发送成功")
-            
-            if success or wakeup_method:
+                self.logger.info("✓ 云端 API 唤醒命令发送成功")
                 self.logger.info(f"等待 Xbox 开机（最多 {timeout} 秒）...")
-                
+
                 if await self._wait_for_power_on(xbox.device_id, timeout):
                     elapsed = asyncio.get_event_loop().time() - start_time
                     return XboxWakeupResult(
                         success=True,
                         xbox_info=xbox,
-                        wakeup_method=wakeup_method or "none",
+                        wakeup_method="api",
                         attempts=attempts,
-                        wait_time_seconds=elapsed
+                        wait_time_seconds=elapsed,
                     )
-                else:
-                    last_error = "等待开机超时"
+                last_error = "等待开机超时"
             else:
                 last_error = "唤醒命令发送失败"
-        
+
         elapsed = asyncio.get_event_loop().time() - start_time
         return XboxWakeupResult(
             success=False,
@@ -587,9 +646,9 @@ class XboxHostMatcher:
             wakeup_method="none",
             attempts=attempts,
             wait_time_seconds=elapsed,
-            error_message=last_error
+            error_message=last_error,
         )
-    
+
     async def _wakeup_via_api(self, device_id: str) -> bool:
         """通过 Xbox Live API 唤醒"""
         try:
@@ -598,9 +657,9 @@ class XboxHostMatcher:
                 'Content-Type': 'application/json',
                 'x-xbl-contract-version': '1'
             }
-            
-            url = f"https://uks.core.gssv-play-prodxhome.xboxlive.com/v6/servers/{device_id}/power"
-            
+
+            url = f"{self._gssv_base_uri}/v6/servers/{device_id}/power"
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     url,
@@ -611,62 +670,34 @@ class XboxHostMatcher:
                     if resp.status == 200:
                         self.logger.debug(f"API 唤醒成功: {device_id}")
                         return True
-                    else:
-                        text = await resp.text()
-                        self.logger.warning(f"API 唤醒失败: {resp.status} - {text}")
-                        return False
-                        
+                    text = await resp.text()
+                    self.logger.warning(f"API 唤醒失败: {resp.status} - {text}")
+                    return False
+
         except Exception as e:
             self.logger.warning(f"API 唤醒异常: {e}")
             return False
-    
-    async def _wakeup_via_smartglass(self, xbox: XboxInfo) -> bool:
-        """通过 SmartGlass 协议唤醒"""
-        if not xbox.ip_address:
-            return False
-        
-        try:
-            SMARTGLASS_PORT = 5050
-            
-            device_id_bytes = xbox.device_id.encode('utf-8')[:16].ljust(16, b'\x00')
-            wakeup_packet = bytes([0] * 16) + device_id_bytes
-            
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(5)
-            sock.sendto(wakeup_packet, (xbox.ip_address, SMARTGLASS_PORT))
-            sock.close()
-            
-            self.logger.debug(f"SmartGlass 唤醒包发送成功: {xbox.ip_address}")
-            return True
-            
-        except Exception as e:
-            self.logger.warning(f"SmartGlass 唤醒失败: {e}")
-            return False
-    
-    async def _wait_for_power_on(
-        self,
-        device_id: str,
-        timeout: int
-    ) -> bool:
+
+    async def _wait_for_power_on(self, device_id: str, timeout: int) -> bool:
         """等待 Xbox 开机"""
         self.logger.info(f"开始轮询检查电源状态（超时: {timeout}s）...")
-        
+
         elapsed = 0
         while elapsed < timeout:
             power_state = await self._check_power_state(device_id)
-            
+
             if power_state == 'On':
                 self.logger.info(f"✓ Xbox 已开机！（耗时: {elapsed}s）")
                 return True
-            
+
             self.logger.debug(f"当前电源状态: {power_state}，等待中... ({elapsed}s/{timeout}s)")
-            
+
             await asyncio.sleep(self.WAKUP_CHECK_INTERVAL)
             elapsed += self.WAKUP_CHECK_INTERVAL
-        
+
         self.logger.warning(f"等待开机超时（{timeout}s）")
         return False
-    
+
     async def _check_power_state(self, device_id: str) -> str:
         """检查 Xbox 电源状态"""
         try:
@@ -675,9 +706,9 @@ class XboxHostMatcher:
                 'Content-Type': 'application/json',
                 'x-xbl-contract-version': '1'
             }
-            
-            url = f"https://uks.core.gssv-play-prodxhome.xboxlive.com/v6/servers/{device_id}"
-            
+
+            url = f"{self._gssv_base_uri}/v6/servers/{device_id}"
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     url,
@@ -687,13 +718,12 @@ class XboxHostMatcher:
                     if resp.status == 200:
                         data = await resp.json()
                         return data.get('powerState', 'Unknown')
-                    else:
-                        return 'Unknown'
-                        
+                    return 'Unknown'
+
         except Exception as e:
             self.logger.debug(f"检查电源状态失败: {e}")
             return 'Unknown'
-    
+
     def get_authorized_xboxes_summary(self) -> List[Dict[str, Any]]:
         """获取授权 Xbox 主机摘要"""
         return [
@@ -702,8 +732,7 @@ class XboxHostMatcher:
                 'name': xbox.name,
                 'power_state': xbox.power_state,
                 'console_type': xbox.console_type,
-                'local_ip': self._local_xboxes.get(xbox.device_id).ip_address 
-                           if self._local_xboxes.get(xbox.device_id) else None
+                'play_path': xbox.play_path,
             }
             for xbox in self._authorized_xboxes
         ]

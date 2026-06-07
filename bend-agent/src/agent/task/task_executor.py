@@ -742,10 +742,12 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
         or 'xbox'
     )
 
-    game_action_type = (
-        params.get('gameActionType')
-        or 'squad_battle'
-    )
+    game_action_type = params.get('gameActionType') or ''
+    two_phase = not bool(game_action_type)
+    phase_mode = params.get('phase') or params.get('sessionPhase')
+    if phase_mode == 'streaming_only':
+        two_phase = True
+        game_action_type = ''
 
     if not streaming_account:
         raise Exception("缺少流媒体账号信息")
@@ -770,9 +772,10 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
             streaming_account_auto_code=streaming_account.get('authCode', ''),
             game_accounts=game_accounts,
             assigned_xbox=assigned_xbox,
-            game_action_type=game_action_type,
+            game_action_type=game_action_type or "",
             account_platform=account_platform,
             auto_match_host=auto_match_host,
+            two_phase=two_phase,
         )
 
         if not success:

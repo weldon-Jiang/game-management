@@ -87,6 +87,12 @@ const routes = [
         meta: { title: '任务管理', icon: 'List' }
       },
       {
+        path: 'tasks/:id',
+        name: 'TaskDetail',
+        component: () => import('@/views/task/TaskDetail.vue'),
+        meta: { title: '任务详情', icon: 'List' }
+      },
+      {
         path: 'subscription',
         name: 'Subscription',
         component: () => import('@/views/subscription/SubscriptionList.vue'),

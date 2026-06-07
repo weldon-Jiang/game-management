@@ -17,6 +17,11 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
+# Re-export pause mode for scheduler / platform alignment
+class PauseMode(str, Enum):
+    IMMEDIATE = "immediate"
+    AFTER_MATCH = "after_match"
+
 
 class TaskStepStatus(Enum):
     """任务步骤状态"""
@@ -55,6 +60,9 @@ class GameAccountInfo:
     gamertag: str
     email: str = ""
     password: str = ""
+    position_index: int = -1
+    is_new_user: bool = False
+    profile_bound: bool = False
     is_primary: bool = False
     target_matches: int = 3
     today_match_count: int = 0
@@ -66,17 +74,23 @@ class XboxInfo:
     Xbox主机信息
 
     属性说明：
-    - id: Xbox主机唯一标识
+    - id: Xbox主机唯一标识（云端 serverId）
     - name: Xbox主机名称
-    - ip_address: IP地址
+    - ip_address: IP地址（可选，云端串流不依赖）
     - live_id: Xbox Live ID
     - mac_address: MAC地址
+    - play_path: PlaySession 创建路径（如 v5/sessions/home/play）
+    - power_state: 云端电源状态
+    - console_type: 主机型号
     """
     id: str = ""
     name: str = ""
     ip_address: str = ""
     live_id: str = ""
     mac_address: str = ""
+    play_path: str = ""
+    power_state: str = ""
+    console_type: str = ""
 
 
 @dataclass
@@ -176,6 +190,10 @@ class AgentTaskContext:
     current_step: str = "PENDING"
     task_status: TaskMainStatus = TaskMainStatus.PENDING
     pause_event: Optional[asyncio.Event] = None
+    pause_mode: Optional[str] = None
+    session_phase: str = "opening"
+    window_visible: bool = True
+    automation_started: bool = False
 
     microsoft_tokens: Optional[Any] = None
     xbox_tokens: Optional[Any] = None
