@@ -1,0 +1,26 @@
+# ================================================
+# Bend Gateway 网关 —— 生产环境覆盖配置
+# ================================================
+# 激活方式：SPRING_PROFILES_ACTIVE=prod
+# 说明：仅覆盖与环境相关的差异项（日志、监控端点），路由/限流/IP 过滤继承 application.yml。
+
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+# 生产降低日志噪音
+logging:
+  level:
+    root: WARN
+    com.bend.gateway: INFO
+
+# 监控端点：生产收敛——不暴露 gateway 路由端点，且不展示健康详情
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never

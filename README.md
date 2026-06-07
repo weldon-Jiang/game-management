@@ -10,6 +10,7 @@ Bend Platform 是一个企业级 Xbox 云游戏自动化管理平台，采用多
 
 | 文档 | 说明 |
 |------|------|
+| [Docker 启动/打包部署指南](docker/README.md) | 一键启动、单服务打包部署、停服清理脚本用法（dev/sit/prod） |
 | [开发环境搭建](docs/development.md) | 环境要求、项目结构、启动调试、代码规范 |
 | [用户操作指南](docs/user-guide.md) | 商户注册、Agent管理、任务操作 |
 | [系统流程说明](docs/flow.md) | 业务流程、数据流向 |

@@ -5,10 +5,17 @@
 #   1. 首次部署完整环境：docker compose -f docker-compose.yml up -d
 #   2. 仅启动核心服务：docker compose -f docker-compose.yml --profile core up -d
 #   3. 仅启动数据层：docker compose -f docker-compose.yml --profile data up -d
-#   4. 查看服务状态：docker compose -f docker-compose.yml ps
-#   5. 查看日志：docker compose -f docker-compose.yml logs -f [service]
-#   6. 停止服务：docker compose -f docker-compose.yml down
-#   7. 完全清理（包括数据）：docker compose -f docker-compose.yml down -v --rmi all
+#   4. 仅启动应用层：docker compose -f docker-compose.yml --profile app up -d
+#   5. 查看服务状态：docker compose -f docker-compose.yml ps
+#   6. 查看日志：docker compose -f docker-compose.yml logs -f [service]
+#   7. 停止服务：docker compose -f docker-compose.yml down
+#   8. 完全清理（包括数据）：docker compose -f docker-compose.yml down -v --rmi all
+# ============================================
+# Profile 说明（控制启动哪些服务，与环境无关）：
+#   data : MySQL + Redis（仅数据层）
+#   core : Redis + 后端 + 网关（无 MySQL/前端）
+#   app  : 前端 + 后端 + 网关（应用层，数据层需另起或外部托管）
+#   full : 全部服务（MySQL + Redis + 后端 + 网关 + 前端）
 # ============================================
 
 version: '3.8'
@@ -89,6 +96,7 @@ services:
     restart: ${RESTART_POLICY:-unless-stopped}
     profiles:
       - core
+      - app
       - full
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
@@ -104,12 +112,18 @@ services:
       JWT_EXPIRATION: ${JWT_EXPIRATION}
       AES_SECRET: ${AES_SECRET}
       CORS_ENABLED: ${CORS_ENABLED:-false}
+      # 本地调试开关：仅 dev 环境置 true 才写 debug-*.log，sit/prod 缺省 false（零动作）
+      BEND_DEBUG_SESSION: ${BEND_DEBUG_SESSION:-false}
       TZ: ${TZ}
+    # required: false —— 未启用数据层 profile（如 core/app）时不报错；
+    # 数据层存在时仍按健康检查顺序启动。运行期需保证 MySQL/Redis 可达。
     depends_on:
       mysql:
         condition: service_healthy
+        required: false
       redis:
         condition: service_healthy
+        required: false
     networks:
       - bend-xbox-network
     healthcheck:
@@ -131,6 +145,7 @@ services:
     restart: ${RESTART_POLICY:-unless-stopped}
     profiles:
       - core
+      - app
       - full
     ports:
       - "${GATEWAY_PORT:-0.0.0.0:8060}:8060"
@@ -147,6 +162,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+        required: false
     networks:
       - bend-xbox-network
     healthcheck:
@@ -167,6 +183,7 @@ services:
     container_name: bend-xbox-frontend
     restart: ${RESTART_POLICY:-unless-stopped}
     profiles:
+      - app
       - full
     ports:
       - "${FRONTEND_PORT:-0.0.0.0:3090}:80"

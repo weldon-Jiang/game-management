@@ -1,752 +1,439 @@
 # Bend Platform - Agent 全局技能文档
 
----
-
-## 📋 文档说明
-
-**版本**: 3.0  
-**最后更新**: 2026-06-02  
-**适用范围**: Bend Platform 后端服务（Java）、网关（Java）、前端服务（Vue3）、Agent服务（Python）
+**版本** 3.3 · **更新** 2026-06-07 · **范围** 后端 (Spring Boot 3.2.5/Java 17) · 网关 (Spring Cloud Gateway 4.1.x) · 前端 (Vue 3.5/Vite 8) · Agent (Python 3.9/asyncio)
 
 ---
 
-## ⚠️ 核心原则（✅ 必须遵守）
+## ⚠️ 核心原则（P0）
 
-| 优先级 | 原则 | 说明 |
-|--------|------|------|
-| P0 | **前瞻设计** | 编写代码时考虑未来需求变化及关联模块影响 |
-| P0 | **双向适配** | 修改后端需同步检查前端，修改前端需同步检查后端 |
-| P0 | **部署验证** | 代码改动后必须通过 Docker Compose 重新部署验证 |
-| P1 | **聚焦验证** | 仅验证新增或改动的功能模块，不做全流程验证 |
+
+| 原则       | 说明                             |
+| -------- | ------------------------------ |
+| 前瞻设计     | 编写代码时考虑未来需求与关联模块影响             |
+| 双向适配     | 改后端检查前端，反之亦然                   |
+| 部署验证     | 代码改动后必须经 Docker Compose 重新部署验证 |
+| 架构红线     | 新增控制接口/自动化入口必须遵循下方「架构红线」       |
+| 聚焦验证（P1） | 仅验证改动模块，不做全流程验证                |
+
+
+---
+
+## 🛑 架构红线（P0，必须遵守）
+
+
+| #   | 红线               | 必须                                                                              | 禁止                                                                  |
+| --- | ---------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 1   | **任务控制面**        | 新接口加在 `TaskControlController`，发 WS `task_control{action}`                       | 在旧 `TaskController` 新增 pause/resume/stop                            |
+| 2   | **自动化入口**        | 走 `/api/streaming-accounts/{id}/tasks/start-streaming` → `start-automation` 两阶段 | 新增 `/api/automation/start` 一步式入口                                    |
+| 3   | **TaskEvent 写入** | 经 `TaskEventService.record(...)`（待补）                                            | `AgentCallbackServiceImpl` 直连 Mapper + 静默吞异常                        |
+| 4   | **Agent 并发**     | 引擎/切换器挂 `context._xxx`；用 `get_active_scheduler()`                               | 模块级全局；单任务 `finally` 调 `scheduler.close()`；`task_executor.scheduler` |
+| 5   | **Git 红线**       | 见 `.gitignore`                                                                  | 提交 `target/` `__pycache__/` `logs/` `tokens/` `docker/.env`*        |
+
 
 ---
 
 ## 🚀 快速开始
 
-### Docker Compose 验证（✅ 必须遵守）
+### Docker Compose（必须带 `--env-file`）
 
 ```bash
-# 完整环境（MySQL + Redis + 后端 + 网关 + 前端）
-docker compose -f docker/docker-compose.yml --profile full up -d --build
+# 首选：环境脚本（自动注入 --env-file + profile + Prod 占位符校验）
+.\docker\start-dev.ps1 / start-sit.ps1 / start-prod.ps1
 
-# 仅核心服务（Redis + 后端 + 网关，不含 MySQL/前端）
-docker compose -f docker/docker-compose.yml --profile core up -d --build
-
-# 单独构建服务
-docker compose -f docker/docker-compose.yml --profile full up -d --build backend
-docker compose -f docker/docker-compose.yml --profile full up -d --build gateway
-docker compose -f docker/docker-compose.yml --profile full up -d --build frontend
-
-# 检查服务状态
+# 手动命令（务必带 --env-file，否则容器内变量为空）
+docker compose --env-file docker/.env.dev -f docker/docker-compose.yml --profile full up -d --build
 docker compose -f docker/docker-compose.yml ps
-
-# 查看日志
 docker compose -f docker/docker-compose.yml logs -f backend
 ```
 
-### 日志检查清单（✅ 必须遵守）
+**Profile**：
 
-- [ ] 部署完成后检查各服务日志
-- [ ] 确认无 ERROR 或 Exception
-- [ ] 用户反馈错误时主动读取容器日志分析
 
-### 数据库变更规范（✅ 必须遵守）
+| Profile | mysql | redis | backend | gateway | frontend | 用途           |
+| ------- | ----- | ----- | ------- | ------- | -------- | ------------ |
+| `data`  | ✅     | ✅     | -       | -       | -        | 仅数据层         |
+| `core`  | -     | ✅     | ✅       | ✅       | -        | 后端（外部 mysql） |
+| `app`   | -     | -     | ✅       | ✅       | ✅        | 应用层（外部数据）    |
+| `full`  | ✅     | ✅     | ✅       | ✅       | ✅        | 完整栈（默认）      |
 
-- 迁移脚本位置：`bend-platform/db/migration/`
-- 全量建表脚本：`bend-platform/db/schema.sql`
-- 每次创建迁移脚本后必须同步更新 `schema.sql`
+
+**端口**：
+
+
+| 服务       | 容器内  | 主机映射                                        |
+| -------- | ---- | ------------------------------------------- |
+| Gateway  | 8060 | `0.0.0.0:8060`（唯一对外 API）                    |
+| Frontend | 80   | `0.0.0.0:3090`                              |
+| Backend  | 8061 | **不暴露**（容器网络内）                              |
+| MySQL    | 3306 | `127.0.0.1:3307` (dev/sit) / `:3306` (prod) |
+| Redis    | 6379 | `127.0.0.1:6380` (dev/sit) / `:6379` (prod) |
+
+
+### 部署后检查清单
+
+- [ ] 各服务无 ERROR / Exception（容器名 `bend-xbox-{mysql,redis,backend,gateway,frontend}`）
+- [ ] `curl http://localhost:8060/actuator/health` 返回 UP
+- [ ] 出错时主动读容器日志分析
+
+### 数据库迁移（**非 Flyway，手动**）
+
+- **全量初始化**：`bend-platform/db/schema.sql` 经 docker volume 挂入 MySQL `/docker-entrypoint-initdb.d/`，**仅首次空卷**自动执行
+- **增量**：`bend-platform/db/migration/V{YYYYMMDD}_{NNN}_{snake_case}.sql`，按文件名字典序，**手动**应用
+
+**新增迁移流程**：
+
+1. 在 `bend-platform/db/migration/` 新增 `V20260607_005_xxx.sql`
+2. **同步**更新 `bend-platform/db/schema.sql` + `bend-platform/db/migration/MIGRATION_INDEX.md`
+3. 已运行环境：`.\docker\run-migration.ps1`（Windows） 或 `./docker/run-migration.sh <file>`
 
 ---
 
 ## 📁 项目结构
 
-### 网关服务 (bend-gateway)
+### 后端 `bend-platform`（234 文件 / 15 子包，端口 8061 容器内）
 
-```
-bend-gateway/
-├── src/main/java/com/bend/gateway/
-│   ├── filter/         # 限流、IP 过滤
-│   └── config/         # CORS 等配置
-└── src/main/resources/
-    └── application.yml # 路由 :8060 → backend:8061
-```
+`controller/` 25 个 REST · `service/` + `service/impl/` 27 接口/实现 + 8 独立 `@Service` · `repository/` 29 `*Mapper`（`@MapperScan`） · `entity/` `dto/` `enums/` `config/` `util/`（`UserContext`/`JwtUtil`/`DataSecurityUtil`/`AesUtil`） · `task/` 4 个 `@Scheduled` · `websocket/` `aspect/`（`AuditLogAspect`/`IdempotentInterceptor`） · `exception/`（`GlobalExceptionHandler` + `BusinessException` + `ResultCode`） · `db/` 全量 + 增量脚本
 
-### 后端服务 (bend-platform)
+### 网关 `bend-gateway`（端口 8060 / WebFlux）
 
-```
-bend-platform/
-├── src/main/java/com/bend/platform/
-│   ├── controller/     # REST API 控制层
-│   ├── service/        # 业务逻辑层（接口+实现）
-│   ├── repository/     # 数据访问层（MyBatis Mapper）
-│   ├── entity/         # 数据库实体类
-│   ├── dto/            # 数据传输对象
-│   ├── config/         # 配置类（过滤器、拦截器等）
-│   ├── websocket/      # WebSocket 端点
-│   ├── exception/      # 异常处理
-│   ├── task/           # 定时任务
-│   └── util/           # 工具类
-├── src/main/resources/
-│   ├── application.yml # 应用配置
-│   └── mapper/         # MyBatis XML 映射
-└── db/                 # 数据库迁移脚本
-```
+- 路由：`/api/`** `/ws/**` `/actuator/**` → `backend:8061`
+- 全局过滤器：`IpFilter(-100)` + `RateLimitFilter(-90, Redis)` + `CorsWebFilter`
+- 限流：login 5/3、register 3/2、`/api/agents/**` 50/30、默认 100/50
+- Actuator：dev/sit `health,info,gateway`；prod 仅 `health,info`
 
-### Agent 服务 (bend-agent)
+### Agent `bend-agent`（20 子包，Python 3.9 / asyncio）
 
-```
-bend-agent/
-├── src/agent/
-│   ├── automation/     # ✅ 核心四步骤实现（必须在此目录开发）
-│   │   ├── step1_stream_account_login.py   # 步骤一：MSAL认证(Token自动刷新)
-│   │   ├── step2_xbox_streaming.py         # 步骤二：Xbox连接+PlaySession
-│   │   ├── step3_streaming_init.py          # 步骤三：SDL窗口+GPU捕获
-│   │   └── step4_game_automation.py        # 步骤四：游戏自动化
-│   ├── task/           # 任务调度与上下文管理
-│   ├── api/            # WebSocket/HTTP 通信
-│   ├── auth/           # Microsoft MSAL 认证
-│   ├── xbox/           # Xbox 设备发现、流控制、PlaySession、WebRTC
-│   ├── vision/         # 视觉识别、画面捕获、GPU解码
-│   │   ├── template_matcher.py      # 基础模板匹配
-│   │   └── template_manager.py       # ✅ Streaming模板管理器（新增）
-│   ├── windows/        # Windows 窗口管理、SDL自绘窗口
-│   ├── core/           # 中央管理与配置
-│   ├── game/           # 游戏账号管理、账号切换
-│   ├── scene/          # 场景检测（降频+缓存优化）
-│   │   ├── scene_detector.py              # 基础场景检测
-│   │   └── streaming_scene_detector.py    # ✅ Streaming场景检测器（新增）
-│   ├── input/          # 输入控制（pygame手柄、键盘映射）
-│   └── utils/          # 工具类
-├── configs/            # 配置文件
-│   └── scene_schemas.py   # ✅ Streaming场景模板配置（新增）
-├── templates/          # ✅ 模板图片目录（需创建）
-└── logs/              # 日志目录
-```
+`automation/` 四步骤（核心） · `api/` HTTP+WS · `auth/` MSAL · `core/` 中央管理/日志/路径 · `discovery/` Xbox 发现 · `game/` 账号切换 · `gssv/` GSSV API · `input/` 手柄/键盘 · `orchestration/` 两阶段编排 · `**runtime/` 并发原语**（task_registry/phase_fsm/input_gate/input_focus/task_control_handler） · `scene/` 场景检测 · `session/` `system/` `task/` 调度执行 · `utils/`（crypto） · `vision/` 模板/解码/捕获 · `window/` `windows/` SDL · `xbox/` PlaySession/WebRTC · `xhome_stream/`
+
+配置：`configs/agent.yaml` · `configs/scene_schemas.py` (SCENE_SCHEMAS 100 行 + SCENE_NAMES ID 1-204) · `configs/scene_transitions.py` · `templates/{场景}.{模板}.png`
+
+### 前端 `bend-platform-web`（Vue 3.5 + Vite 8 + Element Plus 2.13 + Pinia 3）
+
+- **纯 JS + 纯 CSS**（无 TS/SCSS），全部 `<script setup>`，**深色单一主题**
+- 入口 `main.js`（Pinia + Router + ElementPlus zhCn + 全局错误处理）
+- 路由 17 个活跃 + 1 个注释（充值卡）；侧栏 `views/layout/MainLayout.vue`
+- Store：仅 `useAuthStore`（含 `isPlatformAdmin/isMerchantOwner/isOperator/hasManagementPermission`）
+- HTTP：`utils/request.js`（axios 封装 + 401 刷新 + 防重）；17 个 `api/*.js` 模块
+- 样式入口 `styles/index.css`：`variables.css`（设计令牌） + `reset.css`（工具类） + `element-plus.css`（EP 深色覆盖）
+- Dev 端口 3090，`/api` 代理 → `:8060`
+- 测试：Vitest 单元 + MSW 集成
 
 ---
 
-## 🎯 Streaming场景模板匹配规范（✅ 必须遵守）
+## 🔐 认证与多商户隔离
 
-参考项目：[D:\auto-xbox\streaming\xsrpst.py](file:///D:/auto-xbox/streaming/xsrpst.py)
 
-### 核心组件
+| 客户端        | 认证方式                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------- |
+| 前端 Web     | JWT `Authorization: Bearer <token>` → `JwtAuthInterceptor` → `UserContext`（ThreadLocal） |
+| Agent HTTP | `X-Agent-Id`（原始） + `X-Agent-Secret`（**Base64**） → `AgentAuthFilter`                     |
+| Agent WS   | 握手头 `X-Agent-Secret`（Base64，首选）；URL `?agentSecret=`（原始，legacy 兜底）                       |
 
-| 组件 | 文件路径 | 说明 |
-|------|---------|------|
-| 场景配置 | [configs/scene_schemas.py](file:///d:/auto-xbox/team-management/bend-agent/configs/scene_schemas.py) | 场景模板配置定义 |
-| 场景检测器 | [scene/streaming_scene_detector.py](file:///d:/auto-xbox/team-management/bend-agent/src/agent/scene/streaming_scene_detector.py) | Streaming风格场景识别 |
-| 模板管理器 | [vision/template_manager.py](file:///d:/auto-xbox/team-management/bend-agent/src/agent/vision/template_manager.py) | 模板文件加载和缓存 |
-
-### 模板配置规范（✅ 必须遵守）
-
-**配置位置**：`configs/scene_schemas.py`
-
-**模板命名规则**：`{场景ID}.{模板ID}.png`
-
-**示例**：
-```
-templates/
-├── 1.1.png    # 场景1的模板1
-├── 2.1.png    # 场景2的模板1
-├── 2.2.png    # 场景2的模板2
-└── ...
-```
-
-### 场景配置格式
 
 ```python
-[
-    场景ID,           # 1, 2, 3...
-    场景宽度,        # 960
-    场景高度,        # 540
-
-    模板ID,          # 1, 2, 3...
-    模板左上X,        # 模板区域
-    模板左上Y,
-    模板右下X,
-    模板右下Y,
-
-    搜索区域ID,      # 搜索区域
-    搜索区域左上X,
-    搜索区域左上Y,
-    搜索区域右下X,
-    搜索区域右下Y,
-
-    相似度阈值,      # 90 (百分比)
-    算法编号          # 3 (TM_CCORR_NORMED)
-]
+# Agent 侧 Base64 编码（违反则 401）
+headers['X-Agent-Secret'] = base64.b64encode(agent_secret.encode()).decode()
 ```
 
-### 推荐算法
+**多商户三层防护**：① Controller 显式传 `UserContext.getMerchantId()` ② `DataSecurityUtil.validateMerchantAccess`（`platform_admin` 绕行） ③ Service 查询按 `merchantId` 过滤 + `requireTask(taskId, merchantId)` 校验  
+**角色**：`platform_admin` / `merchant_owner` / `operator`
 
-| 编号 | 算法 | 推荐度 |
-|------|------|--------|
-| **3** | **TM_CCORR_NORMED** | ⭐ **推荐** |
-| 5 | TM_CCOEFF_NORMED | 高 |
-| 1 | TM_SQDIFF_NORMED | 中 |
+---
 
-### 使用示例
+## 🛠️ 开发规范
+
+### 后端（Java / Spring Boot）
+
+
+| 规则   | 说明                                                                                                                                               |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 注释   | 新增 Controller / Service 接口/实现必须含**类级 + 公共方法级 Javadoc**；任务字段（`sessionPhase`/`pauseMode`/`gameActionPending`/`windowVisible`）的状态机迁移在方法 Javadoc 中说明 |
+| 命名   | 类 PascalCase；方法/变量 camelCase；避免魔法值（用 `enums/`）                                                                                                   |
+| API  | 统一 `ApiResponse<T>` 包装；异常经 `GlobalExceptionHandler` 转 `BusinessException(ResultCode)`                                                            |
+| DAO  | MyBatis-Plus `BaseMapper`，避免手写 SQL；`@Transactional(rollbackFor = Exception.class)`                                                               |
+| 商户隔离 | 所有商户写操作经 `UserContext.getMerchantId()` 或 `validateMerchantAccess`                                                                                |
+| 注入   | `@RequiredArgsConstructor` 的依赖必须 `final`                                                                                                         |
+
+
+**编译检查清单**：方法重复 / import 完整 / `final` 注入 / 枚举值存在 / `BusinessException(ResultCode)` 构造合法
+
+⚠️ 逻辑删除场景慎用 `@TableLogic`：唯一键资源（如 xbox_host）建议物理删除避免再插冲突
+
+### 前端（Vue3 / JavaScript）
+
+
+| 规则     | 说明                                                                                                                                             |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 组件     | PascalCase；`<script setup>` Composition API                                                                                                    |
+| API 调用 | 用封装的 `request`（`utils/request.js`），禁直接 axios                                                                                                   |
+| 状态     | Pinia                                                                                                                                          |
+| 样式     | scoped；**禁硬编码颜色/间距**，统一 `var(--*)` 令牌；表格/弹窗/页头用 `reset.css` 工具类（`.page-container`/`.content-card`/`.toolbar`/`.pagination-wrap`），不在 scoped 内重复 |
+| 单文件大小  | **不超过 800 行**；超过必须拆子组件 + composable                                                                                                            |
+| 空状态    | 列表/详情必须含 `el-empty`（详情页 `v-else` 兜底）                                                                                                           |
+| 菜单     | 侧栏分组标题禁重名                                                                                                                                      |
+
+
+### Agent（Python）
+
+
+| 规则     | 说明                                                                                                                |
+| ------ | ----------------------------------------------------------------------------------------------------------------- |
+| 代码风格   | PEP 8 + type hints                                                                                                |
+| API 调用 | 用 `PlatformApiClient`（`/api/v1/agent-callback/`*）/ `ApiClient`（`/api/*`），禁直接 aiohttp/requests                     |
+| 异步     | `async/await` + `asyncio.sleep`（非 `time.sleep`）                                                                   |
+| 日志     | 主日志 `logs/agent.log` **JSON**；账号 `logs/stream_log/stream_{name}.log` + `logs/game_log/game_{name}_{date}.log` 纯文本 |
+| 认证     | `X-Agent-Secret` 必须 Base64                                                                                        |
+| 资源清理顺序 | API 客户端 → WS → **仅停当前任务**（不要 close 全局调度器）→ 释放窗口 + GPU 解码槽                                                         |
+
+
+#### 自动化四步骤（必须在 `automation/` 目录）
+
+
+| 步骤  | 文件                              | 主入口                       | 职责                           |
+| --- | ------------------------------- | ------------------------- | ---------------------------- |
+| 1   | `step1_stream_account_login.py` | `step1_execute_login`     | MSAL 设备码 + Token 自动刷新        |
+| 2   | `step2_xbox_streaming.py`       | `step2_execute_streaming` | Xbox 连接 + PlaySession        |
+| 3   | `step3_streaming_init.py`       | `step3_streaming_init`    | SDL 窗口 + GPU 解码              |
+| 4   | `step4_game_automation.py`      | `step4_execute_gaming`    | 游戏自动化（`task_type` **仅此处生效**） |
+
+
+**串行规则**：Step1–3 任一失败 → 整个任务失败；Step4 失败 → **保留串流/窗口**，会话进入 `automation_failed`，用户可再次选择模式重试（不关串流、不关窗口）。
+
+**Step1–3（串流准备）vs Step4（自动化执行）职责边界**：
+
+| 维度 | Step1–3 | Step4 |
+|---|---|---|
+| 触发时机 | 启动串流任务时自动执行 | 串流就绪后由前端「开始自动化」触发 |
+| 退出语义 | 全成功 → 进入 `READY` 等待自动化；失败 → 任务失败、关闭串流 | 全部账号完成 → 关串流；任一失败 → **保持串流 + 窗口**，回到 `automation_failed` 等重试 |
+| 手柄按键 | **禁止**自动化按键；仅建立 `ControllerProtocol` 通道（物理手柄/键盘人工接管走此通道） | **唯一**发送自动化按键来源；通过 `InputGate` 在暂停/非自动化期拦截 |
+| 任务类型 | 不读取 `task_type` | **唯一**生效位置（`_apply_task_type` 调用点） |
+| `streaming_session` | Step3 完成后写入 `ready` 阶段 | Step4 开始时锁定 `gameActionType` |
+| 失败回调 | `STEP1/2/3 FAILED` → 任务 failed | `scope=session, phase=automation_failed`（保留任务 running） |
+
+**复用任务约束**：同一 `(streaming_account_id, target_agent_id)` 终态任务会被复用为新一轮 `streaming_session`，Agent 侧通过 `ensure_task_slot(task_id, relaunch=True)` 清理旧 runtime 后重新跑 Step1–3。
+
+`**task_type` 生效流程**（仅 step4 + 确认登录后）：
+
+```
+switch_to(account) → launch_fc_to_ut_menu / _retry_fc_launch_if_on_home
+  → _match_expected_screen("MAIN_MENU") [仅匹配 UT 场景 127/149/147/101]
+  → _apply_task_type(context, account, logger)  ← 此处生效
+  → 按 task_type 执行比赛循环
+```
+
+合法值：`auction_transfer / squad_battle / transfer_sqb_combo / divisions_rivals / weekend_league`（非法归一为 `squad_battle`）
+
+---
+
+## 🛑 Agent 并发反模式禁忌（P0）
 
 ```python
-from agent.scene.streaming_scene_detector import StreamingSceneDetector
+# ❌ 单任务 finally 调 scheduler.close() — 会 stop_all_tasks() 误杀全部并发任务
+finally:
+    await scheduler.close()
 
-# 初始化
-detector = StreamingSceneDetector(
-    template_dir="templates",
-    default_threshold=0.8
-)
-
-# 预加载模板
-detector.preload_all_templates()
-
-# 识别场景
-result = detector.recognize_scene(frame)
-
-if result.matched:
-    print(f"场景: {result.scene_id}, 置信度: {result.confidence:.2f}")
+# ✅ 仅停当前任务；scheduler 是进程级单例
+except asyncio.CancelledError:
+    await scheduler.stop_task(task_id)
+    raise
 ```
 
-### 场景清单（23个场景）
 
-| 分类 | 场景ID | 说明 |
-|------|--------|------|
-| **UI导航** | 1-9 | 主页、西瓜主页、档案和系统、关机/重启等 |
-| **账号登录** | 10-23 | 登录页面、小键盘输入等 |
+| 反模式                                                  | 正确做法                                                                  |
+| ---------------------------------------------------- | --------------------------------------------------------------------- |
+| step4 模块级全局 `automation_engine` / `account_switcher` | 按 taskId 挂 `context._automation_engine` / `context._account_switcher` |
+| `task_executor.scheduler`（属性不存在，被 try/except 静默吞）    | `from ..task.automation_scheduler import get_active_scheduler`        |
+| FC 启动失败盲等 MAIN_MENU 25s 后跳过账号                        | `_retry_fc_launch_if_on_home(switcher, ...)` 检测主页 203 后重启 FC          |
 
-详细场景配置见：[bend-agent/docs/TEMPLATE_CONFIG_GUIDE.md](file:///d:/auto-xbox/team-management/bend-agent/docs/TEMPLATE_CONFIG_GUIDE.md)
+
+**运行时约束**：
+
+
+| 约束           | 值                                     | 来源                        |
+| ------------ | ------------------------------------- | ------------------------- |
+| 任务总并发        | `task.max_concurrent: 10`             | `configs/agent.yaml`      |
+| GPU 解码并发     | `task.max_concurrent_gpu: 3`（超出降 CPU） | 同上                        |
+| 同邮箱重登冷却      | `MIN_LOGIN_INTERVAL = 300s`           | `automation_scheduler.py` |
+| 任意两次登录间隔     | `MIN_ACCOUNT_INTERVAL = 15s`          | 同上                        |
+| HTTP / WS 心跳 | 各 60s                                 | `agent.yaml`              |
+
 
 ---
 
-## 🛠️ 开发代码规范
+## 🎯 Streaming 场景模板匹配
 
-### 后端服务（Java/Spring Boot）
+详见 [bend-agent/docs/STEP4_SCENE_DESIGN.md](bend-agent/docs/STEP4_SCENE_DESIGN.md)
 
-#### ✅ 必须遵守
 
-| 规则 | 说明 |
-|------|------|
-| 统一 import | 在类顶部使用 `import com.example.ClassName;` |
-| 清理未使用 import | 使用 IDE 的 Optimize Imports |
-| 代码格式化 | 使用 IDE 格式化工具确保格式一致 |
-| 代码注释 | 为关键方法、类、接口添加英文注释 |
-| 命名规范 | 类名 PascalCase，方法/变量 camelCase |
-| 避免魔法值 | 使用常量或枚举定义 |
-| API 响应规范 | 统一使用 `ApiResponse<T>` 包装 |
-| 数据库操作 | 使用 MyBatis Plus，避免手写 SQL |
-| 事务管理 | 使用 `@Transactional` 注解 |
+| 组件   | 路径                                                                              |
+| ---- | ------------------------------------------------------------------------------- |
+| 场景配置 | `bend-agent/configs/scene_schemas.py`（SCENE_SCHEMAS 100 行；SCENE_NAMES ID 1-204） |
+| 场景流转 | `bend-agent/configs/scene_transitions.py`                                       |
+| 场景检测 | `bend-agent/src/agent/scene/streaming_scene_detector.py`                        |
+| 模板管理 | `bend-agent/src/agent/vision/template_manager.py`                               |
 
-#### ⚠️ 数据库操作注意事项
 
-```java
-// ✅ 正确：逻辑删除场景下的唯一键处理
-// 对于可能被软删除后重新创建的记录（如Xbox主机），建议使用物理删除
-@Delete("DELETE FROM xbox_host WHERE id = #{id}")
-void physicalDeleteById(Long id);
-
-// ⚠️ 错误：逻辑删除后再次插入会触发唯一键冲突
-@TableLogic
-private Integer deleted;
-```
-
-#### 代码编译检查清单（✅ 必须通过）
-
-- [ ] **方法重复定义检查**：同一类中不允许存在方法名和参数类型完全相同的方法
-- [ ] **导入语句检查**：使用的所有类必须在文件顶部正确导入
-- [ ] **依赖注入检查**：使用 `@RequiredArgsConstructor` 注入的依赖必须声明为 `final`
-- [ ] **枚举引用检查**：使用枚举值前必须确认该枚举值存在
-- [ ] **异常构造检查**：`BusinessException` 构造函数必须传入 `ResultCode` 枚举
+- **模板命名**：`{场景ID}.{模板ID}.png`（如 `templates/127.1.png`）
+- **基准尺寸**：固定 `960×540`
+- **推荐算法**：3（`TM_CCORR_NORMED`）
+- **多模板分组**：按 `search_id` — 组内全命中算匹配，组间取最高
+- **运行时降阈值**：仅对 `scene_id <= 64` 生效
+- **Step4 必备场景**：`STEP4_REQUIRED_SCENE_IDS = [1,2,3,4,5,6,7,10,24,101,126,127,147,149,203]`，启动 `_validate_step4_templates` 预检；缺失则拒绝运行
 
 ---
 
-### 前端服务（Vue3 + JavaScript）
-
-#### ✅ 必须遵守
-
-| 规则 | 说明 |
-|------|------|
-| 组件命名 | PascalCase，如 `UserList.vue` |
-| 代码风格 | 使用 JavaScript 和 Composition API（`<script setup>`） |
-| API 请求 | 使用封装的 `request` 实例，禁止直接使用 axios |
-| 状态管理 | 使用 Pinia |
-| 组件通信 | 父子组件使用 props/emits，跨层级使用 provide/inject 或 Pinia |
-| 样式规范 | 使用 CSS + scoped；组件样式保持 BEM 命名习惯 |
-| 性能优化 | 列表渲染使用 `key` 属性 |
-
-> 说明：当前代码库为 JavaScript + CSS。TypeScript/SCSS 迁移为可选后续工作，新增代码应遵循上表实际栈。
-
----
-
-### Agent 服务（Python）
-
-#### ✅ 必须遵守
-
-##### 1. 代码风格
-- 遵循 PEP 8 规范
-- 使用 type hints（类型提示）
-- 使用 IDE 自动格式化
-
-##### 2. API 请求规范
-- ✅ 使用封装的 `PlatformApiClient`
-- ❌ 禁止直接使用 aiohttp/requests
-
-##### 3. 异步编程
-- 使用 `async/await` 语法
-- 使用 `asyncio.sleep()` 替代 `time.sleep()`
-
-##### 4. 日志规范
-- 使用 Python `logging` 模块
-- 流媒体账号日志：`logs/stream_log/stream_账号名.log`
-- 游戏账号日志：`logs/game_log/game_账号名_YYYY-MM-DD.log`
-- **日志格式**：JSON 格式便于分析
-
-##### 5. 认证规范
-
-```python
-# ✅ 正确：HTTP请求时对secret进行Base64编码
-import base64
-
-encoded_secret = base64.b64encode(agent_secret.encode('utf-8')).decode('utf-8')
-headers['X-Agent-Secret'] = encoded_secret
-
-# ❌ 错误：直接发送原始secret会导致401认证失败
-headers['X-Agent-Secret'] = agent_secret
-```
-
-##### 6. 资源清理规范
-
-```python
-# 优雅关闭顺序（✅ 必须遵守）
-# 1. 关闭 API 客户端
-# 2. 断开 WebSocket 连接  
-# 3. 停止任务调度器
-# 4. 释放窗口句柄和捕获资源
-```
-
-#### 🔧 自动化流程核心规范（✅ 必须遵守）
-
-**所有自动化流程开发必须在 `automation/` 目录下进行！**
-
-| 步骤 | 文件名 | 核心职责 | 依赖模块 |
-|------|--------|----------|----------|
-| 步骤一 | `step1_stream_account_login.py` | MSAL设备码认证获取Xbox令牌(Token自动刷新) | `auth/`, `api/` |
-| 步骤二 | `step2_xbox_streaming.py` | 发现并连接Xbox主机(PlaySession+SDP) | `xbox/` |
-| 步骤三 | `step3_streaming_init.py` | 初始化画面捕获能力(SDL+GPU) | `vision/`, `windows/` |
-| 步骤四 | `step4_game_automation.py` | 执行游戏比赛并上报状态(场景优化+手柄控制) | `vision/`, `game/`, `scene/`, `input/` |
-
-**步骤文件结构模板（✅ 必须遵守）**
-
-```python
-"""
-步骤N：功能名称
-================
-
-功能说明：
-- 核心功能描述
-- 技术实现要点
-
-方法拆分：
-- stepN_execute_xxx(): 主入口函数（必须）
-- _helper_function(): 辅助函数（前缀下划线）
-
-作者：技术团队
-版本：x.x
-"""
-
-import asyncio
-from typing import Callable, Optional, Dict, Any
-
-from ..core.logger import get_logger
-from ..core.account_logger import get_stream_logger
-from ..task.task_context import AgentTaskContext, StepNResult, TaskStepStatus
-
-async def stepN_execute_xxx(
-    context: AgentTaskContext,
-    check_cancel: Callable[[], bool],
-    report_progress: Callable[[str, str, str], None]
-) -> StepNResult:
-    """
-    步骤N执行：功能名称
-    
-    参数：
-    - context: 任务上下文（包含前序步骤结果）
-    - check_cancel: 取消检查函数（定期调用检测任务是否被取消）
-    - report_progress: 进度上报函数
-    
-    返回：
-    - StepNResult: 步骤执行结果
-    """
-    # 1. 获取日志记录器
-    logger = get_logger(f'stepN_xxx_{context.task_id}')
-    stream_logger = get_stream_logger(context.streaming_account_email)
-    
-    # 2. 更新步骤状态并上报
-    context.update_step_status("stepN", TaskStepStatus.RUNNING, "步骤开始...")
-    await report_progress(context.task_id, "STEPN", "RUNNING", "步骤开始...")
-    
-    # 3. 主流程逻辑
-    try:
-        # 定期检查取消
-        if check_cancel():
-            return StepNResult(success=False, error_code="CANCELLED", message="任务被取消")
-        
-        # 执行核心逻辑...
-        
-        # 完成状态
-        context.update_step_status("stepN", TaskStepStatus.COMPLETED, "步骤完成")
-        await report_progress(context.task_id, "STEPN", "COMPLETED", "步骤完成")
-        return StepNResult(success=True, message="步骤完成")
-        
-    except asyncio.CancelledError:
-        context.update_step_status("stepN", TaskStepStatus.SKIPPED, "任务被取消")
-        return StepNResult(success=False, error_code="CANCELLED", message="任务被取消")
-        
-    except Exception as e:
-        context.update_step_status("stepN", TaskStepStatus.FAILED, str(e))
-        await report_progress(context.task_id, "STEPN", "FAILED", str(e))
-        return StepNResult(success=False, error_code="EXCEPTION", message=str(e))
-```
-
-**步骤间数据传递规范**
-
-| 步骤 | 写入上下文 | 读取上下文 |
-|------|-----------|-----------|
-| 步骤一 | `microsoft_tokens`, `xbox_tokens` | `streaming_account_email`, `streaming_account_password` |
-| 步骤二 | `current_xbox`, `xbox_session` | `xbox_tokens` |
-| 步骤三 | `frame_capture`, `scene_detector` | `xbox_session`, `current_xbox` |
-| 步骤四 | `matches_completed_today` | `frame_capture`, `scene_detector`, `game_accounts`, `task_type` |
-
-**⚠️ 任务类型生效规则（✅ 必须遵守）**
-
-> **核心规则**：任务类型（`task_type`）**仅在步骤四（`step4_game_automation.py`）中生效**，且必须在**确认当前游戏账号登录成功后**才能应用。
-
-**任务类型生效流程**：
+## 🔄 通信协议
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   步骤四：游戏比赛自动化                    │
-├─────────────────────────────────────────────────────────────┤
-│                                                           │
-│   遍历游戏账号列表                                         │
-│        │                                                  │
-│        ▼                                                  │
-│   ┌──────────────────┐                                    │
-│   │ 登录游戏账号      │                                    │
-│   │ （模拟按键操作）   │                                    │
-│   └────────┬─────────┘                                    │
-│            │                                              │
-│            ▼                                              │
-│   ┌──────────────────┐                                    │
-│   │ 确认登录成功      │ ←── 画面检测验证（使用Streaming场景检测器）│
-│   └────────┬─────────┘                                    │
-│            │                                              │
-│            ▼                                              │
-│   ┌──────────────────┐                                    │
-│   │ 应用任务类型      │ ←── task_type 在此处生效          │
-│   │ （比赛模式选择）   │                                    │
-│   └────────┬─────────┘                                    │
-│            │                                              │
-│            ▼                                              │
-│   执行指定场比赛（默认3场/账号）                           │
-│                                                           │
-└─────────────────────────────────────────────────────────────┘
+Agent ──HTTP/WS──► Gateway:8060 ──► Backend:8061
+WebSocket URL: ws://{gateway}:8060/ws/agent/{agentId}
 ```
 
-**任务类型应用原则**：
-- **时机**：必须在游戏账号登录确认后应用，禁止提前使用
-- **位置**：仅在 `step4_game_automation.py` 中处理，其他步骤不应涉及任务类型逻辑
-- **验证**：使用画面检测确认游戏账号登录状态后，才能根据任务类型执行相应操作
+### WebSocket 消息矩阵
 
-**四步骤串行执行规则**
+**入站（Platform → Agent）**：
 
-```
-步骤一 ──► 步骤二 ──► 步骤三 ──► 步骤四
-   │          │          │          │
-   └──────────┴──────────┴──────────┘
-        (任一步骤失败，整个任务失败)
-```
 
-#### 🔗 调用链规范
+| `type`                      | 用途                                   |
+| --------------------------- | ------------------------------------ |
+| `task`                      | 主任务下发（`task_executor.execute_task`）  |
+| `task_control`              | **新协议** — 含 `action` 字段（见下）          |
+| `command`                   | `capture_frame` / `get_scene` / 更新指令 |
+| `version_update`            | 推送版本元数据                              |
+| `automation_control`        | `action=stop` 全停（旧式）                 |
+| `discover_xbox`             | LAN 发现                               |
+| `stop_task` / `cancel_task` | 旧式停止                                 |
 
-```
-WebSocket消息 ──► TaskExecutor ──► AutomationScheduler ──► AutomationTask
-                                                               │
-                    ┌───────────────┼───────────────┐          │
-                    ▼               ▼               ▼          ▼
-               step1_stream      step2_xbox      step3_init   step4_game
-               _account_login    _streaming      _streaming   _automation
-```
 
-#### 🔧 场景模板匹配规范
+`**task_control.action` 值**：`pause` / `resume` / `cancel` / `terminate` / `show_window`(`window_show`) / `hide_window`(`window_hide`) / `focus_window` / `skip_game_account` / `reconnect_stream` / `start_game_automation` / `open_streaming_session`
 
-详见上方 **"🎯 Streaming场景模板匹配规范"** 章节。
+**出站（Agent → Platform）**：`heartbeat` / `task_control_ack` / `task_result` / `status_report` / `xbox_discovered` / `progress`
 
----
+> ⚠️ Agent README 列过 `task_ack` / `task_progress`，但**未在代码中实际发送**。任务流规范出口是 **HTTP**：`report_progress` / `complete_task` / `fail_task`。
 
-## 🔒 安全规范
+### HTTP 回调端点（Agent → Backend）
 
-### ✅ 必须遵守
 
-| 规则 | 说明 |
-|------|------|
-| 密码安全 | 使用 AES 加密存储，HTTPS/WSS 传输 |
-| 敏感数据 | 禁止日志打印密码等敏感信息 |
-| XSS 防护 | 前端输入校验，后端过滤 |
-| SQL 注入 | 使用参数化查询，禁止拼接 SQL |
-| 认证授权 | 使用 JWT Token，最小权限原则 |
+| 客户端                 | 前缀                        | 关键端点                                                                                                                                           |
+| ------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PlatformApiClient` | `/api/v1/agent-callback/` | `progress` · `task/{id}` · `xbox/{id}/lock|unlock` · `credentials/exchange` · `game-account/{id}/profile-binding`                              |
+| `ApiClient`         | `/api/`                   | `agents/register` · `agents/heartbeat` · `agents/status` · `tasks/{id}/complete|fail` · `agents/version/check` · `registration-codes/activate` |
 
----
 
-## 🧪 测试规范
-
-### ✅ 必须遵守
-
-| 规则 | 说明 |
-|------|------|
-| 单元测试 | 核心业务逻辑必须编写单元测试 |
-| 测试覆盖率 | 核心模块 ≥ 80% |
-| 测试命名 | 类名：`{ClassName}Test`，方法名：`test{MethodName}_{Scenario}_{ExpectedResult}` |
-| 测试数据 | 使用独立测试数据库，禁止使用生产数据 |
-
----
-
-## 📦 版本控制规范
-
-### ✅ 必须遵守
-
-| 分支 | 用途 |
-|------|------|
-| `main` | 生产环境 |
-| `develop` | 开发主分支 |
-| `feature/*` | 功能开发 |
-| `bugfix/*` | Bug 修复 |
-| `hotfix/*` | 紧急修复 |
-
-**提交规范**：`[类型] 描述`
-- 类型：feat、fix、docs、style、refactor、test、chore
-
----
-
-## 📊 部署运维规范
-
-### ✅ 必须遵守
-
-| 规则 | 说明 |
-|------|------|
-| 环境配置 | 区分开发、测试、预发布、生产环境 |
-| Docker 镜像 | 多阶段构建，命名规范：`bend-{service}:{version}` |
-| 日志规范 | 统一格式，级别：DEBUG、INFO、WARN、ERROR |
-| 健康检查 | 每个服务配置健康检查接口 |
-
----
-
-## 🎯 代码设计规范
-
-### ✅ 必须遵守
-
-| 规则 | 说明 |
-|------|------|
-| 代码复用 | 提取公共逻辑到工具类，遵循 DRY 原则 |
-| 扩展性设计 | 使用接口/抽象类定义契约，开闭原则 |
-| 职责单一 | 每个方法职责明确 |
-| 常量枚举 | 使用常量类管理魔法值，状态值使用枚举 |
-| 设计模式 | 合理应用工厂模式、单例模式、观察者模式、模板方法模式 |
-
----
-
-## 🔄 与平台通信协议
-
-### WebSocket 连接
-
-**地址**：`ws://{gateway_host}:8060/ws/agent/{agentId}?agentSecret={secret}`  
-**认证**：`agentSecret` 通过 URL 参数直接传递（原始字符串）
-
-### HTTP 认证
-
-**请求头**：
-- `X-Agent-Id`：Agent ID（原始字符串）
-- `X-Agent-Secret`：Agent Secret（**必须 Base64 编码**）
-
-**后端验证逻辑**：
-```java
-String decodedSecret = new String(Base64.getDecoder().decode(agentSecret), StandardCharsets.UTF_8);
-```
-
-### 消息类型
-
-| 类型 | 方向 | 说明 |
-|------|------|------|
-| `task` | 平台→Agent | 下发自动化任务 |
-| `heartbeat` | Agent→平台 | 心跳保活 |
-| `heartbeat_ack` | 平台→Agent | 心跳确认 |
-| `task_ack` | Agent→平台 | 任务接收确认 |
-| `task_progress` | Agent→平台 | 任务进度上报 |
-
----
-
-## 📝 API 响应格式
+### API 响应格式
 
 ```json
-{
-  "code": 200,
-  "message": "success",
-  "data": { ... }
-}
+{"code": 200, "message": "success", "data": { ... }}
 ```
 
-**错误码**：
-
-| 错误码 | 说明 |
-|--------|------|
-| 200 | 成功 |
-| 400 | 请求参数错误 |
-| 401 | 认证失败 |
-| 403 | 权限不足 |
-| 404 | 资源不存在 |
-| 500 | 服务器内部错误 |
+错误码：200/400/401/403/404/429/500（429 = 网关限流）
 
 ---
 
-## ⚙️ Agent 配置
-
-**配置文件**：`bend-agent/configs/agent.yaml`
+## ⚙️ Agent 配置（`configs/agent.yaml` 真实键）
 
 ```yaml
 backend:
-  base_url: 'http://localhost:8060'
+  base_url: 'http://localhost:8060'        # 经 gateway
   ws_url: 'ws://localhost:8060/ws/agent'
 
 agent:
-  heartbeat_interval: 30      # 心跳间隔（秒）
-  reconnect_delay: 5          # 重连延迟（秒）
-  max_reconnect_attempts: 10  # 最大重连次数
+  heartbeat_interval: 60                   # HTTP 心跳
+  ws_heartbeat_interval: 60                # WS 心跳
+  reconnect_delay: 5
+  max_reconnect_attempts: 10
 
 template:
-  dir: 'templates'            # 模板目录
-  threshold: 0.8              # 匹配阈值
-  cache_enabled: true         # 启用缓存
+  template_dir: './templates'              # ⚠ 键名为 template_dir
+  threshold: 0.8
+
+task:
+  max_concurrent: 10
+  max_concurrent_gpu: 3                    # 超出降 CPU
 ```
 
 ---
 
-## 🌟 最佳实践
+## 🔒 安全 / 测试 / 部署
 
-| 实践 | 说明 |
-|------|------|
-| 断线重连 | 使用指数退避策略 |
-| 任务超时 | 默认 3600 秒 |
-| 状态同步 | 使用 `task_game_account_status` 表跟踪 |
-| 并发控制 | 配置最大并发任务数 |
-| 异常处理 | 记录日志并继续执行其他任务 |
-| 模板管理 | 使用Streaming模板管理器，预加载常用模板 |
-| 场景检测 | 使用Streaming场景检测器，支持多区域匹配 |
 
----
+| 类别   | 要点                                                            |
+| ---- | ------------------------------------------------------------- |
+| 密码   | AES 存储（`AesUtil`），HTTPS/WSS 传输                                |
+| 日志   | 禁打印密码 / Token / refresh_token                                 |
+| SQL  | MyBatis-Plus 参数化，禁拼接                                          |
+| 限流   | 网关 Redis 滑动窗口（登录/注册严格、Agent 接口宽松）                             |
+| 后端测试 | 核心模块 ≥ 80% 覆盖；`test{MethodName}_{Scenario}_{Expected}`        |
+| 前端测试 | Vitest 单元 + MSW 集成；Playwright 已配置（待补 E2E）                     |
+| 环境   | `.env.dev` / `.env.sit` / `.env.prod`（位于 `docker/`）           |
+| Prod | `start-prod.ps1` 强制校验 `CHANGE_ME_*` 占位符                       |
+| 健康检查 | 各服务 `healthcheck`；`depends_on: condition: service_healthy` 串联 |
 
-## 📅 版本历史
 
-| 版本 | 日期 | 变更内容 |
-|------|------|----------|
-| 1.0 | 2026-05-13 | 初始版本 |
-| 2.0 | 2026-05-16 | 添加认证规范、资源清理规范 |
-| 2.1 | 2026-05-21 | 优化文档结构、添加检查清单、完善代码模板 |
-| 3.0 | 2026-05-30 | 添加优化模块说明：GPU解码、SDL窗口、场景检测优化、手柄信号发送 |
-| 3.1 | 2026-06-02 | 添加Streaming场景模板匹配规范（scene_schemas.py、streaming_scene_detector.py、template_manager.py）|
+### Git / 分支
+
+`main` 生产 · `develop` 开发主干 · `feature/*` · `bugfix/*` · `hotfix/*`  
+提交：`[类型] 描述`，类型：feat/fix/docs/style/refactor/test/chore
 
 ---
 
 ## 📚 相关文档
 
-- [API 文档](bend-platform-api.json)
-- [数据库脚本](bend-platform/db/schema.sql)
-- [部署文档](docker/DEPLOY.md)
-- [Agent 文档](bend-agent/README.md)
-- [模板配置指南](bend-agent/docs/TEMPLATE_CONFIG_GUIDE.md)
+- [Step4 场景设计与新增手册](bend-agent/docs/STEP4_SCENE_DESIGN.md)
+- [架构合理性评审](docs/review/01_architecture_review.md)
+- [Agent 并发设计分析](docs/review/02_agent_concurrency.md)
+- [前端结构与审美评审](docs/review/03_frontend_review.md)
+- [数据库脚本](bend-platform/db/schema.sql) · [迁移索引](bend-platform/db/migration/MIGRATION_INDEX.md)
+- [Agent 文档](bend-agent/README.md) · [部署文档](docker/DEPLOY.md)
 
 ---
 
-## 🤖 AI 工具执行指南
+## 🤖 自动化规则（机器可读）
 
-### 规则优先级说明
 
-| 标记 | 优先级 | 说明 |
-|------|--------|------|
-| ✅ | P0 | 必须遵守，违反将导致任务失败 |
-| ⚠️ | P1 | 建议遵守，违反将发出警告 |
-| 💡 | P2 | 最佳实践，建议参考 |
+| 标记  | 优先级 | 说明             |
+| --- | --- | -------------- |
+| ✅   | P0  | 必须遵守，违反将导致任务失败 |
+| ⚠️  | P1  | 建议遵守，违反将发出警告   |
+| 💡  | P2  | 最佳实践           |
 
-### 自动化规则（供工具解析）
 
 ```json
 {
   "rules": [
-    {
-      "id": "R001",
-      "name": "API请求规范",
-      "priority": "P0",
-      "type": "must_follow",
-      "check": "使用PlatformApiClient而非直接使用aiohttp",
-      "location": ["src/agent/api/"]
-    },
-    {
-      "id": "R002",
-      "name": "日志规范",
-      "priority": "P1",
-      "type": "recommended",
-      "check": "使用JSON格式日志",
-      "location": ["src/agent/core/"]
-    },
-    {
-      "id": "R003",
-      "name": "自动化步骤位置",
-      "priority": "P0",
-      "type": "must_follow",
-      "check": "四步骤文件必须放在automation/目录下",
-      "location": ["src/agent/automation/"]
-    },
-    {
-      "id": "R004",
-      "name": "HTTP认证编码",
-      "priority": "P0",
-      "type": "must_follow",
-      "check": "X-Agent-Secret必须Base64编码",
-      "location": ["src/agent/api/platform_api_client.py"]
-    },
-    {
-      "id": "R005",
-      "name": "代码复用",
-      "priority": "P1",
-      "type": "recommended",
-      "check": "避免代码重复，提取公共逻辑到工具类",
-      "location": ["src/agent/"]
-    },
-    {
-      "id": "R006",
-      "name": "任务类型生效位置",
-      "priority": "P0",
-      "type": "must_follow",
-      "check": "task_type仅在step4_game_automation.py中处理",
-      "location": ["src/agent/automation/step4_game_automation.py"]
-    },
-    {
-      "id": "R007",
-      "name": "任务类型生效时机",
-      "priority": "P0",
-      "type": "must_follow",
-      "check": "task_type必须在确认游戏账号登录成功后才能应用",
-      "location": ["src/agent/automation/step4_game_automation.py"]
-    },
-    {
-      "id": "R008",
-      "name": "Streaming场景模板匹配",
-      "priority": "P0",
-      "type": "must_follow",
-      "check": "使用configs/scene_schemas.py配置模板，模板文件命名为{场景ID}.{模板ID}.png",
-      "location": ["configs/scene_schemas.py", "src/agent/scene/streaming_scene_detector.py"]
-    }
+    {"id": "R001", "name": "API请求规范", "priority": "P0", "check": "Agent 必须使用 PlatformApiClient / ApiClient，禁直接使用 aiohttp/requests", "location": ["bend-agent/src/agent/api/"]},
+    {"id": "R002", "name": "日志规范", "priority": "P1", "check": "主日志 JSON；账号日志按 stream_log/ 与 game_log/ 分别落盘", "location": ["bend-agent/src/agent/core/logger.py", "bend-agent/src/agent/core/account_logger.py"]},
+    {"id": "R003", "name": "自动化步骤位置", "priority": "P0", "check": "四步骤文件必须放在 automation/ 目录下", "location": ["bend-agent/src/agent/automation/"]},
+    {"id": "R004", "name": "HTTP认证编码", "priority": "P0", "check": "X-Agent-Secret 必须 Base64 编码；WS 握手优先 header，URL 查询参数仅 legacy 兜底", "location": ["bend-agent/src/agent/api/platform_api_client.py", "bend-agent/src/agent/api/websocket.py"]},
+    {"id": "R005", "name": "代码复用", "priority": "P1", "check": "避免代码重复，提取公共逻辑到工具类", "location": ["bend-agent/src/agent/"]},
+    {"id": "R006", "name": "任务类型生效位置", "priority": "P0", "check": "task_type 仅在 step4_game_automation.py 中处理", "location": ["bend-agent/src/agent/automation/step4_game_automation.py"]},
+    {"id": "R007", "name": "任务类型生效时机", "priority": "P0", "check": "task_type 必须在确认游戏账号登录成功后才能应用（_apply_task_type 调用点）", "location": ["bend-agent/src/agent/automation/step4_game_automation.py"]},
+    {"id": "R008", "name": "Streaming场景模板匹配", "priority": "P0", "check": "模板文件命名 {场景ID}.{模板ID}.png；新增场景按 STEP4_SCENE_DESIGN.md 流程", "location": ["bend-agent/configs/scene_schemas.py", "bend-agent/src/agent/scene/streaming_scene_detector.py"]},
+    {"id": "R009", "name": "任务控制面收敛", "priority": "P0", "check": "新接口加在 TaskControlController；旧 TaskController 不得新增 pause/resume/stop", "location": ["bend-platform/src/main/java/com/bend/platform/controller/TaskControlController.java"]},
+    {"id": "R010", "name": "Agent 并发隔离", "priority": "P0", "check": "step4 严禁模块级全局；引擎/切换器挂 context._xxx；单任务 finally 严禁 scheduler.close()", "location": ["bend-agent/src/agent/automation/step4_game_automation.py", "bend-agent/src/agent/task/task_executor.py"]},
+    {"id": "R011", "name": "调度器获取方式", "priority": "P0", "check": "用 get_active_scheduler()；不得通过 task_executor.scheduler 取（属性不存在）", "location": ["bend-agent/src/agent/task/automation_scheduler.py"]},
+    {"id": "R012", "name": "数据库迁移规范", "priority": "P0", "check": "新增 V{YYYYMMDD}_{NNN}_*.sql 必须同步更新 schema.sql 与 MIGRATION_INDEX.md；通过 run-migration 脚本手动应用", "location": ["bend-platform/db/migration/", "bend-platform/db/schema.sql"]},
+    {"id": "R013", "name": "Docker 启动规范", "priority": "P0", "check": "docker compose 必须带 --env-file docker/.env.{env}；优先用 docker/start-{env}.ps1", "location": ["docker/docker-compose.yml", "docker/start-dev.ps1"]},
+    {"id": "R014", "name": "商户隔离强校验", "priority": "P0", "check": "商户写操作必须经 UserContext.getMerchantId() 显式传参 + DataSecurityUtil.validateMerchantAccess 校验", "location": ["bend-platform/src/main/java/com/bend/platform/util/UserContext.java", "bend-platform/src/main/java/com/bend/platform/util/DataSecurityUtil.java"]},
+    {"id": "R015", "name": "前端单文件大小约束", "priority": "P1", "check": "单 .vue 不超过 800 行；超过应拆子组件 + composable；scoped 样式禁硬编码颜色（用 var(--*)）", "location": ["bend-platform-web/src/views/"]},
+    {"id": "R016", "name": "后端注释规范", "priority": "P0", "check": "新增 Controller / Service 接口/实现必须含类级 + 公共方法级 Javadoc；任务状态字段（sessionPhase/pauseMode/gameActionPending）的状态机迁移在方法 Javadoc 中说明", "location": ["bend-platform/src/main/java/com/bend/platform/controller/", "bend-platform/src/main/java/com/bend/platform/service/"]},
+    {"id": "R017", "name": "Git 红线", "priority": "P0", "check": "禁止提交 target/、__pycache__/、logs/、tokens/、docker/.env.*；调试埋点不得入库", "location": [".gitignore"]}
   ]
 }
 ```
 
 ---
 
-*文档结束*
+## 📅 版本历史
+
+
+| 版本  | 日期                      | 变更                                                                        |
+| --- | ----------------------- | ------------------------------------------------------------------------- |
+| 1.0 | 2026-05-13              | 初始版本                                                                      |
+| 2.x | 2026-05-16 ~ 2026-05-21 | 认证 / 资源清理 / 结构优化                                                          |
+| 3.0 | 2026-05-30              | GPU 解码、SDL 窗口、场景检测优化                                                      |
+| 3.1 | 2026-06-02              | Streaming 场景模板匹配规范                                                        |
+| 3.2 | 2026-06-07              | 全系统盘点修订；架构红线 + 并发反模式禁忌；WS 协议矩阵；Docker 4 profile + `--env-file`；精简至约 350 行 |
+| 3.3 | 2026-06-07              | 串流任务长寿命化（任务复用 + `streaming_session` 多轮）；Step4 失败保留串流（`automation_failed`）；`InputGate` 统一收敛自动化按键；新增 Step1–3 vs Step4 边界表 |
+
+

@@ -1,0 +1,26 @@
+# ================================================
+# Bend Gateway 网关 —— SIT 测试环境覆盖配置
+# ================================================
+# 激活方式：SPRING_PROFILES_ACTIVE=sit
+# 说明：仅覆盖与环境相关的差异项（日志、监控端点），路由/限流/IP 过滤继承 application.yml。
+
+spring:
+  config:
+    activate:
+      on-profile: sit
+
+# SIT 保留较详细日志，便于排查路由/限流问题
+logging:
+  level:
+    root: INFO
+    com.bend.gateway: DEBUG
+
+# 监控端点：SIT 保留 gateway 端点便于查看路由，健康详情按授权展示
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
+  endpoint:
+    health:
+      show-details: when_authorized

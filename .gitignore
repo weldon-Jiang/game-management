@@ -6,6 +6,7 @@
 .env
 .env.local
 .env.dev
+.env.sit
 .env.prod
 .env.example
 
@@ -39,3 +40,13 @@ bend-platform/target/
 bend-platform-web/dist/
 bend-agent/dist/
 .cursor/
+
+# Python 缓存与运行产物
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Agent 运行时令牌（敏感）
+bend-agent/tokens/
+docs/
