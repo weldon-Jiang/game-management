@@ -138,7 +138,6 @@ router.onError((error) => {
  * 3. 更新页面标题
  */
 router.beforeEach((to, from, next) => {
-  console.log('Router: navigating to', to.name)
   // 更新页面标题
   document.title = to.meta.title
     ? `${to.meta.title} - ${import.meta.env.VITE_APP_TITLE || 'Bend Platform'}`

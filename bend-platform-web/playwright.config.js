@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const BASE_URL = process.env.BASE_URL || process.env.E2E_BASE_URL || 'http://localhost:3090'
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -8,7 +10,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: process.env.BASE_URL || 'http://localhost:5173',
+    baseURL: BASE_URL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure'
   },
@@ -26,9 +28,12 @@ export default defineConfig({
       use: { ...devices['Desktop Safari'] }
     }
   ],
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI
-  }
+  webServer: process.env.PW_NO_WEBSERVER
+    ? undefined
+    : {
+        command: 'npm run dev',
+        url: BASE_URL,
+        reuseExistingServer: !process.env.CI,
+        timeout: 120000
+      }
 })

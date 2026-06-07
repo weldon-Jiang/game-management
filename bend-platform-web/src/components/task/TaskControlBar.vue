@@ -81,7 +81,11 @@ const selectedMode = ref('squad_battle')
 const isTerminal = computed(() => isTaskTerminal(props.taskStatus))
 
 const canStartAutomation = computed(
-  () => !isTerminal.value && (props.gameActionPending || props.sessionPhase === 'ready')
+  () =>
+    !isTerminal.value &&
+    (props.gameActionPending ||
+      props.sessionPhase === 'ready' ||
+      props.sessionPhase === 'automation_failed')
 )
 const isPaused = computed(
   () => !isTerminal.value && (props.sessionPhase?.startsWith('paused') || props.pauseMode)
@@ -105,7 +109,7 @@ const canShowWindow = computed(() => {
 const canReconnect = computed(() => {
   if (isTerminal.value) return false
   const phase = (props.sessionPhase || '').toLowerCase()
-  return ['streaming', 'ready', 'automating', 'initializing_display', 'initializing_input'].some(
+  return ['streaming', 'ready', 'automating', 'automation_failed', 'initializing_display', 'initializing_input'].some(
     (p) => phase.includes(p)
   ) || phase.startsWith('paused')
 })

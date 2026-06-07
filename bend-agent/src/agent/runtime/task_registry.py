@@ -74,10 +74,12 @@ class TaskRuntimeRegistry:
             cls._instance = cls()
         return cls._instance
 
-    def register(self, runtime: StreamingAccountTaskRuntime) -> None:
+    def register(self, runtime: StreamingAccountTaskRuntime, replace: bool = False) -> None:
         with self._lock:
             if runtime.task_id in self._runtimes:
-                raise ValueError(f"Task {runtime.task_id} already registered")
+                if not replace:
+                    raise ValueError(f"Task {runtime.task_id} already registered")
+                self._runtimes.pop(runtime.task_id, None)
             self._runtimes[runtime.task_id] = runtime
             self.logger.info("Registered task runtime: %s", runtime.task_id)
 

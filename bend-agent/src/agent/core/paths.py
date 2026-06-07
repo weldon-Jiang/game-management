@@ -5,7 +5,8 @@ PyInstaller 打包后，__file__ 会指向临时目录，需要特殊处理
 """
 import os
 import sys
-import inspect
+from pathlib import Path
+from typing import Union
 
 
 def get_base_dir() -> str:
@@ -18,11 +19,27 @@ def get_base_dir() -> str:
     返回值：基准目录路径
     """
     if getattr(sys, 'frozen', False):
-        # PyInstaller 打包后
         return os.path.dirname(sys.executable)
-    else:
-        # 开发环境 - 返回 src 目录的父目录
-        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def get_agent_root() -> Path:
+    """Return bend-agent install root (configs/, templates/, logs/)."""
+    base = Path(get_base_dir()).resolve()
+    if getattr(sys, 'frozen', False):
+        return base
+    parent = base.parent
+    if (parent / 'templates').is_dir() or (parent / 'configs').is_dir():
+        return parent
+    return base
+
+
+def resolve_agent_path(path: Union[str, Path]) -> Path:
+    """Resolve a config path relative to bend-agent root when not absolute."""
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    return (get_agent_root() / candidate).resolve()
 
 
 def get_config_path() -> str:
@@ -49,8 +66,7 @@ def get_templates_dir() -> str:
 
     返回值：templates 目录完整路径
     """
-    base_dir = get_base_dir()
-    return os.path.join(base_dir, 'templates')
+    return str(get_agent_root() / 'templates')
 
 
 def get_logs_dir() -> str:
@@ -73,8 +89,7 @@ def get_logs_dir_fallback() -> str:
     """
     if getattr(sys, 'frozen', False):
         return get_logs_dir()
-    else:
-        return os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-            'logs'
-        )
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+        'logs',
+    )

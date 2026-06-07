@@ -27,6 +27,17 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.*;
 
+/**
+ * Agent 回调服务实现（平台侧的回调入口）。
+ *
+ * <p>处理 Agent 在执行四步骤过程中上报的统一进度（{@link #reportProgress}）以及 Xbox 主机锁定、
+ * 凭证兑换、档案绑定回写等回调。进度按 {@code scope} 分流：session（会话阶段）、module
+ * （账号开通）、game_account（单账号）以及任务级 status（RUNNING/COMPLETED/FAILED/GAMING 等），
+ * 并据此推进任务状态机、更新游戏账号执行状态、在终态释放账号占用与 Agent 负载计数。</p>
+ *
+ * <p>所有回调均经 {@link #requireTaskForAuthenticatedAgent} 校验任务归属于当前认证的 Agent，
+ * 防止跨 Agent 越权操作。响应中的 action 字段（CONTINUE/STOP）用于指示 Agent 后续行为。</p>
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -42,6 +53,16 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     private final StreamingSessionService streamingSessionService;
     private final TaskEventMapper taskEventMapper;
 
+    /**
+     * 统一进度上报入口。
+     *
+     * <p>校验 taskId/status 必填与任务归属后，先落库一条任务事件，再按 scope 分流处理：
+     * session/module/game_account 走各自处理器；否则按任务级 status 推进任务与游戏账号状态。
+     * 返回体含 received 与 action（CONTINUE 继续 / STOP 结束）指示 Agent 后续行为。</p>
+     *
+     * @param payload 含 taskId 及嵌套 data（step/status/message/scope/metrics/error 等）
+     * @return 处理结果，含 action 指令
+     */
     @Override
     public Map<String, Object> reportProgress(Map<String, Object> payload) {
         log.info("【v2.0】统一进度上报 - Payload: {}", payload);
@@ -355,7 +376,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
                 Map<String, Object> streamingInfo = new HashMap<>();
                 streamingInfo.put("id", streamingAccount.getId());
                 streamingInfo.put("email", streamingAccount.getEmail());
-                streamingInfo.put("name", streamingAccount.getName());
+                streamingInfo.put("name", streamingAccount.getDisplayLabel());
                 result.put("streamingAccount", streamingInfo);
             }
         }
@@ -520,12 +541,23 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             positionIndex = Integer.parseInt(String.valueOf(posRaw));
         }
 
-        gameAccountService.updateProfileBinding(gameAccountId, profileBound, positionIndex);
+        String gameName = null;
+        Object nameRaw = payload.get("gameName");
+        if (nameRaw == null) {
+            nameRaw = payload.get("game_name");
+        }
+        if (nameRaw != null && !String.valueOf(nameRaw).isBlank()) {
+            gameName = String.valueOf(nameRaw).trim();
+        }
 
+        gameAccountService.updateProfileBinding(gameAccountId, profileBound, positionIndex, gameName);
+
+        GameAccount updated = gameAccountService.findById(gameAccountId);
         Map<String, Object> result = new HashMap<>();
         result.put("gameAccountId", gameAccountId);
         result.put("profileBound", profileBound != null ? profileBound : account.getProfileBound());
         result.put("positionIndex", positionIndex != null ? positionIndex : account.getPositionIndex());
+        result.put("gameName", updated != null ? updated.getGameName() : account.getGameName());
         return result;
     }
 
@@ -639,6 +671,9 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             event.setMessage(message);
             event.setGameAccountId((String) data.get("gameAccountId"));
             event.setModule((String) data.get("module"));
+            if (task.getSessionId() != null) {
+                event.setSessionId(task.getSessionId());
+            }
             taskEventMapper.insert(event);
         } catch (Exception e) {
             log.debug("task_event insert skipped: {}", e.getMessage());
@@ -678,8 +713,16 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         String phase = (String) data.get("phase");
         if (phase != null) {
             task.setSessionPhase(phase);
-            if ("ready".equals(phase)) {
+            if ("ready".equals(phase) || "automation_failed".equals(phase)) {
                 task.setGameActionPending(true);
+                if ("running".equals(task.getStatus())
+                        || "paused".equals(task.getStatus())
+                        || ("automation_failed".equals(phase) && "failed".equals(task.getStatus()))) {
+                    task.setStatus("running");
+                }
+                if ("automation_failed".equals(phase)) {
+                    task.setErrorMessage(null);
+                }
             }
             if (phase.startsWith("paused")) {
                 task.setStatus("paused");
@@ -733,6 +776,23 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             if (data.get("stepTotal") instanceof Number stepTotal) {
                 gaStatus.setProvisioningStepTotal(stepTotal.intValue());
             }
+
+            String accountStatus = (String) data.get("accountStatus");
+            if (accountStatus != null && !accountStatus.isBlank()) {
+                gaStatus.setStatus(accountStatus.toLowerCase());
+            } else if ("FAILED".equals(status)) {
+                gaStatus.setStatus("failed");
+            } else if ("SKIPPED".equals(status)) {
+                gaStatus.setStatus("skipped");
+            }
+
+            String errorMessage = (String) data.get("errorMessage");
+            if (errorMessage != null && !errorMessage.isBlank()) {
+                gaStatus.setErrorMessage(errorMessage);
+            } else if ("FAILED".equals(status) && data.get("message") != null) {
+                gaStatus.setErrorMessage(String.valueOf(data.get("message")));
+            }
+
             statusService.updateProvisioningStatus(gaStatus);
         }
 

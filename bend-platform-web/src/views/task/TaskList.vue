@@ -289,7 +289,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -307,6 +307,8 @@ import {
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+
+const TASK_LIST_AGENT_KEY = 'taskList.defaultAgentId'
 
 const goDetail = (row) => {
   router.push(`/tasks/${row.id}`)
@@ -479,6 +481,9 @@ const initFromRoute = async () => {
   if (route.query.status) {
     filterStatus.value = route.query.status
   }
+  if (route.query.streamingAccountId) {
+    filterStreamingAccountId.value = route.query.streamingAccountId
+  }
 
   if (route.query.agentId) {
     filterAgentId.value = route.query.agentId
@@ -494,6 +499,29 @@ const initFromRoute = async () => {
     }
   }
 }
+
+const applyDefaultAgentFilter = () => {
+  if (filterAgentId.value) {
+    return
+  }
+  const saved = localStorage.getItem(TASK_LIST_AGENT_KEY)
+  if (saved && agentOptions.value.some((agent) => agent.agentId === saved)) {
+    filterAgentId.value = saved
+    return
+  }
+  const online = onlineAgents.value.find((agent) => agent.status === 'online')
+  if (online) {
+    filterAgentId.value = online.agentId
+  } else if (agentOptions.value.length) {
+    filterAgentId.value = agentOptions.value[0].agentId
+  }
+}
+
+watch(filterAgentId, (value) => {
+  if (value) {
+    localStorage.setItem(TASK_LIST_AGENT_KEY, value)
+  }
+})
 
 const showCreateDialog = () => {
   createForm.name = ''
@@ -636,8 +664,9 @@ onMounted(async () => {
   await loadMerchants()
   await initFromRoute()
   await loadFilterOptions()
+  await loadOnlineAgents()
+  applyDefaultAgentFilter()
   loadData()
-  loadOnlineAgents()
 })
 </script>
 

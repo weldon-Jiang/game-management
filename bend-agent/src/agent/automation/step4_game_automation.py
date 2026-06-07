@@ -50,9 +50,6 @@ from ..input.football_controller import FootballController
 from ..input.controller_protocol import XboxButtonFlag
 from ..scene.scene_action_mapper import SceneActionMapper
 
-automation_engine = None
-account_switcher = None
-
 VALID_TASK_TYPES = frozenset({
     'auction_transfer',
     'squad_battle',
@@ -119,6 +116,34 @@ WEEKEND_LEAGUE_REQUIREMENTS = {
 }
 
 
+def _resolve_template_dir() -> str:
+    from ..core.config import config as agent_config
+    from ..core.paths import get_templates_dir, resolve_agent_path
+
+    configured = agent_config.get('template.template_dir', './templates')
+    if configured in ('./templates', 'templates'):
+        return get_templates_dir()
+    return str(resolve_agent_path(configured))
+
+
+async def _validate_step4_templates(logger) -> Optional[str]:
+    """Return an error message when required templates are missing."""
+    from ..vision.template_manager import validate_templates
+
+    template_dir = _resolve_template_dir()
+    ok, missing = validate_templates(template_dir)
+    if ok:
+        logger.info("场景模板预检通过 (dir=%s)", template_dir)
+        return None
+
+    sample = ", ".join(missing[:8])
+    suffix = f" 等共 {len(missing)} 个" if len(missing) > 8 else ""
+    return (
+        f"场景模板缺失 ({len(missing)} 个): {sample}{suffix}。"
+        f"请确认模板目录 {template_dir} 存在，或运行 bend-agent/tools/sync_scene_schemas.py 同步模板。"
+    )
+
+
 async def _ensure_streaming_scene_detector(context: AgentTaskContext, logger):
     """创建或复用 StreamingSceneDetector，写入 context。"""
     if getattr(context, '_streaming_scene_detector', None) is not None:
@@ -127,7 +152,7 @@ async def _ensure_streaming_scene_detector(context: AgentTaskContext, logger):
     from ..core.config import config as agent_config
     from ..scene.streaming_scene_detector import StreamingSceneDetector
 
-    template_dir = agent_config.get('template.template_dir', './templates')
+    template_dir = _resolve_template_dir()
     threshold = float(agent_config.get('template.threshold', 0.8))
     detector = StreamingSceneDetector(
         template_dir=template_dir,
@@ -406,6 +431,99 @@ async def _launch_fc_with_manual_pause(
                 return False
 
 
+# 启动 FC 失败但仍停留 Xbox 主页时，重启启动链的最大次数
+FC_LAUNCH_HOME_RETRY_MAX = 3
+
+
+async def _retry_fc_launch_if_on_home(
+    switcher,
+    context: AgentTaskContext,
+    game_account: GameAccountInfo,
+    check_cancel: Callable[[], bool],
+    report_progress: Callable,
+    set_session_phase: Optional[Callable],
+    logger,
+    stream_logger,
+) -> bool:
+    """
+    启动 FC 失败后，若画面仍停留 Xbox 主页(scene203)，重启 FC 启动链而非空等跳过。
+
+    背景：MAIN_MENU 仅匹配 UT 场景 [127,149,147,101]，在 Xbox 主页恒超时（25s），
+    导致「切换成功 -> MAIN_MENU 盲等 -> 跳过账号」的死循环。此处在确认仍在主页时
+    重启启动链；若多次仍停 203，启动链内部会抛出 ManualInterventionRequired 转入暂停。
+
+    返回：True 表示重启后已进入 FC/UT；False 表示已离开主页（交由 MAIN_MENU 校验）
+    或重试耗尽。
+    """
+    for attempt in range(1, FC_LAUNCH_HOME_RETRY_MAX + 1):
+        if check_cancel():
+            return False
+
+        try:
+            on_home = await switcher._is_home_203_dominant()
+        except Exception as exc:
+            logger.debug("主页 203 检测异常，跳过重启逻辑: %s", exc)
+            return False
+
+        if not on_home:
+            logger.info("启动 FC 失败但已离开 Xbox 主页，交由 MAIN_MENU 校验")
+            return False
+
+        retry_msg = (
+            f"账号 {game_account.gamertag} 启动 FC 失败且仍停留 Xbox 主页(scene203)，"
+            f"重启 FC 启动链（第 {attempt}/{FC_LAUNCH_HOME_RETRY_MAX} 次）"
+        )
+        logger.warning(retry_msg)
+        stream_logger.warning(retry_msg)
+
+        launch_ok = await _launch_fc_with_manual_pause(
+            switcher,
+            context,
+            game_account,
+            check_cancel,
+            report_progress,
+            set_session_phase,
+            logger,
+            stream_logger,
+        )
+        if launch_ok:
+            return True
+        await asyncio.sleep(2.0)
+
+    logger.error(
+        "账号 %s 多次重启 FC 启动链后仍停留 Xbox 主页，放弃该账号",
+        game_account.gamertag,
+    )
+    return False
+
+
+async def _report_step4_failure(
+    context: AgentTaskContext,
+    report_progress: Callable,
+    error_msg: str,
+    keep_session_alive: bool,
+    logger,
+) -> None:
+    """Report step4 failure; optionally keep stream/session alive for manual retry."""
+    if keep_session_alive:
+        logger.error("%s (stream kept alive for retry)", error_msg)
+        window_state = "visible" if getattr(context, "sdl_window", None) else "hidden"
+        await report_progress(
+            context.task_id,
+            "SESSION",
+            "RUNNING",
+            error_msg,
+            {
+                "scope": "session",
+                "phase": "automation_failed",
+                "windowState": window_state,
+            },
+        )
+        return
+    logger.error(error_msg)
+    await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
+
+
 async def step4_execute_gaming(
     context: AgentTaskContext,
     check_cancel: Callable[[], bool],
@@ -416,6 +534,8 @@ async def step4_execute_gaming(
     skipped_accounts: Optional[set] = None,
     pause_after_match: Optional[Callable[[], bool]] = None,
     set_session_phase: Optional[Callable] = None,
+    keep_session_alive: bool = False,
+    input_gate: Optional[Any] = None,
 ) -> Step4Result:
     """
     步骤四执行：自动操作Xbox主机
@@ -446,8 +566,6 @@ async def step4_execute_gaming(
     返回：
     - Step4Result: 包含游戏自动化结果的Step4Result
     """
-    global automation_engine, account_switcher
-
     logger = get_logger(f'step4_game_{context.task_id}')
     stream_logger = get_stream_logger(context.streaming_account_email)
     logger.info("=== 步骤四：开始自动操作Xbox主机 ===")
@@ -459,21 +577,40 @@ async def step4_execute_gaming(
         error_msg = "步骤三未初始化画面捕获器，无法执行游戏自动化"
         logger.error(error_msg)
         context.update_step_status("step4", TaskStepStatus.FAILED, error_msg)
-        await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
+        await _report_step4_failure(
+            context, report_progress, error_msg, keep_session_alive, logger
+        )
         return Step4Result(success=False, error_code="NO_CAPTURE", message=error_msg)
 
     logger.info("画面捕获器可用，开始自动操作Xbox主机")
 
-    engine, switcher = await _init_game_automation(context, logger, platform_client)
+    template_error = await _validate_step4_templates(logger)
+    if template_error:
+        await _report_step4_failure(
+            context, report_progress, template_error, keep_session_alive, logger
+        )
+        context.update_step_status("step4", TaskStepStatus.FAILED, template_error)
+        return Step4Result(
+            success=False,
+            error_code="MISSING_TEMPLATES",
+            message=template_error,
+        )
+
+    engine, switcher = await _init_game_automation(
+        context, logger, platform_client, input_gate=input_gate
+    )
     if not engine or not switcher:
         error_msg = "游戏自动化引擎初始化失败"
         logger.error(error_msg)
         context.update_step_status("step4", TaskStepStatus.FAILED, error_msg)
-        await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
+        await _report_step4_failure(
+            context, report_progress, error_msg, keep_session_alive, logger
+        )
         return Step4Result(success=False, error_code="ENGINE_INIT_FAILED", message=error_msg)
 
-    automation_engine = engine
-    account_switcher = switcher
+    # 引擎/切换器随 context 传递，避免模块级全局在多任务并发时互相覆盖
+    context._automation_engine = engine
+    context._account_switcher = switcher
 
     global_frame_queue = None
     global_scene_queue = None
@@ -484,9 +621,9 @@ async def step4_execute_gaming(
 
     async def _send_controller_signal(signal):
         """发送手柄信号到Xbox"""
-        if automation_engine and hasattr(automation_engine, 'send_controller_signal'):
+        if engine and hasattr(engine, 'send_controller_signal'):
             try:
-                await automation_engine.send_controller_signal(signal)
+                await engine.send_controller_signal(signal)
                 logger.debug(f"[手柄信号] 发送: {signal}")
             except Exception as e:
                 logger.error(f"[手柄信号] 发送失败: {e}")
@@ -546,9 +683,18 @@ async def step4_execute_gaming(
 
         if provisioning_module is not None and hasattr(provisioning_module, "refresh_dependencies"):
             detector = await _ensure_streaming_scene_detector(context, logger)
+
+            async def _capture_for_provisioning():
+                if context.frame_capture is None:
+                    return None
+                return await context.frame_capture.capture_frame()
+
             provisioning_module.refresh_dependencies(
                 detector,
                 getattr(context, "_controller_protocol", None),
+                platform_client=platform_client,
+                frame_getter=_capture_for_provisioning,
+                stream_session=getattr(context, "xbox_session", None),
             )
 
         for account_index, game_account in enumerate(context.game_accounts):
@@ -613,10 +759,10 @@ async def step4_execute_gaming(
                 lambda: getattr(context, "xbox_session", None),
                 interval=4.0,
             ):
-                switch_result = await account_switcher.switch_to(game_account.id)
+                switch_result = await switcher.switch_to(game_account.id)
                 if switch_result.success:
                     launch_ok = await _launch_fc_with_manual_pause(
-                        account_switcher,
+                        switcher,
                         context,
                         game_account,
                         check_cancel,
@@ -636,19 +782,19 @@ async def step4_execute_gaming(
 
                         if await reconnect_input_channel(context, logger):
                             executor = (
-                                automation_engine._action_executor
-                                if automation_engine
-                                and hasattr(automation_engine, "_action_executor")
+                                engine._action_executor
+                                if engine
+                                and hasattr(engine, "_action_executor")
                                 else None
                             )
                             rebind_stream_bindings(
                                 context,
                                 executor=executor,
-                                switcher=account_switcher,
-                                engine=automation_engine,
+                                switcher=switcher,
+                                engine=engine,
                             )
                             launch_ok = await _launch_fc_with_manual_pause(
-                                account_switcher,
+                                switcher,
                                 context,
                                 game_account,
                                 check_cancel,
@@ -657,6 +803,20 @@ async def step4_execute_gaming(
                                 logger,
                                 stream_logger,
                             )
+
+                    if not launch_ok:
+                        # 仍失败：若画面仍停留 Xbox 主页(scene203)，重启 FC 启动链，
+                        # 避免「切换成功 -> MAIN_MENU 盲等 25s -> 跳过」的死循环
+                        launch_ok = await _retry_fc_launch_if_on_home(
+                            switcher,
+                            context,
+                            game_account,
+                            check_cancel,
+                            report_progress,
+                            set_session_phase,
+                            logger,
+                            stream_logger,
+                        )
 
                     if not launch_ok:
                         launch_msg = (
@@ -826,11 +986,13 @@ async def step4_execute_gaming(
 
         if total_matches > 0 and completed_matches == 0:
             error_msg = "游戏自动化结束但未完成任何比赛"
-            logger.error(error_msg)
             stream_logger.error(error_msg)
             context.update_step_status("step4", TaskStepStatus.FAILED, error_msg)
-            await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
-            await _close_task_window(window_manager, context.task_id, "no_matches", logger)
+            await _report_step4_failure(
+                context, report_progress, error_msg, keep_session_alive, logger
+            )
+            if not keep_session_alive:
+                await _close_task_window(window_manager, context.task_id, "no_matches", logger)
             return Step4Result(
                 success=False,
                 error_code="NO_MATCHES_COMPLETED",
@@ -844,46 +1006,60 @@ async def step4_execute_gaming(
         context.update_step_status("step4", TaskStepStatus.COMPLETED, success_msg)
         await report_progress(context.task_id, "STEP4", "COMPLETED", success_msg)
 
-        await _close_task_window(window_manager, context.task_id, "task_completed", logger)
+        if not keep_session_alive:
+            await _close_task_window(window_manager, context.task_id, "task_completed", logger)
 
         return Step4Result(success=True, message=success_msg, total_matches=completed_matches)
 
     except asyncio.CancelledError:
         logger.info("步骤四被取消")
         context.update_step_status("step4", TaskStepStatus.SKIPPED, "任务被取消")
-        await _close_task_window(window_manager, context.task_id, "task_cancelled", logger)
+        if not keep_session_alive:
+            await _close_task_window(window_manager, context.task_id, "task_cancelled", logger)
         return Step4Result(success=False, error_code="CANCELLED", message="任务被取消")
 
     except asyncio.TimeoutError as e:
         error_msg = f"步骤四执行超时: {str(e)}"
         logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step4", TaskStepStatus.FAILED, error_msg, str(e))
-        await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
-        await _close_task_window(window_manager, context.task_id, "timeout", logger)
+        await _report_step4_failure(
+            context, report_progress, error_msg, keep_session_alive, logger
+        )
+        if not keep_session_alive:
+            await _close_task_window(window_manager, context.task_id, "timeout", logger)
         return Step4Result(success=False, error_code="TIMEOUT", message=error_msg)
 
     except ConnectionError as e:
         error_msg = f"步骤四网络连接失败: {str(e)}"
         logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step4", TaskStepStatus.FAILED, error_msg, str(e))
-        await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
-        await _close_task_window(window_manager, context.task_id, "connection_error", logger)
+        await _report_step4_failure(
+            context, report_progress, error_msg, keep_session_alive, logger
+        )
+        if not keep_session_alive:
+            await _close_task_window(window_manager, context.task_id, "connection_error", logger)
         return Step4Result(success=False, error_code="CONNECTION_ERROR", message=error_msg)
 
     except ValueError as e:
         error_msg = f"步骤四参数错误: {str(e)}"
         logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step4", TaskStepStatus.FAILED, error_msg, str(e))
-        await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
-        await _close_task_window(window_manager, context.task_id, "value_error", logger)
+        await _report_step4_failure(
+            context, report_progress, error_msg, keep_session_alive, logger
+        )
+        if not keep_session_alive:
+            await _close_task_window(window_manager, context.task_id, "value_error", logger)
         return Step4Result(success=False, error_code="VALUE_ERROR", message=error_msg)
 
     except Exception as e:
         error_msg = f"步骤四执行异常: {str(e)}"
         logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step4", TaskStepStatus.FAILED, error_msg, str(e))
-        await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
-        await _close_task_window(window_manager, context.task_id, "error", logger)
+        await _report_step4_failure(
+            context, report_progress, error_msg, keep_session_alive, logger
+        )
+        if not keep_session_alive:
+            await _close_task_window(window_manager, context.task_id, "error", logger)
         return Step4Result(success=False, error_code="EXCEPTION", message=error_msg)
 
     finally:
@@ -920,6 +1096,7 @@ async def _init_game_automation(
     context: AgentTaskContext,
     logger,
     platform_client: Optional[Any] = None,
+    input_gate: Optional[Any] = None,
 ):
     """
     初始化游戏自动化引擎
@@ -931,8 +1108,6 @@ async def _init_game_automation(
     返回：
     - (automation_engine, account_switcher) 或 (None, None)
     """
-    global automation_engine, account_switcher
-
     try:
         from ..scene.game_automation_engine import GameAutomationEngine, ActionExecutor
         from ..scene.scene_detector import SceneDetector, SceneState
@@ -970,13 +1145,15 @@ async def _init_game_automation(
                 logger.warning(f"场景检测器创建失败: {e}")
 
         executor = ActionExecutor()
+        if input_gate is not None:
+            executor.set_input_gate(input_gate)
         if context.xbox_session:
             executor.set_xbox_session(context.xbox_session)
             logger.info("动作执行器已绑定Xbox会话")
         else:
             logger.warning("Xbox会话不可用，动作执行器将无法发送信号")
 
-        await _init_gamepad_protocol(context, executor, logger)
+        await _init_gamepad_protocol(context, executor, logger, input_gate=input_gate)
 
         engine = GameAutomationEngine()
         if scene_detector and context.xbox_session:
@@ -1003,6 +1180,8 @@ async def _init_game_automation(
         ]
         switcher.set_accounts(accounts_data)
         switcher.set_action_executor(executor)
+        if input_gate is not None:
+            switcher.set_input_gate(input_gate)
         if context.xbox_session:
             switcher.set_stream_session(context.xbox_session)
 
@@ -1024,11 +1203,16 @@ async def _init_game_automation(
 
         if platform_client and hasattr(platform_client, "update_profile_binding"):
 
-            async def _mark_profile_bound(ga_id: str, position_index: int) -> None:
+            async def _mark_profile_bound(
+                ga_id: str,
+                position_index: int,
+                game_name: Optional[str] = None,
+            ) -> None:
                 await platform_client.update_profile_binding(
                     ga_id,
                     profile_bound=True,
                     position_index=position_index,
+                    game_name=game_name,
                 )
 
             switcher.set_profile_bound_callback(_mark_profile_bound)
@@ -1278,15 +1462,15 @@ async def _navigate_to_squad_battle(
     logger.info("导航到SQB模式 (SCENE_TRANSITIONS 链)")
     game_logger.info("[SQB] 开始导航 (scene_transitions 链)")
 
-    global account_switcher
+    switcher = getattr(context, '_account_switcher', None)
 
     try:
-        if not account_switcher:
+        if not switcher:
             logger.error("[SQB] account_switcher 未初始化，无法执行场景转移链")
             game_logger.error("[SQB] account_switcher 未初始化")
             return
 
-        current = await account_switcher._detect_any_scene(
+        current = await switcher._detect_any_scene(
             SQB_NAVIGATION_SCENES, strict=False
         )
         chain = trim_sqb_navigation_chain(current)
@@ -1298,7 +1482,7 @@ async def _navigate_to_squad_battle(
         logger.info(f"[SQB] 当前 scene={current}，执行链: {chain}")
         game_logger.info(f"[SQB] 链: {chain}")
 
-        ok = await account_switcher.run_scene_transition_chain(
+        ok = await switcher.run_scene_transition_chain(
             chain,
             label="SQB",
             complete_scenes=SQB_COMPLETE_SCENES,
@@ -1639,7 +1823,8 @@ async def _finish_match(
 async def _init_gamepad_protocol(
     context: AgentTaskContext,
     executor,
-    logger
+    logger,
+    input_gate: Optional[Any] = None,
 ) -> bool:
     """
     初始化手柄协议（优化三）
@@ -1666,6 +1851,8 @@ async def _init_gamepad_protocol(
 
         controller_protocol = ControllerProtocol()
         controller_protocol.set_stream_controller(context.xbox_session)
+        if input_gate is not None:
+            controller_protocol.set_input_gate(input_gate)
 
         executor.set_controller_protocol(controller_protocol)
 

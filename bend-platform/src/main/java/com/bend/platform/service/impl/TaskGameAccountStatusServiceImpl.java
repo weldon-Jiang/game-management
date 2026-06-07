@@ -167,6 +167,14 @@ public class TaskGameAccountStatusServiceImpl implements TaskGameAccountStatusSe
 
     @Override
     @Transactional
+    public void deleteByTaskId(String taskId) {
+        LambdaQueryWrapper<TaskGameAccountStatus> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(TaskGameAccountStatus::getTaskId, taskId);
+        statusMapper.delete(wrapper);
+    }
+
+    @Override
+    @Transactional
     public void updateDailyMatchInfo(String taskId, String gameAccountId, Integer todayCompleted, Integer dailyLimit) {
         TaskGameAccountStatus record = findByTaskIdAndGameAccountId(taskId, gameAccountId);
         if (record != null) {

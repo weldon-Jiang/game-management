@@ -720,8 +720,6 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
     - 四步骤串行执行，任一步骤失败则任务失败
     - 无需 Xbox App 窗口，纯协议控制
     """
-    from ..task.automation_scheduler import AutomationScheduler
-
     streaming_account = params.get('streamingAccount', {})
     game_accounts = params.get('gameAccounts', [])
     task_id = params.get('taskId', '')
@@ -749,6 +747,8 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
         two_phase = True
         game_action_type = ''
 
+    relaunch = bool(params.get('relaunch'))
+
     if not streaming_account:
         raise Exception("缺少流媒体账号信息")
 
@@ -759,8 +759,13 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
     from ..core.credentials_provider import get_credentials
     agent_id, agent_secret = get_credentials()
 
-    # 创建自动化调度器
-    scheduler = AutomationScheduler(agent_id=agent_id, agent_secret=agent_secret)
+    from ..task.automation_scheduler import AutomationScheduler, get_active_scheduler
+
+    scheduler = get_active_scheduler()
+    if scheduler is None:
+        scheduler = AutomationScheduler(agent_id=agent_id, agent_secret=agent_secret)
+    else:
+        scheduler.set_credentials(agent_id, agent_secret)
 
     try:
         # 启动自动化任务
@@ -776,6 +781,7 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
             account_platform=account_platform,
             auto_match_host=auto_match_host,
             two_phase=two_phase,
+            relaunch=relaunch,
         )
 
         if not success:
@@ -818,8 +824,10 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
         await scheduler.stop_task(task_id)
         raise Exception(f"流控制任务执行失败: {e}")
 
-    finally:
-        await scheduler.close()
+    # 注意：scheduler 为共享单例，支持多串流账号并发执行。
+    # 此处禁止调用 scheduler.close()——它会触发 stop_all_tasks() 误杀其他并发任务，
+    # 并关闭共享的 PlatformApiClient。当前任务的资源已由 _run_task 的 finally
+    # 及各步骤（窗口关闭 / 串流断开）自行清理，无需在此关闭整个调度器。
 
 
 async def handle_template_match(params: Dict[str, Any], check_cancel: Callable) -> Dict[str, Any]:

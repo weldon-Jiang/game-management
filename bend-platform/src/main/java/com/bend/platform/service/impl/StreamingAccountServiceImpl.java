@@ -1,6 +1,7 @@
 package com.bend.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.ImportResultDto;
@@ -16,6 +17,7 @@ import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.util.AesUtil;
 import com.bend.platform.util.DataSecurityUtil;
 import com.bend.platform.util.PlatformTypeUtil;
+import org.apache.commons.lang3.StringUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -68,14 +70,9 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             throw new BusinessException(ResultCode.StreamingAccount.EMAIL_DUPLICATE);
         }
 
-        // 检查名称是否已被使用
-        if (findByName(name) != null) {
-            throw new BusinessException(ResultCode.StreamingAccount.NAME_DUPLICATE);
-        }
-
         StreamingAccount account = new StreamingAccount();
         account.setMerchantId(merchantId);
-        account.setName(name);
+        account.setName(normalizeOptionalName(name));
         account.setEmail(email);
         account.setPasswordEncrypted(aesUtil.encrypt(password));
         account.setAuthCode(authCode);
@@ -105,9 +102,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         merchantService.validateMerchantActive(merchantId);
 
         Set<String> emailSet = new HashSet<>();
-        Set<String> nameSet = new HashSet<>();
         Set<String> existEmails = new HashSet<>();
-        Set<String> existNames = new HashSet<>();
         List<StreamingAccountImportDto> toImport = new ArrayList<>();
 
         for (int i = 0; i < accounts.size(); i++) {
@@ -116,11 +111,6 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
 
             if (emailSet.contains(dto.getEmail())) {
                 errors.add(String.format("第%d行: 邮箱[%s]重复", rowNum, dto.getEmail()));
-                continue;
-            }
-
-            if (nameSet.contains(dto.getName())) {
-                errors.add(String.format("第%d行: 账号名称[%s]重复", rowNum, dto.getName()));
                 continue;
             }
 
@@ -137,15 +127,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
                 continue;
             }
 
-            StreamingAccount existingByName = findByName(dto.getName());
-            if (existingByName != null) {
-                existNames.add(dto.getName());
-                skipCount++;
-                continue;
-            }
-
             emailSet.add(dto.getEmail());
-            nameSet.add(dto.getName());
             toImport.add(dto);
         }
 
@@ -153,7 +135,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             try {
                 StreamingAccount entity = new StreamingAccount();
                 entity.setMerchantId(merchantId);
-                entity.setName(dto.getName());
+                entity.setName(null);
                 entity.setEmail(dto.getEmail());
                 entity.setPasswordEncrypted(aesUtil.encrypt(dto.getPassword()));
                 entity.setAuthCode(dto.getAuthCode());
@@ -233,7 +215,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         merchantService.validateMerchantActive(account.getMerchantId());
 
         if (name != null) {
-            account.setName(name);
+            account.setName(normalizeOptionalName(name));
         }
         if (authCode != null) {
             account.setAuthCode(authCode);
@@ -256,7 +238,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             account.setMerchantId(merchantId);
         }
         if (name != null) {
-            account.setName(name);
+            account.setName(normalizeOptionalName(name));
         }
         if (authCode != null) {
             account.setAuthCode(authCode);
@@ -277,7 +259,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
         merchantService.validateMerchantActive(account.getMerchantId());
 
         if (name != null) {
-            account.setName(name);
+            account.setName(normalizeOptionalName(name));
         }
         if (password != null) {
             account.setPasswordEncrypted(aesUtil.encrypt(password));
@@ -309,7 +291,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             account.setMerchantId(merchantId);
         }
         if (name != null) {
-            account.setName(name);
+            account.setName(normalizeOptionalName(name));
         }
         if (email != null) {
             // 检查邮箱是否与其他账号重复
@@ -345,8 +327,17 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             throw new BusinessException(ResultCode.StreamingAccount.STATUS_INVALID);
         }
 
-        account.setStatus(status);
-        streamingAccountMapper.updateById(account);
+        if ("idle".equalsIgnoreCase(status)) {
+            LambdaUpdateWrapper<StreamingAccount> wrapper = new LambdaUpdateWrapper<>();
+            wrapper.eq(StreamingAccount::getId, id)
+                    .set(StreamingAccount::getStatus, status)
+                    .set(StreamingAccount::getAgentId, null);
+            streamingAccountMapper.update(null, wrapper);
+            log.info("流媒体账号状态为空闲，自动重置运行Agent - ID: {}", id);
+        } else {
+            account.setStatus(status);
+            streamingAccountMapper.updateById(account);
+        }
         log.info("更新流媒体账号状态 - ID: {}, 新状态: {}", id, status);
     }
 
@@ -400,8 +391,15 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
         }
 
-        account.setAgentId(agentId);
-        streamingAccountMapper.updateById(account);
+        if (agentId == null) {
+            LambdaUpdateWrapper<StreamingAccount> wrapper = new LambdaUpdateWrapper<>();
+            wrapper.eq(StreamingAccount::getId, id)
+                    .set(StreamingAccount::getAgentId, null);
+            streamingAccountMapper.update(null, wrapper);
+        } else {
+            account.setAgentId(agentId);
+            streamingAccountMapper.updateById(account);
+        }
         log.info("更新流媒体账号Agent绑定 - ID: {}, AgentID: {}", id, agentId);
     }
 
@@ -413,16 +411,17 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
         }
 
-        // 只更新status字段，与taskStatus保持一致
-        account.setStatus(taskStatus);
-
-        // 状态变为空闲时，自动重置运行Agent
-        if ("idle".equalsIgnoreCase(taskStatus) && account.getAgentId() != null) {
-            account.setAgentId(null);
+        if ("idle".equalsIgnoreCase(taskStatus)) {
+            LambdaUpdateWrapper<StreamingAccount> wrapper = new LambdaUpdateWrapper<>();
+            wrapper.eq(StreamingAccount::getId, id)
+                    .set(StreamingAccount::getStatus, taskStatus)
+                    .set(StreamingAccount::getAgentId, null);
+            streamingAccountMapper.update(null, wrapper);
             log.info("流媒体账号状态为空闲，自动重置运行Agent - ID: {}", id);
+        } else {
+            account.setStatus(taskStatus);
+            streamingAccountMapper.updateById(account);
         }
-
-        streamingAccountMapper.updateById(account);
         log.info("更新流媒体账号任务状态 - ID: {}, 状态: {}", id, taskStatus);
     }
 
@@ -452,11 +451,12 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
             return;
         }
 
-        // 清空每个账号的agentId和任务状态
         for (StreamingAccount account : accounts) {
-            account.setAgentId(null);
-            account.setStatus("idle");
-            streamingAccountMapper.updateById(account);
+            LambdaUpdateWrapper<StreamingAccount> wrapper = new LambdaUpdateWrapper<>();
+            wrapper.eq(StreamingAccount::getId, account.getId())
+                    .set(StreamingAccount::getAgentId, null)
+                    .set(StreamingAccount::getStatus, "idle");
+            streamingAccountMapper.update(null, wrapper);
             log.info("清空流媒体账号Agent绑定 - AccountID: {}, Email: {}", account.getId(), account.getEmail());
         }
 
@@ -465,5 +465,9 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
 
     private boolean isValidStatus(String status) {
         return "idle".equals(status) || "busy".equals(status) || "error".equals(status);
+    }
+
+    private String normalizeOptionalName(String name) {
+        return StringUtils.isNotBlank(name) ? name.trim() : null;
     }
 }

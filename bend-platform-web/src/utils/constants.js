@@ -369,6 +369,7 @@ export const SESSION_PHASE_MAP = {
   initializing_display: { text: '初始化画面', type: 'primary' },
   initializing_input: { text: '初始化输入', type: 'primary' },
   ready: { text: '串流就绪', type: 'success' },
+  automation_failed: { text: '自动化失败（可重试）', type: 'warning' },
   automating: { text: '自动化执行中', type: 'primary' },
   paused_immediate: { text: '已暂停', type: 'warning' },
   paused_after_match: { text: '本场后暂停', type: 'warning' },
@@ -433,6 +434,9 @@ export const TASK_EVENT_MESSAGE_MAP = {
   'Discovering console': '正在发现主机',
   'Cancelled': '已取消',
   'Account skipped': '账号已跳过',
+  '准备完成（账号已存在）': '准备完成（账号已存在）',
+  '添加账号失败': '添加账号失败',
+  '账号校验失败': '账号校验失败',
   'Input mode: virtual': '输入模式：虚拟手柄',
   'Input mode: physical': '输入模式：实体手柄'
 }

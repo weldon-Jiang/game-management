@@ -21,7 +21,16 @@ class TemplateMatcher:
         threshold: Optional[float] = None,
     ):
         self.logger = get_logger("template_matcher")
-        template_dir = template_dir or config.get("template.template_dir", "./templates")
+        if template_dir:
+            resolved_dir = template_dir
+        else:
+            from ..core.paths import get_templates_dir, resolve_agent_path
+            configured = config.get("template.template_dir", "./templates")
+            if configured in ("./templates", "templates"):
+                resolved_dir = get_templates_dir()
+            else:
+                resolved_dir = str(resolve_agent_path(configured))
+        template_dir = resolved_dir
         threshold = threshold if threshold is not None else float(
             config.get("template.threshold", 0.8)
         )

@@ -8,10 +8,7 @@
     <el-table-column label="准备阶段" min-width="180" show-overflow-tooltip>
       <template #default="{ row }">
         <span v-if="row.provisioningPhase">
-          {{ row.provisioningMessage || getProvisioningPhaseText(row.provisioningPhase) }}
-          <template v-if="row.provisioningStep">
-            ({{ row.provisioningStep }}/{{ row.provisioningStepTotal || '?' }})
-          </template>
+          {{ formatProvisioningDisplay(row) }}
         </span>
         <span v-else class="text-muted">已就绪</span>
       </template>
@@ -21,7 +18,7 @@
         {{ getGameAccountPhaseText(row.phase) }}
       </template>
     </el-table-column>
-    <el-table-column label="场次" width="108" align="center">
+    <el-table-column v-if="showMatchProgress" label="场次" width="108" align="center">
       <template #default="{ row }">
         {{ row.completedCount || 0 }}/{{ row.totalMatches || 0 }}
         <span v-if="row.failedCount" class="text-danger"> (失败{{ row.failedCount }})</span>
@@ -40,7 +37,7 @@
         <span v-else class="text-muted">-</span>
       </template>
     </el-table-column>
-    <el-table-column label="操作" width="72" align="center">
+    <el-table-column v-if="!readonly" label="操作" width="72" align="center">
       <template #default="{ row }">
         <el-button
           v-if="row.status === 'pending' || row.status === 'running'"
@@ -64,9 +61,23 @@ import {
 } from '@/utils/constants'
 
 defineProps({
-  rows: { type: Array, default: () => [] }
+  rows: { type: Array, default: () => [] },
+  showMatchProgress: { type: Boolean, default: true },
+  readonly: { type: Boolean, default: false }
 })
 defineEmits(['skip'])
+
+function formatProvisioningDisplay(row) {
+  const phase = String(row.provisioningPhase || '').toLowerCase()
+  const message = row.provisioningMessage || getProvisioningPhaseText(row.provisioningPhase)
+  if (phase === 'ready' || phase === 'failed' || phase === 'skipped') {
+    return message
+  }
+  if (row.provisioningStep && row.provisioningStepTotal) {
+    return `${message} (${row.provisioningStep}/${row.provisioningStepTotal})`
+  }
+  return message
+}
 </script>
 
 <style scoped>

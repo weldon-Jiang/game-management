@@ -7,7 +7,7 @@
     python scripts/calibrate_account_positions.py --streaming-id <id> --slots 5
 
 流程：进入场景6 → 从顶部起逐格 DOWN → 每格保存截图到 logs/account_slots/
-根据截图中的 gamertag 填写平台 game_account.position_index（0=最上）。
+对照截图核对 gamertag 与 gameName 是否一致；切换时 Agent 会 OCR 自动定位，无需手填 position_index。
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ async def _run(streaming_id: str, slots: int, max_step: int) -> int:
             await switcher._press_button("DPAD_DOWN", duration=0.1)
             await asyncio.sleep(0.5)
 
-    print("\n对照截图中的 gamertag，在平台更新 game_account.position_index（0=最上方）")
+    print("\n对照截图核对 gamertag 是否与平台 gameName 一致（Agent 切换时 OCR 自动定位）")
     for ga in params.get("gameAccounts", []):
         print(f"  - {ga.get('gameName')} (id={ga.get('id')})")
     return 0

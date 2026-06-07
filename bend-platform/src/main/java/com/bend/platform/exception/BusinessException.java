@@ -20,39 +20,56 @@ public class BusinessException extends RuntimeException {
 
     private final int code;
     private final String message;
+    private final Object data;
 
     public BusinessException(ResultCode resultCode) {
         super(resultCode.getMessage());
         this.code = resultCode.getCode();
         this.message = resultCode.getMessage();
+        this.data = null;
     }
 
     public BusinessException(ResultCode resultCode, String customMessage) {
         super(customMessage);
         this.code = resultCode.getCode();
         this.message = customMessage;
+        this.data = null;
     }
 
     public BusinessException(ResultCode resultCode, Throwable cause) {
         super(resultCode.getMessage(), cause);
         this.code = resultCode.getCode();
         this.message = resultCode.getMessage();
+        this.data = null;
     }
 
     public BusinessException(int code, String message) {
         super(message);
         this.code = code;
         this.message = message;
+        this.data = null;
+    }
+
+    public BusinessException(int code, String message, Object data) {
+        super(message);
+        this.code = code;
+        this.message = message;
+        this.data = data;
     }
 
     public BusinessException(int code, String message, Throwable cause) {
         super(message, cause);
         this.code = code;
         this.message = message;
+        this.data = null;
     }
 
     public int getCode() {
         return code;
+    }
+
+    public Object getData() {
+        return data;
     }
 
     @Override

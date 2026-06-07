@@ -9,7 +9,7 @@
     </el-steps>
 
     <div v-if="step === 0" class="step-body">
-      <p class="mb-8">串流账号: <strong>{{ account?.name }}</strong> ({{ account?.email }})</p>
+      <p class="mb-8">串流账号: <strong>{{ account?.email }}</strong></p>
       <p class="label">选择游戏账号（可多选）</p>
       <el-checkbox-group v-model="form.gameAccountIds" class="ga-list">
         <el-checkbox
@@ -84,7 +84,7 @@
 <script setup>
 import { ref, reactive, watch, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { automationApi } from '@/api/automation'
 import { taskApi } from '@/api/task'
 import SessionPhaseStepper from '@/components/task/SessionPhaseStepper.vue'
@@ -134,9 +134,6 @@ watch(() => props.modelValue, (v) => {
     form.gameAccountIds = props.gameAccounts.map((ga) => ga.id)
     const boundAgent = props.agents.find((a) => a.agentId === props.account?.agentId)
     form.agentId = boundAgent?.agentId || (props.agents.length === 1 ? props.agents[0].agentId : '')
-    // #region agent log
-    fetch('http://127.0.0.1:7598/ingest/9cbbab43-1405-4014-8793-f701df850f81',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c660bd'},body:JSON.stringify({sessionId:'c660bd',location:'StartWizard.vue:watch:modelValue',message:'wizard opened agent init',data:{agentsCount:props.agents.length,accountAgentId:props.account?.agentId,selectedAgentId:form.agentId},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
   }
 })
 watch(visible, (v) => emit('update:modelValue', v))
@@ -209,7 +206,28 @@ const startStreaming = async () => {
     statusMessage.value = '正在认证与发现主机...'
     startPoll()
     emit('started', res.data)
-    ElMessage.success('串流已启动')
+    ElMessage.success(res.data?.reused ? '已复用任务并启动串流' : '串流已启动')
+  } catch (error) {
+    const conflict = error?.data
+    if (conflict?.taskId) {
+      try {
+        await ElMessageBox.confirm(
+          error.message || '该串流账号正在运行任务',
+          '无法启动串流',
+          {
+            confirmButtonText: '查看任务',
+            cancelButtonText: '知道了',
+            type: 'warning'
+          }
+        )
+        router.push(`/tasks/${conflict.taskId}`)
+        visible.value = false
+      } catch {
+        // user dismissed
+      }
+    } else {
+      ElMessage.error(error?.message || '启动串流失败')
+    }
   } finally {
     submitting.value = false
   }

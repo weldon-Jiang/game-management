@@ -9,7 +9,7 @@
 - 支持添加新用户（场景10+ 小键盘登录）
 
 技术实现说明：
-- gamertag 因人而异，列表内用 position_index + 方向键定位
+- 场景6「您是谁」列表顺序随最近登录变化，运行时 OCR 按 gamertag 定位
 - 场景 3/5/6 用 StreamingSceneDetector 校验 Xbox 系统 UI
 """
 
@@ -79,6 +79,7 @@ class AccountSwitchResult:
     to_account: Optional[str] = None
     error_message: Optional[str] = None
     time_taken: float = 0.0
+    host_gamertag: Optional[str] = None
 
 
 # 进 UT 主菜单前的场景链（对齐 streaming get_scenes_diagram）
@@ -116,6 +117,9 @@ FC_LAUNCH_MANUAL_REASON = (
     "请手工在主机上启动游戏并进入 UT 界面，完成后在平台点击「恢复任务」继续自动化。"
 )
 
+# Xbox「您是谁」列表最大扫描行数（含「添加新用户」前的档案）
+MAX_PROFILE_LIST_SLOTS = 12
+
 
 class ManualInterventionRequired(Exception):
     """需要人工处理后恢复自动化（任务应暂停而非终止）。"""
@@ -135,9 +139,9 @@ class ManualInterventionRequired(Exception):
 
 class AccountSwitcher:
     """
-    游戏账号切换器（位置索引 + 场景校验）
+    游戏账号切换器（gamertag OCR + 场景校验）
 
-    已有档案：引导菜单 → 场景3 → 场景5 → 场景6 → 按索引选账号
+    已有档案：引导菜单 → 场景3 → 场景5 → 场景6 → OCR 按 gamertag 选账号
     新用户：引导菜单 → 场景3 → 场景5 → 添加新用户 → 场景10+ 登录
     """
 
@@ -151,10 +155,16 @@ class AccountSwitcher:
         self._stream_session = None
         self._reconnect_callback: Optional[Callable[[], Awaitable[bool]]] = None
         self._profile_bound_callback: Optional[
-            Callable[[str, int], Awaitable[None]]
+            Callable[[str, int, Optional[str]], Awaitable[None]]
         ] = None
+        self._input_gate = None
 
-    def set_accounts(self, accounts: List[Dict[str, Any]]):
+    def set_input_gate(self, gate) -> None:
+        """绑定输入闸门（task 级），用于在任务暂停时屏蔽手柄信号。"""
+        self._input_gate = gate
+
+    def set_accounts(self, accounts: List[Dict[str, Any]]) -> None:
+        """加载游戏账号列表（替换现有账号集合）。"""
         self._accounts.clear()
         for idx, acc_data in enumerate(accounts):
             raw_index = acc_data.get('position_index', idx)
@@ -209,23 +219,37 @@ class AccountSwitcher:
 
     def set_profile_bound_callback(
         self,
-        callback: Optional[Callable[[str, int], Awaitable[None]]],
+        callback: Optional[Callable[[str, int, Optional[str]], Awaitable[None]]],
     ) -> None:
-        """登录/切换成功后回写平台 profile_bound。"""
+        """登录/切换成功后回写平台 profile_bound / 主机 Gamertag。"""
         self._profile_bound_callback = callback
 
-    async def _persist_profile_bound(self, account: GameAccount) -> None:
-        if account.profile_bound:
-            return
+    async def _persist_profile_bound(
+        self,
+        account: GameAccount,
+        *,
+        host_gamertag: Optional[str] = None,
+    ) -> None:
+        """切换/登录成功后回写平台：profile_bound=True，position_index=0，可选 gameName。"""
+        newly_bound = not account.profile_bound
         account.profile_bound = True
-        self.logger.info(
-            "已标记档案 %s 为主机已绑定 (profile_bound=True)",
-            account.gamertag,
-        )
+        account.position_index = 0
+        resolved_name = (host_gamertag or "").strip() or None
+        if resolved_name:
+            account.gamertag = resolved_name
+        if newly_bound:
+            self.logger.info(
+                "已标记档案 %s 为主机已绑定 (profile_bound=True)",
+                account.gamertag or account.account_id,
+            )
         if not self._profile_bound_callback:
             return
         try:
-            await self._profile_bound_callback(account.account_id, account.position_index)
+            await self._profile_bound_callback(
+                account.account_id,
+                0,
+                resolved_name,
+            )
         except Exception as exc:
             self.logger.warning("profile_bound 平台回写失败: %s", exc)
 
@@ -274,22 +298,6 @@ class AccountSwitcher:
 
             async with StreamKeepaliveLoop(lambda: self._stream_session):
                 await self._ensure_input_ready()
-                if target_account.profile_bound and not target_account.is_new_user:
-                    on_home = await self._detect_any_scene([203, 1, 24], strict=False)
-                    if on_home in XBOX_HOME_SCENES:
-                        self.logger.info(
-                            "档案已绑定 (%s, pos=%s)，处于主页，跳过完整切换",
-                            target_account.gamertag,
-                            target_account.position_index,
-                        )
-                        self._current_account_id = target_account_id
-                        target_account.mark_login()
-                        return AccountSwitchResult(
-                            success=True,
-                            from_account=from_account,
-                            to_account=target_account_id,
-                            time_taken=time.time() - start_time,
-                        )
                 on_home = await self._detect_any_scene([203, 1, 24], strict=False)
                 if not await self._open_guide_menu():
                     self.logger.warning("未能打开西瓜引导页（场景2），继续尝试导航")
@@ -314,7 +322,10 @@ class AccountSwitcher:
                     await self._login_with_credentials(
                         target_account.email, target_account.password
                     )
-                    await self._persist_profile_bound(target_account)
+                    host_tag = await self._read_host_gamertag_from_profile_list()
+                    await self._persist_profile_bound(
+                        target_account, host_gamertag=host_tag
+                    )
                 else:
                     await self._select_add_switch()
                     if not await self._wait_for_scene(5):
@@ -324,7 +335,10 @@ class AccountSwitcher:
                     if not await self._wait_for_scene(6):
                         raise RuntimeError("未进入账号选择页面（场景6）")
 
-                    await self._navigate_to_account_position(target_account.position_index)
+                    found_index = await self._select_account_by_gamertag(
+                        target_account.gamertag
+                    )
+                    target_account.position_index = found_index
                     await self._confirm_account_selection()
 
                     if await self._wait_for_scene(10, timeout=10.0):
@@ -336,7 +350,10 @@ class AccountSwitcher:
                             await self._login_with_credentials(
                                 target_account.email, target_account.password
                             )
-                            await self._persist_profile_bound(target_account)
+                            host_tag = await self._read_host_gamertag_from_profile_list()
+                            await self._persist_profile_bound(
+                                target_account, host_gamertag=host_tag
+                            )
                         else:
                             raise RuntimeError(
                                 f"档案 {target_account.gamertag} 需重新登录，"
@@ -348,7 +365,10 @@ class AccountSwitcher:
                             target_account.gamertag,
                             target_account.profile_bound,
                         )
-                        await self._persist_profile_bound(target_account)
+                        host_tag = await self._read_host_gamertag_from_profile_list()
+                        await self._persist_profile_bound(
+                            target_account, host_gamertag=host_tag
+                        )
 
             self._current_account_id = target_account_id
             target_account.mark_login()
@@ -762,19 +782,51 @@ class AccountSwitcher:
         except Exception as e:
             self.logger.debug(f"保存调试帧失败: {e}")
 
+    def _resolve_input_session(self):
+        """Resolve WebRTC/SmartGlass session from stream binding or action executor."""
+        if self._stream_session is not None:
+            return self._stream_session
+        executor = self._action_executor
+        if executor is None:
+            return None
+        session = getattr(executor, "_xbox_session", None)
+        if session is not None:
+            return session
+        return getattr(executor, "_stream_controller", None)
+
+    async def _execute_press_button(self, button: str, duration: float = 0.08) -> None:
+        if not self._action_executor:
+            return
+        from ..scene.game_automation_engine import Action, ActionType
+
+        if hasattr(self._action_executor, "execute"):
+            await self._action_executor.execute(
+                Action(
+                    type=ActionType.PRESS_BUTTON,
+                    params={'button': button, 'duration': duration},
+                    description=f"Press {button}",
+                    timeout=2.0,
+                )
+            )
+            return
+
+        from ..input.controller_protocol import ControllerProtocol, XboxButtonFlag
+
+        if isinstance(self._action_executor, ControllerProtocol):
+            flag_name = button.upper()
+            if not hasattr(XboxButtonFlag, flag_name):
+                self.logger.warning("未知手柄按钮: %s", button)
+                return
+            await self._action_executor.press_button(
+                getattr(XboxButtonFlag, flag_name),
+                duration,
+            )
+
     async def _press_button(self, button: str, duration: float = 0.08):
         if not self._action_executor:
             return
         await self._ensure_input_ready()
-        from ..scene.game_automation_engine import Action, ActionType
-        await self._action_executor.execute(
-            Action(
-                type=ActionType.PRESS_BUTTON,
-                params={'button': button, 'duration': duration},
-                description=f"Press {button}",
-                timeout=2.0,
-            )
-        )
+        await self._execute_press_button(button, duration)
 
     async def _press_guide_button(self):
         await self._press_button('NEXUS', duration=0.05)
@@ -847,19 +899,10 @@ class AccountSwitcher:
 
     async def _navigate_to_accounts_system(self):
         """从西瓜引导页侧栏进入「档案和系统」。"""
-        from ..scene.game_automation_engine import Action, ActionType
-
         for i in range(5):
             if not self._action_executor:
                 return
-            await self._action_executor.execute(
-                Action(
-                    type=ActionType.PRESS_BUTTON,
-                    params={'button': 'DPAD_DOWN', 'duration': 0.05},
-                    description=f"Guide sidebar DOWN ({i + 1}/5)",
-                    timeout=1.0,
-                )
-            )
+            await self._execute_press_button('DPAD_DOWN', duration=0.05)
             await asyncio.sleep(0.25)
 
         await self._press_button('A', duration=0.05)
@@ -884,14 +927,57 @@ class AccountSwitcher:
         await self._press_button('A', duration=0.1)
         await asyncio.sleep(1.5)
 
+    async def _read_host_gamertag_from_profile_list(self) -> Optional[str]:
+        """
+        登录/添加用户后进入场景6，OCR 读取列表最上方档案昵称（主机侧 Gamertag）。
+        """
+        for _ in range(3):
+            await self._press_button('B', duration=0.08)
+            await asyncio.sleep(0.35)
+
+        if not await self._open_guide_menu():
+            await self._navigate_to_accounts_system()
+        elif not await self._run_scene_transition(2, 2):
+            await self._navigate_to_accounts_system()
+
+        if not await self._wait_for_scene(3, timeout=12.0):
+            self.logger.warning("读取主机昵称：未能进入场景3")
+            await self._save_debug_frame(3)
+            return None
+
+        await self._select_add_switch()
+        if not await self._wait_for_scene(5, timeout=12.0):
+            self.logger.warning("读取主机昵称：未能进入场景5")
+            return None
+
+        await self._enter_account_selection()
+        if not await self._wait_for_scene(6, timeout=12.0):
+            self.logger.warning("读取主机昵称：未能进入场景6")
+            await self._save_debug_frame(6)
+            return None
+
+        await self._scroll_profile_list_to_top()
+        await asyncio.sleep(0.45)
+        detected = await self._read_focused_gamertag_from_frame()
+        if detected and detected.strip():
+            self.logger.info("主机档案昵称 OCR: %r", detected.strip())
+            return detected.strip()
+
+        self.logger.warning("场景6未能 OCR 到主机档案昵称")
+        await self._save_debug_frame(6)
+        return None
+
     async def add_new_user_with_credentials(
         self,
         email: str,
         password: str,
         check_cancel: Optional[Callable[[], bool]] = None,
+        *,
+        account_id: Optional[str] = None,
     ) -> AccountSwitchResult:
         """Passive provisioning: navigate to add-user flow and log in with credentials."""
         start = time.time()
+        host_tag: Optional[str] = None
         try:
             if check_cancel and check_cancel():
                 return AccountSwitchResult(success=False, error_message="cancelled")
@@ -914,11 +1000,22 @@ class AccountSwitcher:
 
                 await self._select_add_new_user()
                 await self._login_with_credentials(email, password)
+                host_tag = await self._read_host_gamertag_from_profile_list()
+                if account_id and host_tag:
+                    stub = GameAccount(
+                        account_id=account_id,
+                        gamertag=host_tag,
+                        email=email,
+                    )
+                    await self._persist_profile_bound(
+                        stub, host_gamertag=host_tag
+                    )
 
             return AccountSwitchResult(
                 success=True,
                 to_account=email,
                 time_taken=time.time() - start,
+                host_gamertag=host_tag,
             )
         except Exception as exc:
             self.logger.error("add_new_user_with_credentials failed: %s", exc)
@@ -937,14 +1034,81 @@ class AccountSwitcher:
         await self._press_button('A', duration=0.1)
         await asyncio.sleep(2.0)
 
-    async def _navigate_to_account_position(self, position_index: int):
+    async def _scroll_profile_list_to_top(self) -> None:
         for _ in range(10):
             await self._press_button('DPAD_UP', duration=0.1)
             await asyncio.sleep(0.15)
 
-        for i in range(position_index):
-            await self._press_button('DPAD_DOWN', duration=0.1)
-            await asyncio.sleep(0.2)
+    async def _read_focused_gamertag_from_frame(self) -> str:
+        from ..vision.profile_name_reader import read_focused_gamertag
+
+        frame = await self._frame_getter() if self._frame_getter else None
+        if frame is None:
+            return ""
+        image = frame.data if hasattr(frame, 'data') else frame
+        if self._scene_detector and hasattr(self._scene_detector, '_normalize_frame'):
+            image = self._scene_detector._normalize_frame(image, 6)
+        return read_focused_gamertag(image)
+
+    async def _select_account_by_gamertag(
+        self,
+        gamertag: str,
+        *,
+        max_slots: int = MAX_PROFILE_LIST_SLOTS,
+    ) -> int:
+        """
+        在场景6列表中按 gamertag 查找档案（不依赖静态 position_index）。
+
+        返回匹配到的列表索引（0=最上方）。
+        """
+        from ..vision.profile_name_reader import (
+            gamertag_matches,
+            read_list_gamertags,
+        )
+
+        if not gamertag:
+            raise RuntimeError("目标 gamertag 为空，无法定位档案")
+
+        await self._scroll_profile_list_to_top()
+        await asyncio.sleep(0.35)
+
+        for slot in range(max_slots):
+            detected = await self._read_focused_gamertag_from_frame()
+            if gamertag_matches(detected, gamertag):
+                self.logger.info(
+                    "场景6已定位档案 %s（列表索引 %s，OCR=%r）",
+                    gamertag,
+                    slot,
+                    detected,
+                )
+                return slot
+
+            if slot == 0 and not detected:
+                frame = await self._frame_getter() if self._frame_getter else None
+                if frame is not None:
+                    image = frame.data if hasattr(frame, 'data') else frame
+                    if self._scene_detector and hasattr(
+                        self._scene_detector, '_normalize_frame'
+                    ):
+                        image = self._scene_detector._normalize_frame(image, 6)
+                    for line in read_list_gamertags(image):
+                        if gamertag_matches(line, gamertag):
+                            self.logger.info(
+                                "场景6列表 OCR 匹配档案 %s（索引 %s，OCR=%r）",
+                                gamertag,
+                                slot,
+                                line,
+                            )
+                            return slot
+
+            if slot < max_slots - 1:
+                await self._press_button('DPAD_DOWN', duration=0.1)
+                await asyncio.sleep(0.35)
+
+        await self._save_debug_frame(6)
+        raise RuntimeError(
+            f"场景6未找到档案 gamertag={gamertag}（已扫描 {max_slots} 行）"
+        )
 
     async def _confirm_account_selection(self):
         await self._press_button('A', duration=0.1)
@@ -1150,7 +1314,11 @@ class AccountSwitcher:
         right_thumb_y: int,
         duration_sec: float,
     ):
-        if not self._action_executor or not self._action_executor._xbox_session:
+        if self._input_gate is not None and not self._input_gate.is_allowed():
+            return False
+
+        session = self._resolve_input_session()
+        if session is None:
             await asyncio.sleep(duration_sec)
             return False
 
@@ -1168,19 +1336,19 @@ class AccountSwitcher:
         release = ControllerSignal()
 
         async def _do_send() -> bool:
-            session = self._action_executor._xbox_session
-            if session is None:
+            active_session = self._resolve_input_session()
+            if active_session is None:
                 return False
             try:
-                if hasattr(session, 'send_gamepad_state'):
-                    ok_press = await session.send_gamepad_state(press.to_dict())
+                if hasattr(active_session, 'send_gamepad_state'):
+                    ok_press = await active_session.send_gamepad_state(press.to_dict())
                     await asyncio.sleep(max(duration_sec, 0.05))
-                    ok_release = await session.send_gamepad_state(release.to_dict())
+                    ok_release = await active_session.send_gamepad_state(release.to_dict())
                     return ok_press and ok_release
-                if hasattr(session, 'send_input'):
-                    await session.send_input('gamepad', press.to_dict())
+                if hasattr(active_session, 'send_input'):
+                    await active_session.send_input('gamepad', press.to_dict())
                     await asyncio.sleep(max(duration_sec, 0.05))
-                    await session.send_input('gamepad', release.to_dict())
+                    await active_session.send_input('gamepad', release.to_dict())
                     return True
             except Exception as e:
                 self.logger.warning(f"发送原始手柄信号失败: {e}")

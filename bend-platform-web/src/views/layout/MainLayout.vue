@@ -28,7 +28,7 @@
 
         <el-divider style="margin: 8px 0; border-color: rgba(255,255,255,0.06);" />
 
-        <div class="menu-group-title" v-if="!isCollapse && showUserManagementGroup">账号管理</div>
+        <div class="menu-group-title" v-if="!isCollapse && showUserManagementGroup">用户与商户</div>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="Merchants" @click="router.push('/merchants')">
           <el-icon><OfficeBuilding /></el-icon>
           <template #title>商户管理</template>

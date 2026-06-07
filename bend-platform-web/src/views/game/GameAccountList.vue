@@ -44,7 +44,13 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="positionIndex" label="档案位置" width="90" align="center">
+        <el-table-column prop="positionIndex" width="100" align="center">
+          <template #header>
+            <span>档案位置</span>
+            <el-tooltip content="Agent 自动记录，登录后该档案会置顶为 0，无需手填" placement="top">
+              <el-icon class="header-hint"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
           <template #default="{ row }">
             <span v-if="row.positionIndex != null && row.positionIndex >= 0">{{ row.positionIndex }}</span>
             <span v-else class="text-muted">-</span>
@@ -122,7 +128,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="游戏昵称" prop="gameName">
-          <el-input v-model="formData.gameName" placeholder="请输入游戏昵称" />
+          <el-input
+            v-model="formData.gameName"
+            placeholder="选填；一般由自动化从 Xbox 主机读取后回写"
+            maxlength="64"
+          />
+          <div class="form-hint">留空即可；自动化在 Xbox 主机添加/登录成功后会 OCR 读取 Gamertag 并回写平台</div>
         </el-form-item>
         <el-form-item label="邮箱" prop="email">
           <el-input v-model="formData.email" placeholder="请输入邮箱" />
@@ -169,17 +180,16 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="档案位置" prop="positionIndex">
-          <el-input-number
-            v-model="formData.positionIndex"
-            :min="-1"
-            :max="10"
-            placeholder="Xbox 档案槽位，-1 表示未设置"
-            style="width: 100%"
+        <el-form-item v-if="dialogType === 'edit'" label="档案位置">
+          <el-input
+            :model-value="formData.positionIndex >= 0 ? String(formData.positionIndex) : '未探测'"
+            disabled
+            placeholder="由 Agent 在 Xbox 主机上自动识别"
           />
         </el-form-item>
-        <el-form-item label="档案绑定" prop="profileBound">
+        <el-form-item v-if="dialogType === 'edit'" label="档案绑定" prop="profileBound">
           <el-switch v-model="formData.profileBound" active-text="已绑定" inactive-text="未绑定" />
+          <div class="form-hint">切换账号时 Agent 会按游戏昵称在「您是谁」列表中自动定位</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -268,7 +278,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Plus, Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import { gameAccountApi, merchantApi } from '@/api'
 import { PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag } from '@/utils/constants'
 import { useAuthStore } from '@/stores/auth'
@@ -345,7 +355,7 @@ const formRules = {
     { required: true, message: '请选择商户', trigger: 'change' }
   ],
   gameName: [
-    { required: true, message: '请输入游戏昵称', trigger: 'blur' }
+    { max: 64, message: '游戏昵称长度不能超过 64 个字符', trigger: 'blur' }
   ],
   email: [
     { required: true, message: '请输入邮箱', trigger: 'blur' },
@@ -470,7 +480,7 @@ const handleSubmit = async () => {
     if (dialogType.value === 'add') {
       await gameAccountApi.create({
         merchantId: formData.merchantId,
-        gameName: formData.gameName,
+        gameName: formData.gameName?.trim() || undefined,
         email: formData.email,
         password: formData.password,
         platform: formData.platform
@@ -479,11 +489,10 @@ const handleSubmit = async () => {
     } else {
       const updateData = {
         merchantId: formData.merchantId,
-        gameName: formData.gameName,
+        gameName: formData.gameName?.trim() || undefined,
         email: formData.email,
         password: formData.password || undefined,
         platform: formData.platform,
-        positionIndex: formData.positionIndex,
         profileBound: formData.profileBound
       }
       await gameAccountApi.update(formData.id, updateData)
@@ -503,7 +512,7 @@ const handleSubmit = async () => {
  * @param {Object} row - 当前行数据
  */
 const handleDelete = async (row) => {
-  await ElMessageBox.confirm(`确定要删除账号「${row.gameName}」吗？`, '提示', {
+  await ElMessageBox.confirm(`确定要删除账号「${row.gameName || row.email}」吗？`, '提示', {
     confirmButtonText: '确定删除',
     cancelButtonText: '取消',
     type: 'warning'
@@ -583,24 +592,24 @@ const handleImport = async () => {
     }
 
     const header = lines[0].split(',').map(h => h.trim())
-    const requiredHeaders = ['游戏昵称', '邮箱', '密码']
-    const hasRequiredHeaders = requiredHeaders.every(h => header.includes(h))
-
-    if (!hasRequiredHeaders) {
-      ElMessage.warning('CSV文件格式不正确，请检查表头是否包含：游戏昵称、邮箱、密码')
+    const emailIdx = header.indexOf('邮箱')
+    const passwordIdx = header.indexOf('密码')
+    if (emailIdx < 0 || passwordIdx < 0) {
+      ElMessage.warning('CSV文件格式不正确，请检查表头是否包含：邮箱、密码')
       return
     }
 
+    const gameNameIdx = header.indexOf('游戏昵称')
     const platformIdx = header.indexOf('平台类型')
 
     const accounts = []
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim())
-      if (values.length >= 3 && values[0] && values[1] && values[2]) {
+      if (values.length >= 2 && values[emailIdx] && values[passwordIdx]) {
         accounts.push({
-          gameName: values[0],
-          email: values[1],
-          password: values[2] || '',
+          gameName: gameNameIdx >= 0 ? (values[gameNameIdx] || '') : '',
+          email: values[emailIdx],
+          password: values[passwordIdx] || '',
           platform: platformIdx >= 0 ? (values[platformIdx] || 'xbox') : 'xbox'
         })
       }
@@ -816,6 +825,21 @@ onMounted(() => {
 
 .text-muted {
   color: #909399;
+}
+
+.header-hint {
+  margin-left: 4px;
+  font-size: 14px;
+  color: #909399;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.form-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
 }
 
 .error-item {

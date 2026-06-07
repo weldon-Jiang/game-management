@@ -33,9 +33,19 @@ public class StreamingSessionServiceImpl implements StreamingSessionService {
 
     @Override
     public StreamingSession findByTaskId(String taskId) {
+        var openWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StreamingSession>()
+                .eq(StreamingSession::getTaskId, taskId)
+                .isNull(StreamingSession::getClosedTime)
+                .orderByDesc(StreamingSession::getStartedTime)
+                .last("LIMIT 1");
+        StreamingSession open = streamingSessionMapper.selectOne(openWrapper);
+        if (open != null) {
+            return open;
+        }
         return streamingSessionMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StreamingSession>()
                         .eq(StreamingSession::getTaskId, taskId)
+                        .orderByDesc(StreamingSession::getStartedTime)
                         .last("LIMIT 1"));
     }
 
@@ -81,5 +91,23 @@ public class StreamingSessionServiceImpl implements StreamingSessionService {
         session.setPhase(phase);
         session.setClosedTime(LocalDateTime.now());
         streamingSessionMapper.updateById(session);
+    }
+
+    @Override
+    public void closeOpenSessionsForTask(String taskId, String phase) {
+        var wrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StreamingSession>()
+                .eq(StreamingSession::getTaskId, taskId)
+                .isNull(StreamingSession::getClosedTime);
+        for (StreamingSession session : streamingSessionMapper.selectList(wrapper)) {
+            closeSession(session.getId(), phase);
+        }
+    }
+
+    @Override
+    public java.util.List<StreamingSession> listByTaskId(String taskId) {
+        var wrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StreamingSession>()
+                .eq(StreamingSession::getTaskId, taskId)
+                .orderByDesc(StreamingSession::getStartedTime);
+        return streamingSessionMapper.selectList(wrapper);
     }
 }

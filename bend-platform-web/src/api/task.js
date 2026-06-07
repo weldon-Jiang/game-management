@@ -20,8 +20,11 @@ export const taskApi = {
   resume: (taskId) => request.post(`/api/tasks/${taskId}/resume`),
   stop: (taskId) => request.post(`/api/tasks/${taskId}/stop`),
   getDetail: (taskId) => request.get(`/api/tasks/${taskId}/detail`),
-  getEvents: (taskId, limit = 50) =>
-    request.get(`/api/tasks/${taskId}/events`, { params: { limit } }),
+  getEvents: (taskId, params = {}) =>
+    request.get(`/api/tasks/${taskId}/events`, {
+      params: { limit: 50, ...params }
+    }),
+  listSessions: (taskId) => request.get(`/api/tasks/${taskId}/sessions`),
   getGameAccountStatus: (taskId) => request.get(`/api/tasks/${taskId}/game-account-status`),
   showWindow: (taskId) => request.post(`/api/tasks/${taskId}/window/show`),
   hideWindow: (taskId) => request.post(`/api/tasks/${taskId}/window/hide`),

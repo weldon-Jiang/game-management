@@ -237,6 +237,16 @@ public interface TaskService {
     boolean hasRunningTask(String streamingAccountId);
 
     /**
+     * Active task for streaming account: pending, running, or paused.
+     */
+    Task findActiveTaskByStreamingAccountId(String streamingAccountId);
+
+    /**
+     * Latest reusable task bound to streaming account + agent (terminal states).
+     */
+    Task findReusableTaskByStreamingAccountAndAgent(String streamingAccountId, String agentId);
+
+    /**
      * 查询卡住的任务
      *
      * <p>查找运行时间超过指定阈值但仍未完成的任务。

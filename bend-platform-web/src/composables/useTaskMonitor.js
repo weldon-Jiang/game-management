@@ -2,7 +2,7 @@ import { ref, onUnmounted, unref, watch } from 'vue'
 import { taskApi } from '@/api/task'
 import { subscribeToTopic } from '@/utils/stompClient'
 
-export function useTaskMonitor(taskIdRef) {
+export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
   const detail = ref(null)
   const events = ref([])
   const loading = ref(false)
@@ -14,9 +14,12 @@ export function useTaskMonitor(taskIdRef) {
     if (!id) return
     loading.value = true
     try {
+      const sessionId = unref(sessionIdRef)
+      const eventParams = { limit: 50 }
+      if (sessionId) eventParams.sessionId = sessionId
       const [detailRes, eventsRes] = await Promise.all([
         taskApi.getDetail(id),
-        taskApi.getEvents(id, 50).catch(() => ({ data: [] }))
+        taskApi.getEvents(id, eventParams).catch(() => ({ data: [] }))
       ])
       detail.value = detailRes.data
       events.value = eventsRes.data || []
@@ -91,6 +94,13 @@ export function useTaskMonitor(taskIdRef) {
       if (id) startMonitor()
     }
   )
+
+  if (sessionIdRef) {
+    watch(
+      () => unref(sessionIdRef),
+      () => refresh()
+    )
+  }
 
   onUnmounted(stopMonitor)
 

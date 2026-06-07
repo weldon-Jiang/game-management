@@ -1,0 +1,34 @@
+# ================================================
+# Bend Platform 后端 —— SIT 测试环境覆盖配置
+# ================================================
+# 激活方式：SPRING_PROFILES_ACTIVE=sit
+# 说明：本文件仅覆盖与环境相关的差异项（日志、SQL 日志、监控端点），
+#       其余配置（数据源、Redis、JWT、AES 等）继承 application.yml，
+#       敏感值仍由环境变量注入（见 docker/.env.sit）。
+
+spring:
+  config:
+    activate:
+      on-profile: sit
+
+# SIT 保留较详细日志，便于联调排查
+logging:
+  level:
+    root: INFO
+    com.bend.platform: DEBUG
+    com.bend.platform.config.JwtAuthInterceptor: INFO
+
+# SIT 打印 SQL，便于验证数据访问
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# 监控端点：SIT 多暴露 metrics 便于观测，健康详情按授权展示
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized

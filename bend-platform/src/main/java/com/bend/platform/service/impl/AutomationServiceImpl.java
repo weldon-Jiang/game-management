@@ -12,6 +12,7 @@ import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.*;
 import com.bend.platform.util.PlatformTypeUtil;
+import com.bend.platform.util.StreamingTaskConflictMessage;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -74,22 +75,26 @@ public class AutomationServiceImpl implements AutomationService {
             if (PlatformType.PLAYSTATION.getCode().equals(platform)) {
                 Map<String, Object> errorResult = new HashMap<>();
                 errorResult.put("streamingAccountId", streamingAccountId);
-                errorResult.put("streamingAccountName", streamingAccount.getName());
+                errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
                 errorResult.put("success", false);
                 errorResult.put("message", ResultCode.System.PLATFORM_NOT_SUPPORTED.getMessage());
                 results.add(errorResult);
-                log.warn("自动化启动失败 - PlayStation 自动化尚未开放: {}", streamingAccount.getName());
+                log.warn("自动化启动失败 - PlayStation 自动化尚未开放: {}", streamingAccount.getDisplayLabel());
                 continue;
             }
 
-            if (taskService.hasRunningTask(streamingAccountId)) {
+            Task activeTask = taskService.findActiveTaskByStreamingAccountId(streamingAccountId);
+            if (activeTask != null) {
                 Map<String, Object> errorResult = new HashMap<>();
                 errorResult.put("streamingAccountId", streamingAccountId);
-                errorResult.put("streamingAccountName", streamingAccount.getName());
+                errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
                 errorResult.put("success", false);
-                errorResult.put("message", "该流媒体账号已有运行中的任务，请先停止当前任务");
+                errorResult.put("taskId", activeTask.getId());
+                errorResult.put("agentId", activeTask.getTargetAgentId());
+                String agentName = agentInstanceService.resolveDisplayName(activeTask.getTargetAgentId());
+                errorResult.put("message", StreamingTaskConflictMessage.format(activeTask, agentName));
                 results.add(errorResult);
-                log.warn("自动化启动失败 - 流媒体账号已有运行中的任务: {}", streamingAccount.getName());
+                log.warn("自动化启动失败 - 流媒体账号已有运行中的任务: {}", streamingAccount.getDisplayLabel());
                 continue;
             }
 
@@ -103,7 +108,7 @@ public class AutomationServiceImpl implements AutomationService {
                 if (selectedHost == null) {
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("streamingAccountId", streamingAccountId);
-                    errorResult.put("streamingAccountName", streamingAccount.getName());
+                    errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
                     errorResult.put("success", false);
                     errorResult.put("message", "指定的主机不存在");
                     results.add(errorResult);
@@ -112,7 +117,7 @@ public class AutomationServiceImpl implements AutomationService {
                 if (!streamingAccountId.equals(selectedHost.getBoundStreamingAccountId())) {
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("streamingAccountId", streamingAccountId);
-                    errorResult.put("streamingAccountName", streamingAccount.getName());
+                    errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
                     errorResult.put("success", false);
                     errorResult.put("message", "指定的主机未绑定到该流媒体账号");
                     results.add(errorResult);
@@ -121,7 +126,7 @@ public class AutomationServiceImpl implements AutomationService {
                 if (!platform.equals(PlatformTypeUtil.normalizeOrDefault(selectedHost.getPlatform()))) {
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("streamingAccountId", streamingAccountId);
-                    errorResult.put("streamingAccountName", streamingAccount.getName());
+                    errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
                     errorResult.put("success", false);
                     errorResult.put("message", "主机平台与流媒体账号不一致");
                     results.add(errorResult);
@@ -130,7 +135,7 @@ public class AutomationServiceImpl implements AutomationService {
                 if (Boolean.TRUE.equals(selectedHost.getLocked())) {
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("streamingAccountId", streamingAccountId);
-                    errorResult.put("streamingAccountName", streamingAccount.getName());
+                    errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
                     errorResult.put("success", false);
                     errorResult.put("message", "指定的主机已被锁定");
                     results.add(errorResult);
@@ -152,7 +157,7 @@ public class AutomationServiceImpl implements AutomationService {
             if (!busyGameAccountNames.isEmpty()) {
                 Map<String, Object> errorResult = new HashMap<>();
                 errorResult.put("streamingAccountId", streamingAccountId);
-                errorResult.put("streamingAccountName", streamingAccount.getName());
+                errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
                 errorResult.put("success", false);
                 errorResult.put("message", "以下游戏账号正在忙碌中: " + String.join(", ", busyGameAccountNames));
                 results.add(errorResult);
@@ -167,12 +172,12 @@ public class AutomationServiceImpl implements AutomationService {
                 String message = (String) validationResult.get("message");
                 Map<String, Object> errorResult = new HashMap<>();
                 errorResult.put("streamingAccountId", streamingAccountId);
-                errorResult.put("streamingAccountName", streamingAccount.getName());
+                errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
                 errorResult.put("success", false);
                 errorResult.put("message", message);
                 results.add(errorResult);
                 log.warn("自动化启动失败 - merchantId: {}, account: {}, reason: {}",
-                        merchantId, streamingAccount.getName(), message);
+                        merchantId, streamingAccount.getDisplayLabel(), message);
                 continue;
             }
 
@@ -187,7 +192,7 @@ public class AutomationServiceImpl implements AutomationService {
                 if (selectedGameAccounts.isEmpty()) {
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("streamingAccountId", streamingAccountId);
-                    errorResult.put("streamingAccountName", streamingAccount.getName());
+                    errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
                     errorResult.put("success", false);
                     errorResult.put("message", "未找到指定的游戏账号");
                     results.add(errorResult);
@@ -211,7 +216,7 @@ public class AutomationServiceImpl implements AutomationService {
             taskParams.put("merchantId", merchantId);
 
             Task task = new Task();
-            task.setName("自动化任务-" + streamingAccount.getName());
+            task.setName("自动化任务-" + streamingAccount.getDisplayLabel());
             task.setDescription(request.getDescription() != null ? request.getDescription() : "流媒体账号自动化任务");
             task.setType("automation");
             task.setTargetAgentId(agentId);
@@ -238,7 +243,7 @@ public class AutomationServiceImpl implements AutomationService {
 
             automationUsageService.deductPointsAndRecordUsage(
                     merchantId, userId, created.getId(),
-                    streamingAccountId, streamingAccount.getName(),
+                    streamingAccountId, streamingAccount.getDisplayLabel(),
                     selectedGameAccounts.size(), xboxHostsForBilling.size(), validationResult);
 
             // 更新流媒体账号状态为忙碌
@@ -255,7 +260,7 @@ public class AutomationServiceImpl implements AutomationService {
 
             Map<String, Object> result = new HashMap<>();
             result.put("streamingAccountId", streamingAccountId);
-            result.put("streamingAccountName", streamingAccount.getName());
+            result.put("streamingAccountName", streamingAccount.getDisplayLabel());
             result.put("taskId", created.getId());
             result.put("gameAccountsCount", selectedGameAccounts.size());
             result.put("success", true);
@@ -263,7 +268,7 @@ public class AutomationServiceImpl implements AutomationService {
             results.add(result);
 
             log.info("创建自动化任务成功 - 流媒体账号: {}, Agent: {}, TaskId: {}, Points: {}",
-                streamingAccount.getName(), agentId, created.getId(), validationResult.get("totalPoints"));
+                streamingAccount.getDisplayLabel(), agentId, created.getId(), validationResult.get("totalPoints"));
         }
 
         Map<String, Object> response = new HashMap<>();
@@ -341,7 +346,7 @@ public class AutomationServiceImpl implements AutomationService {
     private Map<String, Object> buildStreamingAccountInfo(StreamingAccount account) {
         Map<String, Object> info = new HashMap<>();
         info.put("id", account.getId());
-        info.put("name", account.getName());
+        info.put("name", account.getDisplayLabel());
         info.put("email", account.getEmail());
         info.put("platform", PlatformTypeUtil.normalizeOrDefault(account.getPlatform()));
         info.put("authCode", account.getAuthCode());

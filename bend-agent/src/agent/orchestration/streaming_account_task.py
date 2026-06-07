@@ -2,7 +2,7 @@
 StreamingAccountTask — single-task state machine (two-phase lifecycle).
 
 Phase 1: auth → discovery → stream → READY (wait for start_automation)
-Phase 2: provisioning gate → step4 per game account → CLOSING
+Phase 2: provisioning gate → step4 per game account → CLOSING (only on full success)
 """
 
 import asyncio
@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from ..core.logger import get_logger
 from ..game.account_provisioning import AccountProvisioningModule
 from ..runtime.input_focus import InputFocusManager
+from ..runtime.input_gate import InputGate
 from ..runtime.phase_fsm import PauseMode, SessionPhase
 from ..runtime.task_registry import StreamingAccountTaskRuntime
 from ..session.api import StreamingSession
@@ -45,6 +46,7 @@ class StreamingAccountTask:
         self.logger = get_logger(f"sat_{runtime.task_id}")
         self._skipped: Set[str] = set()
         self._decode_mode = "auto"
+        self._last_automation_fail_msg: Optional[str] = None
         if game_action_type:
             self.context.game_action_type = game_action_type
 
@@ -63,6 +65,9 @@ class StreamingAccountTask:
         session = StreamingSession(task_id)
         self.runtime.modules["streaming_session"] = session
         SessionRegistry.get_instance().register(task_id, session)
+
+        input_gate = InputGate(self.context.is_paused)
+        self.runtime.modules["input_gate"] = input_gate
 
         async def on_phase(phase: SessionPhase, message: str):
             self.runtime.set_phase(phase, message)
@@ -97,71 +102,110 @@ class StreamingAccountTask:
                 self._decode_mode = open_result.media.decode_mode
                 self._sync_media_context(open_result.media.context)
 
-            try:
-                from ..automation.step3_streaming_init import step3_ensure_display
-                if await step3_ensure_display(self.context):
-                    self.runtime.window_visible = True
-            except Exception as exc:
-                self.logger.warning("默认打开显示窗口失败: %s", exc)
+            display_ok = await self._ensure_display_after_stream()
+            if not display_ok:
+                self.logger.warning(
+                    "串流成功但窗口未就绪，进入 READY 后可手动显示窗口"
+                )
 
             provisioning = AccountProvisioningModule(
                 task_id=task_id,
                 scene_detector=getattr(self.context, "_streaming_scene_detector", None),
                 input_sender=getattr(self.context, "_controller_protocol", None),
                 report_progress=self._report_progress_extended,
+                platform_client=self.platform_client,
             )
             self.runtime.modules["account_provisioning"] = provisioning
 
-            if self.two_phase and not self.context.game_action_type:
-                await self._report_session(SessionPhase.READY, "等待选择自动化类型")
-                automation_event: asyncio.Event = self.runtime.modules["automation_start_event"]
-                while not automation_event.is_set():
-                    if check_cancel():
-                        return AutomationResult(success=False, error_code="CANCELLED", message="Cancelled")
-                    await self.context.wait_if_paused()
-                    await asyncio.sleep(0.5)
+            automation_event: asyncio.Event = self.runtime.modules["automation_start_event"]
+            total_matches = 0
 
-            self.runtime.set_phase(SessionPhase.AUTOMATING, "Automation running")
-            try:
-                from ..automation.step3_streaming_init import (
-                    step3_ensure_display,
-                    _stop_sdl_display_pump,
+            while True:
+                if check_cancel():
+                    await self._cleanup_session(session, destroy_window=True)
+                    self.runtime.set_phase(SessionPhase.CLOSED, "Cancelled")
+                    return AutomationResult(
+                        success=False, error_code="CANCELLED", message="Cancelled"
+                    )
+
+                if self.two_phase and not self.context.game_action_type:
+                    if self.runtime.phase_fsm.phase == SessionPhase.AUTOMATION_FAILED:
+                        retry_msg = (
+                            self._last_automation_fail_msg
+                            or "自动化失败，可重新选择模式后重试"
+                        )
+                        await self._report_session(
+                            SessionPhase.AUTOMATION_FAILED, retry_msg
+                        )
+                    else:
+                        ready_msg = (
+                            "等待选择自动化类型"
+                            if display_ok
+                            else "串流就绪，请显示窗口并选择自动化类型"
+                        )
+                        self.runtime.set_phase(SessionPhase.READY, ready_msg)
+                        await self._report_session(SessionPhase.READY, ready_msg)
+                    automation_event.clear()
+                    while not automation_event.is_set():
+                        if check_cancel():
+                            await self._cleanup_session(session, destroy_window=True)
+                            return AutomationResult(
+                                success=False,
+                                error_code="CANCELLED",
+                                message="Cancelled",
+                            )
+                        await self.context.wait_if_paused()
+                        await asyncio.sleep(0.5)
+
+                self.runtime.set_phase(SessionPhase.AUTOMATING, "Automation running")
+                await self._report_session(SessionPhase.AUTOMATING, "Automation running")
+
+                await self._ensure_display_after_stream()
+
+                input_gate.set_automation_active(True)
+                step4_result = await step4_execute_gaming(
+                    self.context,
+                    check_cancel,
+                    self._report_progress,
+                    platform_client=self.platform_client,
+                    provisioning_module=provisioning,
+                    skipped_accounts=self._skipped,
+                    pause_after_match=lambda: self.runtime.pause_after_match,
+                    set_session_phase=self._set_session_phase,
+                    keep_session_alive=True,
+                    input_gate=input_gate,
                 )
-                await step3_ensure_display(self.context)
-                self.runtime.window_visible = True
-                await _stop_sdl_display_pump(self.context)
-            except Exception as exc:
-                self.logger.warning("自动化开始前恢复显示窗口失败: %s", exc)
-            step4_result = await step4_execute_gaming(
-                self.context,
-                check_cancel,
-                self._report_progress,
-                platform_client=self.platform_client,
-                provisioning_module=provisioning,
-                skipped_accounts=self._skipped,
-                pause_after_match=lambda: self.runtime.pause_after_match,
-                set_session_phase=self._set_session_phase,
-            )
+                input_gate.set_automation_active(False)
 
-            if step4_result.success:
-                self.runtime.set_phase(SessionPhase.CLOSING, "All accounts done")
-                await self._cleanup_session(session, destroy_window=True)
-                self.runtime.set_phase(SessionPhase.CLOSED, "Completed")
-                return AutomationResult(
-                    success=True,
-                    message=step4_result.message,
-                    total_matches=step4_result.total_matches,
+                if step4_result.success:
+                    total_matches = step4_result.total_matches or total_matches
+                    self.runtime.set_phase(SessionPhase.CLOSING, "All accounts done")
+                    await self._cleanup_session(session, destroy_window=True)
+                    self.runtime.set_phase(SessionPhase.CLOSED, "Completed")
+                    return AutomationResult(
+                        success=True,
+                        message=step4_result.message,
+                        total_matches=total_matches,
+                    )
+
+                if check_cancel():
+                    await self._cleanup_session(session, destroy_window=True)
+                    return AutomationResult(
+                        success=False,
+                        error_code="CANCELLED",
+                        message="Cancelled",
+                    )
+
+                self.context.game_action_type = None
+                automation_event.clear()
+                fail_msg = step4_result.message or "自动化失败"
+                self._last_automation_fail_msg = fail_msg
+                self.runtime.set_phase(SessionPhase.AUTOMATION_FAILED, fail_msg)
+                await self._report_session(SessionPhase.AUTOMATION_FAILED, fail_msg)
+                self.logger.warning(
+                    "Step4 failed (%s); stream kept alive for retry",
+                    step4_result.error_code,
                 )
-
-            self.runtime.set_phase(SessionPhase.FAILED, step4_result.message)
-            await self._report_session(SessionPhase.FAILED, step4_result.message)
-            await self._cleanup_session(session, destroy_window=True, emit_session_phases=False)
-            return AutomationResult(
-                success=False,
-                failed_step="STEP4",
-                message=step4_result.message,
-                error_code=step4_result.error_code,
-            )
 
         except asyncio.CancelledError:
             await self._cleanup_session(session, destroy_window=True)
@@ -175,9 +219,22 @@ class StreamingAccountTask:
             await self._cleanup_session(session, destroy_window=True, emit_session_phases=False)
             return AutomationResult(success=False, error_code="EXCEPTION", message=str(exc))
         finally:
+            input_gate.set_automation_active(False)
             focus.pop(task_id)
             release_decode_slot(self._decode_mode)
             SessionRegistry.get_instance().remove(task_id)
+
+    async def _ensure_display_after_stream(self) -> bool:
+        try:
+            from ..automation.step3_streaming_init import step3_ensure_display
+
+            ok = await step3_ensure_display(self.context)
+            self.runtime.window_visible = ok
+            return ok
+        except Exception as exc:
+            self.logger.warning("打开显示窗口失败: %s", exc)
+            self.runtime.window_visible = False
+            return False
 
     async def skip_game_account(self, game_account_id: str) -> None:
         self._skipped.add(game_account_id)

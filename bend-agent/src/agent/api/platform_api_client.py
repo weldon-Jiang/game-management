@@ -14,6 +14,7 @@ Platform API客户端 v2.0
 
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -22,6 +23,9 @@ import aiohttp
 
 _DEBUG_LOG_PATH = Path(__file__).resolve().parents[4] / "debug-a2845b.log"
 _DEBUG_SESSION_ID = "a2845b"
+# 本地调试开关：仅当设置环境变量 BEND_DEBUG_SESSION=1/true/on 时才写调试日志。
+# 默认关闭——生产打包后该埋点不产生任何动作。
+_DEBUG_ENABLED = os.getenv("BEND_DEBUG_SESSION", "").strip().lower() in ("1", "true", "on", "yes")
 
 
 def _normalize_progress_fields(kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -47,6 +51,8 @@ def _write_progress_debug_log(
     hypothesis_id: str = "H-progress",
 ) -> None:
     # #region agent log
+    if not _DEBUG_ENABLED:
+        return
     try:
         payload = {
             "sessionId": _DEBUG_SESSION_ID,
@@ -310,13 +316,16 @@ class PlatformApiClient:
         *,
         profile_bound: bool = True,
         position_index: Optional[int] = None,
+        game_name: Optional[str] = None,
     ) -> bool:
-        """Persist profile_bound / position_index after successful console login."""
+        """Persist profile_bound / position_index / gameName after console login."""
         url = self._get_callback_url(f'game-account/{game_account_id}/profile-binding')
         headers = await self._get_headers()
         payload: Dict[str, Any] = {"profileBound": profile_bound}
         if position_index is not None:
             payload["positionIndex"] = position_index
+        if game_name:
+            payload["gameName"] = game_name
 
         try:
             session = await self._get_session()

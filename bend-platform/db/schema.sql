@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS `merchant_registration_code` (
 CREATE TABLE IF NOT EXISTS `streaming_account` (
     `id` VARCHAR(36) NOT NULL COMMENT '主键ID',
     `merchant_id` VARCHAR(36) NOT NULL COMMENT '商户ID',
-    `name` VARCHAR(100) NOT NULL COMMENT '账号名称',
+    `name` VARCHAR(100) DEFAULT NULL COMMENT '账号名称（可选，已弃用）',
     `email` VARCHAR(255) NOT NULL COMMENT '账号邮箱',
     `password_encrypted` VARCHAR(512) DEFAULT NULL COMMENT '加密后的密码',
     `auth_code` VARCHAR(512) DEFAULT NULL COMMENT '认证码',
@@ -285,10 +285,12 @@ CREATE TABLE IF NOT EXISTS `task_event` (
     `game_account_id` VARCHAR(64) DEFAULT NULL COMMENT '游戏账号ID',
     `module` VARCHAR(64) DEFAULT NULL COMMENT '模块名',
     `payload` JSON DEFAULT NULL COMMENT '扩展数据',
+    `session_id` VARCHAR(64) DEFAULT NULL COMMENT '串流会话ID',
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (`id`),
     KEY `idx_task_id` (`task_id`),
     KEY `idx_scope` (`scope`),
+    KEY `idx_session_id` (`session_id`),
     KEY `idx_created_time` (`created_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='任务事件时间线';
 

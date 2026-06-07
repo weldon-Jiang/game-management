@@ -14,8 +14,8 @@ import com.bend.platform.enums.AccountStatusEnum;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.service.*;
-import com.bend.platform.service.TaskEventService;
 import com.bend.platform.util.PlatformTypeUtil;
+import com.bend.platform.util.StreamingTaskConflictMessage;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +26,17 @@ import org.springframework.util.StringUtils;
 
 import java.util.*;
 
+/**
+ * {@link TaskControlService} 的实现。
+ *
+ * <p>实现分阶段任务控制面：阶段一 {@link #startStreaming} 负责创建或复用串流任务、生成串流会话、
+ * 标记账号忙碌并交由 {@code TaskExecutorService} 拉起；阶段二 {@link #startAutomation} 在串流就绪后
+ * 锁定本会话的 gameActionType 并下发开始指令。其余方法覆盖暂停/恢复/取消/终止与窗口、跳过账号、
+ * 重连串流等运行时控制。</p>
+ *
+ * <p>所有写操作经 {@link #requireTask} 做 merchant 归属校验；对 Agent 的指令统一经
+ * {@link #sendTaskControl} 通过 {@code AgentWebSocketEndpoint} 下发。</p>
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -42,8 +53,13 @@ public class TaskControlServiceImpl implements TaskControlService {
     private final XboxHostService xboxHostService;
     private final CredentialTokenService credentialTokenService;
     private final TaskEventService taskEventService;
+    private final AgentInstanceService agentInstanceService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * 阶段一实现：校验 Agent 在线与并发余量、流媒体账号归属与冲突，构建任务参数后
+     * 新建或复用串流任务，创建串流会话并标记账号忙碌，最后交由执行器拉起串流。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> startStreaming(String streamingAccountId, StartStreamingRequest request,
@@ -63,8 +79,17 @@ public class TaskControlServiceImpl implements TaskControlService {
         if (streamingAccount == null || !merchantId.equals(streamingAccount.getMerchantId())) {
             throw new BusinessException(404, "流媒体账号不存在");
         }
-        if (taskService.hasRunningTask(streamingAccountId)) {
-            throw new BusinessException(400, "该流媒体账号已有运行中的任务");
+        Task activeTask = taskService.findActiveTaskByStreamingAccountId(streamingAccountId);
+        if (activeTask != null) {
+            String agentName = agentInstanceService.resolveDisplayName(activeTask.getTargetAgentId());
+            Map<String, Object> conflict = new HashMap<>();
+            conflict.put("taskId", activeTask.getId());
+            conflict.put("agentId", activeTask.getTargetAgentId());
+            conflict.put("agentName", agentName);
+            throw new BusinessException(
+                    400,
+                    StreamingTaskConflictMessage.format(activeTask, agentName),
+                    conflict);
         }
 
         List<GameAccount> gameAccounts = gameAccountService.findByStreamingIdWithCredentials(streamingAccountId);
@@ -81,12 +106,54 @@ public class TaskControlServiceImpl implements TaskControlService {
         Map<String, Object> taskParams = buildStreamingTaskParams(
                 streamingAccount, gameAccounts, selectedHost, merchantId);
 
+        Task reusable = taskService.findReusableTaskByStreamingAccountAndAgent(streamingAccountId, agentId);
+        final Task task;
+        final boolean reused;
+        if (reusable != null) {
+            task = reactivateStreamingTask(reusable, taskParams, selectedHost, request);
+            reused = true;
+            log.info("复用串流任务 - TaskID: {}, StreamingAccount: {}, Agent: {}",
+                    task.getId(), streamingAccountId, agentId);
+        } else {
+            task = createStreamingTask(
+                    streamingAccount, agentId, userId, request, selectedHost, taskParams);
+            reused = false;
+            log.info("新建串流任务 - TaskID: {}, StreamingAccount: {}, Agent: {}",
+                    task.getId(), streamingAccountId, agentId);
+        }
+
+        streamingSessionService.closeOpenSessionsForTask(task.getId(), "closed");
+        StreamingSession session = streamingSessionService.createForTask(task, merchantId);
+
+        task.setSessionId(session.getId());
+        task.setSessionPhase("opening");
+        taskMapper.updateById(task);
+
+        markStreamingAccountsBusy(streamingAccountId, agentId, gameAccounts);
+
+        taskExecutorService.executeTask(task);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("taskId", task.getId());
+        result.put("sessionId", session.getId());
+        result.put("phase", "opening");
+        result.put("reused", reused);
+        return result;
+    }
+
+    private Task createStreamingTask(
+            StreamingAccount streamingAccount,
+            String agentId,
+            String userId,
+            StartStreamingRequest request,
+            XboxHost selectedHost,
+            Map<String, Object> taskParams) {
         Task task = new Task();
-        task.setName("串流任务-" + streamingAccount.getName());
+        task.setName("串流任务-" + streamingAccount.getDisplayLabel());
         task.setDescription(request.getDescription());
         task.setType("automation");
         task.setTargetAgentId(agentId);
-        task.setStreamingAccountId(streamingAccountId);
+        task.setStreamingAccountId(streamingAccount.getId());
         task.setXboxHostId(selectedHost != null ? selectedHost.getId() : request.getXboxHostId());
         task.setCreatedBy(userId);
         task.setStatus("pending");
@@ -99,36 +166,79 @@ public class TaskControlServiceImpl implements TaskControlService {
         } catch (Exception e) {
             task.setParams("{}");
         }
+        return taskService.create(task);
+    }
 
-        Task created = taskService.create(task);
-        StreamingSession session = streamingSessionService.createForTask(created, merchantId);
+    private Task reactivateStreamingTask(
+            Task task,
+            Map<String, Object> taskParams,
+            XboxHost selectedHost,
+            StartStreamingRequest request) {
+        taskParams.put("relaunch", true);
+        task.setStatus("pending");
+        task.setErrorMessage(null);
+        task.setResult(null);
+        task.setGameActionType(null);
+        task.setGameActionPending(true);
+        task.setSessionPhase("opening");
+        task.setWindowVisible(true);
+        task.setPauseMode(null);
+        task.setProgressMessage(null);
+        task.setCurrentStep(null);
+        task.setStepStatus(null);
+        task.setCompletedTime(null);
+        task.setStartedTime(null);
+        if (selectedHost != null) {
+            task.setXboxHostId(selectedHost.getId());
+        } else if (request.getXboxHostId() != null && !request.getXboxHostId().isBlank()) {
+            task.setXboxHostId(request.getXboxHostId());
+        }
+        if (request.getDescription() != null) {
+            task.setDescription(request.getDescription());
+        }
+        statusService.deleteByTaskId(task.getId());
+        try {
+            task.setParams(objectMapper.writeValueAsString(taskParams));
+        } catch (Exception e) {
+            task.setParams("{}");
+        }
+        taskMapper.updateById(task);
+        return task;
+    }
 
-        created.setSessionId(session.getId());
-        created.setSessionPhase("opening");
-        taskMapper.updateById(created);
-
+    private void markStreamingAccountsBusy(
+            String streamingAccountId, String agentId, List<GameAccount> gameAccounts) {
         streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.BUSY.getCode());
         streamingAccountService.updateAgentId(streamingAccountId, agentId);
-
         for (GameAccount ga : gameAccounts) {
             gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.BUSY.getCode());
             gameAccountService.updateAgentId(ga.getId(), agentId);
         }
-
-        taskExecutorService.executeTask(created);
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("taskId", created.getId());
-        result.put("sessionId", session.getId());
-        result.put("phase", "opening");
-        return result;
     }
 
+    private void restoreStreamingAccountState(Task task) {
+        String streamingAccountId = task.getStreamingAccountId();
+        if (streamingAccountId == null) {
+            return;
+        }
+        streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
+        streamingAccountService.updateAgentId(streamingAccountId, null);
+        for (GameAccount ga : gameAccountService.findByStreamingId(streamingAccountId)) {
+            gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
+            gameAccountService.updateAgentId(ga.getId(), null);
+        }
+    }
+
+    /**
+     * 阶段二实现：仅当任务处于 ready / automation_failed 或仍待选择任务类型时允许启动；
+     * 写入 gameActionType、切换 phase=automating，锁定会话任务类型并向 Agent 下发开始指令。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> startAutomation(String taskId, StartTaskAutomationRequest request, String merchantId) {
         Task task = requireTask(taskId, merchantId);
         if (!"ready".equalsIgnoreCase(task.getSessionPhase())
+                && !"automation_failed".equalsIgnoreCase(task.getSessionPhase())
                 && !Boolean.TRUE.equals(task.getGameActionPending())) {
             throw new BusinessException(400, "任务尚未就绪，无法开始自动化");
         }
@@ -153,6 +263,10 @@ public class TaskControlServiceImpl implements TaskControlService {
         return result;
     }
 
+    /**
+     * 实现：写入 pauseMode（immediate/after_match），将 status 置 paused，sessionPhase 标为
+     * {@code paused_<mode>}，并向 Agent 下发 pause 指令。
+     */
     @Override
     public void pauseTask(String taskId, TaskPauseRequest request, String merchantId) {
         Task task = requireTask(taskId, merchantId);
@@ -164,6 +278,10 @@ public class TaskControlServiceImpl implements TaskControlService {
         sendTaskControl(task, "pause", Map.of("mode", mode));
     }
 
+    /**
+     * 实现：清理 pauseMode、置 status=running；若仍待选择任务类型则回到 ready，否则回到 automating，
+     * 随后下发 resume 指令。
+     */
     @Override
     public void resumeTask(String taskId, String merchantId) {
         Task task = requireTask(taskId, merchantId);
@@ -178,16 +296,39 @@ public class TaskControlServiceImpl implements TaskControlService {
         sendTaskControl(task, "resume", Map.of());
     }
 
+    /**
+     * 实现：显式 sessionId 优先；否则取任务当前会话；缺会话时退回任务级查询（仅商户隔离）。
+     */
     @Override
-    public List<TaskEvent> getTaskEvents(String taskId, String merchantId, int limit) {
+    public List<StreamingSession> getTaskSessions(String taskId, String merchantId) {
+        requireTask(taskId, merchantId);
+        return streamingSessionService.listByTaskId(taskId);
+    }
+
+    @Override
+    public List<TaskEvent> getTaskEvents(String taskId, String merchantId, int limit, String sessionId) {
+        if (StringUtils.hasText(sessionId)) {
+            return taskEventService.listByTaskIdAndSession(taskId, merchantId, sessionId, limit);
+        }
+        Task task = requireTask(taskId, merchantId);
+        if (StringUtils.hasText(task.getSessionId())) {
+            return taskEventService.listByTaskIdAndSession(
+                    taskId, merchantId, task.getSessionId(), limit);
+        }
         return taskEventService.listByTaskIdForMerchant(taskId, merchantId, limit);
     }
 
+    /** 实现：直接复用 {@link #terminateTask}，二者语义等同。 */
     @Override
     public void cancelTask(String taskId, String merchantId) {
         terminateTask(taskId, merchantId);
     }
 
+    /**
+     * 实现：先取消 Agent 执行（{@code taskExecutorService.cancelTask}），再将任务置 cancelled、
+     * sessionPhase=closed、windowVisible=false；关闭当前会话、释放流媒体/游戏账号占用，
+     * 最后下发 terminate（含关闭窗口）。
+     */
     @Override
     public void terminateTask(String taskId, String merchantId) {
         Task task = requireTask(taskId, merchantId);
@@ -200,9 +341,13 @@ public class TaskControlServiceImpl implements TaskControlService {
         if (session != null) {
             streamingSessionService.closeSession(session.getId(), "closed");
         }
+        restoreStreamingAccountState(task);
         sendTaskControl(task, "terminate", Map.of("closeWindow", true));
     }
 
+    /**
+     * 实现：根据 action（show/hide）更新 windowVisible，向 Agent 下发 {@code window_<action>} 指令。
+     */
     @Override
     public void windowControl(String taskId, String action, String merchantId) {
         Task task = requireTask(taskId, merchantId);
@@ -212,6 +357,9 @@ public class TaskControlServiceImpl implements TaskControlService {
         sendTaskControl(task, "window_" + action, Map.of());
     }
 
+    /**
+     * 实现：将该任务-账号的状态置为 skipped 并下发 skip_game_account 通知，Agent 收到后跳过该账号。
+     */
     @Override
     public void skipGameAccount(String taskId, String gameAccountId, String merchantId) {
         Task task = requireTask(taskId, merchantId);
@@ -219,12 +367,16 @@ public class TaskControlServiceImpl implements TaskControlService {
         sendTaskControl(task, "skip_game_account", Map.of("gameAccountId", gameAccountId));
     }
 
+    /** 实现：向 Agent 下发 reconnect_stream 指令，由 Agent 端复用 PlaySession 重连 DataChannel。 */
     @Override
     public void reconnectStream(String taskId, String merchantId) {
         Task task = requireTask(taskId, merchantId);
         sendTaskControl(task, "reconnect_stream", Map.of());
     }
 
+    /**
+     * 实现：聚合任务本体、当前串流会话与各游戏账号执行状态；为状态记录补齐展示名。
+     */
     @Override
     public Map<String, Object> getTaskDetail(String taskId, String merchantId) {
         Task task = requireTask(taskId, merchantId);
@@ -263,6 +415,9 @@ public class TaskControlServiceImpl implements TaskControlService {
         }
     }
 
+    /**
+     * 实现：按 Agent 拉取任务，过滤 merchant 后保留 running/paused 或仍待选择任务类型的项。
+     */
     @Override
     public List<Map<String, Object>> getActiveTasks(String agentId, String merchantId) {
         List<Task> tasks = taskService.findByAgentId(agentId);
@@ -319,7 +474,7 @@ public class TaskControlServiceImpl implements TaskControlService {
     private Map<String, Object> buildStreamingInfo(StreamingAccount account) {
         Map<String, Object> info = new HashMap<>();
         info.put("id", account.getId());
-        info.put("name", account.getName());
+        info.put("name", account.getDisplayLabel());
         info.put("email", account.getEmail());
         info.put("authCode", account.getAuthCode());
         info.put("passwordToken", credentialTokenService.generateToken(

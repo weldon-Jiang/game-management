@@ -45,11 +45,16 @@ class AccountProvisioningModule:
         scene_detector: Any,
         input_sender: Any,
         report_progress: Optional[Callable] = None,
+        platform_client: Any = None,
     ):
         self.task_id = task_id
         self.logger = get_logger(f"account_provisioning_{task_id}")
         self._detector = ProfileDetector(scene_detector)
-        self._adder = AddAccountFlow(scene_detector, input_sender)
+        self._adder = AddAccountFlow(
+            scene_detector,
+            input_sender,
+            platform_client,
+        )
         self._report = report_progress
         self._phase = ProvisioningPhase.IDLE
 
@@ -57,6 +62,9 @@ class AccountProvisioningModule:
         self,
         scene_detector: Any = None,
         input_sender: Any = None,
+        platform_client: Any = None,
+        frame_getter: Any = None,
+        stream_session: Any = None,
     ) -> None:
         """Late-bind detector/input after step3/step4 init."""
         if scene_detector is not None:
@@ -64,6 +72,12 @@ class AccountProvisioningModule:
             self._adder._scene = scene_detector
         if input_sender is not None:
             self._adder._input = input_sender
+        if platform_client is not None:
+            self._adder._platform_client = platform_client
+        if frame_getter is not None:
+            self._adder._frame_getter = frame_getter
+        if stream_session is not None:
+            self._adder._stream_session = stream_session
 
     async def _emit(
         self,
@@ -72,21 +86,31 @@ class AccountProvisioningModule:
         game_account_id: str,
         step_index: int = 0,
         status: str = "RUNNING",
+        *,
+        account_status: Optional[str] = None,
+        error_message: Optional[str] = None,
     ) -> None:
         self._phase = phase
         if not self._report:
             return
+        extra: Dict[str, Any] = {
+            "scope": "module",
+            "module": "account_provisioning",
+            "phase": phase.value,
+            "game_account_id": game_account_id,
+            "stepIndex": step_index,
+            "stepTotal": self.STEP_TOTAL,
+        }
+        if account_status:
+            extra["accountStatus"] = account_status
+        if error_message:
+            extra["errorMessage"] = error_message
         await self._report(
             self.task_id,
             "STEP4",
             status,
             message,
-            scope="module",
-            module="account_provisioning",
-            phase=phase.value,
-            game_account_id=game_account_id,
-            stepIndex=step_index,
-            stepTotal=self.STEP_TOTAL,
+            **extra,
         )
 
     async def ensure(
@@ -121,7 +145,7 @@ class AccountProvisioningModule:
         if exists:
             await self._emit(
                 ProvisioningPhase.READY,
-                "账号已存在",
+                "准备完成（账号已存在）",
                 game_account.id,
                 step_index=self.STEP_TOTAL,
                 status="COMPLETED",
@@ -152,12 +176,20 @@ class AccountProvisioningModule:
                 )
             ),
         )
+        if added and game_account.gamertag:
+            self.logger.info(
+                "主机昵称已同步: %s -> gameAccount %s",
+                game_account.gamertag,
+                game_account.id,
+            )
         if not added:
             await self._emit(
                 ProvisioningPhase.FAILED,
                 "添加账号失败",
                 game_account.id,
                 status="FAILED",
+                account_status="failed",
+                error_message="添加账号失败",
             )
             return ProvisioningResult(
                 success=False,
@@ -178,6 +210,8 @@ class AccountProvisioningModule:
                 "校验失败",
                 game_account.id,
                 status="FAILED",
+                account_status="failed",
+                error_message="账号校验失败",
             )
             return ProvisioningResult(
                 success=False,

@@ -8,8 +8,7 @@ import lombok.Data;
 @Data
 public class GameAccountImportDto {
 
-    @NotBlank(message = "游戏昵称不能为空")
-    @Size(max = 50, message = "游戏昵称长度不能超过50")
+    @Size(max = 64, message = "游戏昵称长度不能超过64")
     private String gameName;
 
     @NotBlank(message = "邮箱不能为空")

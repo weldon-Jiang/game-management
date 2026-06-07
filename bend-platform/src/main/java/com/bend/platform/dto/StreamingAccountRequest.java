@@ -13,7 +13,6 @@ public class StreamingAccountRequest {
 
     private String merchantId;
 
-    @NotBlank(message = "账号名称不能为空")
     private String name;
 
     private String email;

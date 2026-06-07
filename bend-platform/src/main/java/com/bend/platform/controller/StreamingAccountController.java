@@ -88,7 +88,7 @@ public class StreamingAccountController {
 
     @GetMapping("/template")
     public ApiResponse<String> downloadTemplate() {
-        String template = "账号名称,邮箱,密码,认证码,平台类型\n测试账号1,test1@email.com,password1,authcode1,xbox\n测试账号2,test2@email.com,password2,authcode2,playstation";
+        String template = "邮箱,密码,认证码,平台类型\ntest1@email.com,password1,authcode1,xbox\ntest2@email.com,password2,authcode2,playstation";
         return ApiResponse.success(template);
     }
 

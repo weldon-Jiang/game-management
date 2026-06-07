@@ -21,6 +21,7 @@ Streaming-style Scene Detector - 基于Streaming项目的场景检测器
 import os
 import cv2
 import numpy as np
+from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass
 from enum import Enum
@@ -128,15 +129,20 @@ class StreamingSceneDetector:
         try:
             from ..vision.template_manager import StreamingTemplateManager
 
-            streaming_dat = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-                "..", "..", "streaming", "data", "templates.dat"
-            )
-            streaming_dat = os.path.normpath(streaming_dat)
-            alt_dat = os.path.normpath(r"D:\auto-xbox\streaming\data\templates.dat")
+            from ..core.paths import get_agent_root
+
+            agent_root = get_agent_root()
+            dat_candidates = [
+                agent_root / "data" / "templates.dat",
+                agent_root.parent / "streaming" / "data" / "templates.dat",
+                Path(r"D:\auto-xbox\streaming\data\templates.dat"),
+                Path(r"D:\auto-xbox\xsrp\_internal\data\templates.dat"),
+                Path(r"D:\auto-xbox\XStreamingDesktop-main\ttt-reference\templates.dat"),
+            ]
 
             manager = StreamingTemplateManager(template_dir=self.template_dir)
-            for dat_path in (streaming_dat, alt_dat):
+            for dat_path in dat_candidates:
+                dat_path = os.path.normpath(str(dat_path))
                 if os.path.exists(dat_path):
                     manager.load_serialized(os.path.basename(dat_path))
                     manager.data_dir = os.path.dirname(dat_path)

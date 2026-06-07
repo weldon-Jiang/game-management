@@ -186,6 +186,7 @@ class AutomationScheduler:
         auto_match_host: bool = True,
         streaming_account_auto_code: str = "",
         two_phase: bool = True,
+        relaunch: bool = False,
     ) -> bool:
         """
         启动自动化任务
@@ -204,6 +205,10 @@ class AutomationScheduler:
         """
         if task_id in self._running_tasks:
             self.logger.warning(f"任务 {task_id} 已在运行中")
+            return False
+
+        if not await self.ensure_task_slot(task_id, relaunch=relaunch):
+            self.logger.warning(f"任务 {task_id} 无法获取执行槽位")
             return False
 
         self.logger.info(f"启动任务: {task_id}, 串流账号: {streaming_account_email}")
@@ -286,7 +291,7 @@ class AutomationScheduler:
         with self._lock:
             self._cancel_events[task_id] = cancel_event
             self._task_contexts[task_id] = context
-            self._registry.register(runtime)
+            self._registry.register(runtime, replace=relaunch)
 
         await self._semaphore.acquire()
 
@@ -489,6 +494,8 @@ class AutomationScheduler:
                 self._running_tasks.pop(task_id, None)
                 self._task_objects.pop(task_id, None)
                 self._cancel_events.pop(task_id, None)
+                self._task_contexts.pop(task_id, None)
+                self._task_results.pop(task_id, None)
             self._registry.unregister(task_id)
 
             self._semaphore.release()
@@ -641,6 +648,64 @@ class AutomationScheduler:
             await self._window_manager.destroy_by_task(task_id)
         except Exception as exc:
             self.logger.debug("destroy window manager entry: %s", exc)
+
+        with self._lock:
+            self._task_contexts.pop(task_id, None)
+            self._task_results.pop(task_id, None)
+            self._task_objects.pop(task_id, None)
+
+    async def ensure_task_slot(self, task_id: str, relaunch: bool = False) -> bool:
+        """Release stale runtime state before (re)starting a task."""
+        active = get_active_scheduler()
+        if active and active is not self and task_id in active._running_tasks:
+            if relaunch:
+                await active.force_terminate_task(task_id)
+                await self._wait_task_coroutine_done(active, task_id, timeout=5.0)
+            else:
+                return False
+
+        if task_id in self._running_tasks:
+            if relaunch:
+                await self.force_terminate_task(task_id)
+                await self._wait_task_coroutine_done(self, task_id, timeout=5.0)
+            else:
+                return False
+
+        runtime = self._registry.get(task_id)
+        if runtime:
+            runtime.cancel_event.set()
+            self._registry.unregister(task_id)
+
+        self._purge_task_maps(task_id)
+        async with self._xbox_lock:
+            stale_hosts = [
+                xbox_id for xbox_id, owner in self._streaming_xbox_hosts.items()
+                if owner == task_id
+            ]
+            for xbox_id in stale_hosts:
+                del self._streaming_xbox_hosts[xbox_id]
+        return True
+
+    async def _wait_task_coroutine_done(
+        self,
+        scheduler: "AutomationScheduler",
+        task_id: str,
+        timeout: float = 5.0,
+    ) -> None:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            asyncio_task = scheduler._running_tasks.get(task_id)
+            if asyncio_task is None or asyncio_task.done():
+                return
+            await asyncio.sleep(0.1)
+
+    def _purge_task_maps(self, task_id: str) -> None:
+        with self._lock:
+            self._running_tasks.pop(task_id, None)
+            self._cancel_events.pop(task_id, None)
+            self._task_contexts.pop(task_id, None)
+            self._task_results.pop(task_id, None)
+            self._task_objects.pop(task_id, None)
 
     def get_task_status(self, task_id: str) -> Optional[str]:
         """

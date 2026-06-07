@@ -100,8 +100,13 @@ request.interceptors.response.use(
         router.push('/login')
         return Promise.reject(new Error(res.message || 'Auth error'))
       }
-      ElMessage.error(res.message || 'Request failed')
-      return Promise.reject(new Error(res.message || 'Error'))
+      if (!response.config?.skipErrorToast) {
+        ElMessage.error(res.message || 'Request failed')
+      }
+      const err = new Error(res.message || 'Error')
+      err.code = res.code
+      err.data = res.data
+      return Promise.reject(err)
     }
     return res
   },

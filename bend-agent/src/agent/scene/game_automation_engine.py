@@ -149,6 +149,10 @@ class ActionExecutor:
         self._controller = None
         self._xbox_session = None
         self._controller_protocol = None
+        self._input_gate = None
+
+    def set_input_gate(self, gate) -> None:
+        self._input_gate = gate
 
     def set_controller(self, controller):
         """设置Xbox控制器"""
@@ -169,6 +173,8 @@ class ActionExecutor:
 
     async def _send_gamepad_state(self, gamepad_data: Dict[str, Any]) -> bool:
         """Send gamepad state via WebRTC DataChannel or legacy SmartGlass session."""
+        if self._input_gate is not None and not self._input_gate.is_allowed():
+            return False
         if not self._xbox_session:
             return False
         if hasattr(self._xbox_session, "send_gamepad_state"):

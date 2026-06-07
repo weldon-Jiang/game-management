@@ -23,6 +23,7 @@ const phaseIndex = {
   initializing_display: 2,
   initializing_input: 2,
   ready: 3,
+  automation_failed: 3,
   automating: 4,
   paused_immediate: 4,
   paused_after_match: 4,

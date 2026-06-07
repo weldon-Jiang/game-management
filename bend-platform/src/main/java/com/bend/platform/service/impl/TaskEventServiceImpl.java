@@ -37,4 +37,20 @@ public class TaskEventServiceImpl implements TaskEventService {
         }
         return listByTaskId(taskId, limit);
     }
+
+    @Override
+    public List<TaskEvent> listByTaskIdAndSession(
+            String taskId, String merchantId, String sessionId, int limit) {
+        Task task = taskService.findById(taskId);
+        if (task == null || !merchantId.equals(task.getMerchantId())) {
+            throw new BusinessException(404, "任务不存在");
+        }
+        int safeLimit = Math.min(Math.max(limit, 1), 200);
+        LambdaQueryWrapper<TaskEvent> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(TaskEvent::getTaskId, taskId)
+                .eq(TaskEvent::getSessionId, sessionId)
+                .orderByDesc(TaskEvent::getCreatedTime)
+                .last("LIMIT " + safeLimit);
+        return taskEventMapper.selectList(wrapper);
+    }
 }

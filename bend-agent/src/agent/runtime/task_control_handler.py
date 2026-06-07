@@ -98,7 +98,7 @@ class TaskControlHandler:
         runtime.context.resume()
         prev = runtime.phase_before_pause
         runtime.phase_before_pause = None
-        if prev == SessionPhase.READY or not runtime.phase_fsm.automation_started:
+        if prev == SessionPhase.READY or prev == SessionPhase.AUTOMATION_FAILED or not runtime.phase_fsm.automation_started:
             phase = runtime.set_phase(SessionPhase.READY, "Resumed")
         else:
             phase = runtime.set_phase(SessionPhase.AUTOMATING, "Resumed")

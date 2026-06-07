@@ -19,6 +19,7 @@ import com.bend.platform.service.GameAccountService;
 import com.bend.platform.util.AesUtil;
 import com.bend.platform.util.DataSecurityUtil;
 import com.bend.platform.util.PlatformTypeUtil;
+import org.apache.commons.lang3.StringUtils;
 import com.bend.platform.enums.PlatformType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -85,7 +86,7 @@ public class GameAccountServiceImpl implements GameAccountService {
         GameAccount entity = new GameAccount();
         entity.setMerchantId(merchantId);
         entity.setStreamingId(account.getStreamingId());
-        entity.setGameName(account.getGameName());
+        entity.setGameName(normalizeOptionalGameName(account.getGameName()));
         entity.setEmail(account.getEmail());
         entity.setPlatform(accountPlatform);
         if (account.getPassword() != null) {
@@ -120,9 +121,17 @@ public class GameAccountServiceImpl implements GameAccountService {
             GameAccountImportDto dto = accounts.get(i);
             int rowNum = i + 2;
 
-            if (gamertagSet.contains(dto.getGameName())) {
-                errors.add(String.format("第%d行: 游戏昵称[%s]重复", rowNum, dto.getGameName()));
-                continue;
+            if (StringUtils.isNotBlank(dto.getGameName())) {
+                if (gamertagSet.contains(dto.getGameName())) {
+                    errors.add(String.format("第%d行: 游戏昵称[%s]重复", rowNum, dto.getGameName()));
+                    continue;
+                }
+                GameAccount existing = findByGamertag(dto.getGameName());
+                if (existing != null) {
+                    errors.add(String.format("第%d行: 游戏昵称[%s]已存在", rowNum, dto.getGameName()));
+                    continue;
+                }
+                gamertagSet.add(dto.getGameName());
             }
 
             if (dto.getPlatform() != null && !dto.getPlatform().isBlank()
@@ -130,14 +139,6 @@ public class GameAccountServiceImpl implements GameAccountService {
                 errors.add(String.format("第%d行: 平台类型无效，仅支持 xbox、playstation", rowNum));
                 continue;
             }
-
-            GameAccount existing = findByGamertag(dto.getGameName());
-            if (existing != null) {
-                errors.add(String.format("第%d行: 游戏昵称[%s]已存在", rowNum, dto.getGameName()));
-                continue;
-            }
-
-            gamertagSet.add(dto.getGameName());
         }
 
         if (!errors.isEmpty()) {
@@ -151,7 +152,7 @@ public class GameAccountServiceImpl implements GameAccountService {
             try {
                 GameAccount entity = new GameAccount();
                 entity.setMerchantId(merchantId);
-                entity.setGameName(dto.getGameName());
+                entity.setGameName(normalizeOptionalGameName(dto.getGameName()));
                 entity.setEmail(dto.getEmail());
                 entity.setPlatform(PlatformTypeUtil.normalizeOrDefault(dto.getPlatform()));
                 if (dto.getPassword() != null) {
@@ -461,7 +462,7 @@ public class GameAccountServiceImpl implements GameAccountService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void updateProfileBinding(String id, Boolean profileBound, Integer positionIndex) {
+    public void updateProfileBinding(String id, Boolean profileBound, Integer positionIndex, String gameName) {
         GameAccount account = gameAccountMapper.selectById(id);
         if (account == null) {
             throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
@@ -472,10 +473,24 @@ public class GameAccountServiceImpl implements GameAccountService {
         if (positionIndex != null) {
             account.setPositionIndex(positionIndex);
         }
+        if (StringUtils.isNotBlank(gameName)) {
+            GameAccount existing = findByGamertag(gameName.trim());
+            if (existing != null && !existing.getId().equals(id)) {
+                throw new BusinessException(ResultCode.GameAccount.GAMERTAG_DUPLICATE);
+            }
+            account.setGameName(gameName.trim());
+        }
         account.setUpdatedTime(LocalDateTime.now());
         gameAccountMapper.updateById(account);
-        log.info("更新游戏账号档案绑定 - ID: {}, profileBound: {}, positionIndex: {}",
-                id, profileBound, positionIndex);
+        log.info("更新游戏账号档案绑定 - ID: {}, profileBound: {}, positionIndex: {}, gameName: {}",
+                id, profileBound, positionIndex, gameName);
+    }
+
+    /**
+     * 游戏昵称由 Xbox 主机侧确定后由 Agent 回写；平台创建/导入时允许为空。
+     */
+    private String normalizeOptionalGameName(String gameName) {
+        return StringUtils.isNotBlank(gameName) ? gameName.trim() : null;
     }
 
     @Override

@@ -191,6 +191,10 @@ class ControllerProtocol:
     def __init__(self, stream_controller=None):
         self.logger = get_logger('controller_protocol')
         self._stream_controller = stream_controller
+        self._input_gate = None
+
+    def set_input_gate(self, gate) -> None:
+        self._input_gate = gate
 
     def set_stream_controller(self, controller):
         """
@@ -220,6 +224,9 @@ class ControllerProtocol:
         """
         if not self._stream_controller:
             self.logger.warning("未设置流控制器，无法发送信号")
+            return False
+
+        if self._input_gate is not None and not self._input_gate.is_allowed():
             return False
 
         try:

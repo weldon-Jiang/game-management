@@ -44,11 +44,13 @@ public class GlobalExceptionHandler {
      * 处理业务异常
      */
     @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException e, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Object>> handleBusinessException(BusinessException e, HttpServletRequest request) {
         log.warn("业务异常 - URI: {}, Code: {}, Message: {}", request.getRequestURI(), e.getCode(), e.getMessage());
 
         int code = e.getCode();
-        ApiResponse<Void> response = ApiResponse.error(code, e.getMessage());
+        ApiResponse<Object> response = e.getData() != null
+                ? ApiResponse.error(code, e.getMessage(), e.getData())
+                : ApiResponse.error(code, e.getMessage());
 
         if (code == ResultCode.Auth.TOKEN_INVALID.getCode()
                 || code == ResultCode.Auth.TOKEN_EXPIRED.getCode()

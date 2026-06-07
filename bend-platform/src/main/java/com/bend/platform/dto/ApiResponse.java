@@ -107,6 +107,14 @@ public class ApiResponse<T> {
                 .build();
     }
 
+    public static <T> ApiResponse<T> error(int code, String message, T data) {
+        return ApiResponse.<T>builder()
+                .code(code)
+                .message(message)
+                .data(data)
+                .build();
+    }
+
     /**
      * 错误响应（默认500状态码）
      *

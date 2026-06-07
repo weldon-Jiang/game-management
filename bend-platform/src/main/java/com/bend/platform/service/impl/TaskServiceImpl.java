@@ -156,7 +156,7 @@ public class TaskServiceImpl implements TaskService {
             if (StringUtils.hasText(task.getStreamingAccountId())) {
                 var streamingAccount = streamingAccountService.findById(task.getStreamingAccountId());
                 if (streamingAccount != null) {
-                    task.setStreamingAccountName(streamingAccount.getName());
+                    task.setStreamingAccountName(streamingAccount.getDisplayLabel());
                 }
             }
         }
@@ -284,7 +284,7 @@ public class TaskServiceImpl implements TaskService {
         for (String streamingId : streamingIds) {
             var account = streamingAccountService.findById(streamingId);
             if (account != null) {
-                streamingNames.put(streamingId, account.getName());
+                streamingNames.put(streamingId, account.getDisplayLabel());
             }
         }
 
@@ -810,12 +810,39 @@ public class TaskServiceImpl implements TaskService {
         return taskMapper.selectList(wrapper);
     }
 
+    private static final List<String> ACTIVE_STREAMING_TASK_STATUSES =
+            List.of("pending", "running", "paused");
+
+    private static final List<String> REUSABLE_STREAMING_TASK_STATUSES =
+            List.of("completed", "failed", "cancelled", "stopped");
+
     @Override
     public boolean hasRunningTask(String streamingAccountId) {
+        return findActiveTaskByStreamingAccountId(streamingAccountId) != null;
+    }
+
+    @Override
+    public Task findActiveTaskByStreamingAccountId(String streamingAccountId) {
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Task::getStreamingAccountId, streamingAccountId)
-               .in(Task::getStatus, "pending", "running");
-        return taskMapper.exists(wrapper);
+               .in(Task::getStatus, ACTIVE_STREAMING_TASK_STATUSES)
+               .orderByDesc(Task::getCreatedTime)
+               .last("LIMIT 1");
+        return taskMapper.selectOne(wrapper);
+    }
+
+    @Override
+    public Task findReusableTaskByStreamingAccountAndAgent(String streamingAccountId, String agentId) {
+        if (!StringUtils.hasText(streamingAccountId) || !StringUtils.hasText(agentId)) {
+            return null;
+        }
+        LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Task::getStreamingAccountId, streamingAccountId)
+               .eq(Task::getTargetAgentId, agentId)
+               .in(Task::getStatus, REUSABLE_STREAMING_TASK_STATUSES)
+               .orderByDesc(Task::getUpdatedTime)
+               .last("LIMIT 1");
+        return taskMapper.selectOne(wrapper);
     }
 
     /**

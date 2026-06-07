@@ -41,10 +41,19 @@ public class StreamingAccount {
     private String merchantId;
 
     /**
-     * 账号名称
-     * 用于显示的友好名称
+     * 账号名称（可选，已弃用；展示请用 {@link #getDisplayLabel()}）
      */
     private String name;
+
+    /**
+     * UI/日志展示标签，无名称时回退邮箱。
+     */
+    public String getDisplayLabel() {
+        if (name != null && !name.isBlank()) {
+            return name.trim();
+        }
+        return email != null ? email : id;
+    }
 
     /**
      * 账号邮箱

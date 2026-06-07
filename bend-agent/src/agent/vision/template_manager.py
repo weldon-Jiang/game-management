@@ -460,3 +460,40 @@ class StreamingTemplateManager:
         except Exception as e:
             self.logger.error(f"导出模板失败: {e}")
             return False
+
+
+# Scenes required for account provisioning, switching, and FC launch navigation.
+STEP4_REQUIRED_SCENE_IDS = [
+    1, 2, 3, 4, 5, 6, 7, 10, 24, 101, 126, 127, 147, 149, 203,
+]
+
+
+def required_template_names(scene_ids: Optional[List[int]] = None) -> List[str]:
+    """Return template filenames ({scene}.{template}.png) for the given scenes."""
+    target_scenes = set(scene_ids or STEP4_REQUIRED_SCENE_IDS)
+    names: List[str] = []
+    for schema in SCENE_SCHEMAS:
+        row = dict(zip(SCENE_COLUMNS, schema))
+        scene_id = int(row["scene_id"])
+        if scene_id not in target_scenes:
+            continue
+        template_id = int(row["template_id"])
+        names.append(f"{scene_id}.{template_id}.png")
+    return sorted(set(names))
+
+
+def validate_templates(
+    template_dir: str,
+    scene_ids: Optional[List[int]] = None,
+) -> Tuple[bool, List[str]]:
+    """
+    Check that required PNG templates exist under template_dir.
+
+    Returns (ok, missing_filenames).
+    """
+    root = Path(template_dir)
+    missing = [
+        name for name in required_template_names(scene_ids)
+        if not (root / name).exists()
+    ]
+    return len(missing) == 0, missing

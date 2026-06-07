@@ -21,6 +21,7 @@ public class TaskEvent {
     private String gameAccountId;
     private String module;
     private String payload;
+    private String sessionId;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdTime;

@@ -16,6 +16,7 @@ class SessionPhase(str, Enum):
     INITIALIZING_DISPLAY = "initializing_display"
     INITIALIZING_INPUT = "initializing_input"
     READY = "ready"
+    AUTOMATION_FAILED = "automation_failed"
     AUTOMATING = "automating"
     PAUSED_IMMEDIATE = "paused_immediate"
     PAUSED_AFTER_MATCH = "paused_after_match"
@@ -70,6 +71,13 @@ _TRANSITIONS: Dict[SessionPhase, FrozenSet[SessionPhase]] = {
         SessionPhase.CLOSED,
         SessionPhase.FAILED,
     }),
+    SessionPhase.AUTOMATION_FAILED: frozenset({
+        SessionPhase.AUTOMATING,
+        SessionPhase.READY,
+        SessionPhase.CLOSING,
+        SessionPhase.CLOSED,
+        SessionPhase.FAILED,
+    }),
     SessionPhase.AUTOMATING: frozenset({
         SessionPhase.PAUSED_IMMEDIATE,
         SessionPhase.PAUSED_AFTER_MATCH,
@@ -77,6 +85,7 @@ _TRANSITIONS: Dict[SessionPhase, FrozenSet[SessionPhase]] = {
         SessionPhase.CLOSED,
         SessionPhase.FAILED,
         SessionPhase.READY,
+        SessionPhase.AUTOMATION_FAILED,
     }),
     SessionPhase.PAUSED_IMMEDIATE: frozenset({
         SessionPhase.AUTOMATING,
@@ -146,7 +155,10 @@ class PhaseFSM:
         )
 
     def can_start_automation(self) -> bool:
-        return self._phase == SessionPhase.READY
+        return self._phase in (
+            SessionPhase.READY,
+            SessionPhase.AUTOMATION_FAILED,
+        )
 
     def can_restart_streaming(self) -> bool:
         """After automating/paused, restart streaming is forbidden."""
