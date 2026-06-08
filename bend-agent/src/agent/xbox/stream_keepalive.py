@@ -53,6 +53,7 @@ async def send_keepalive(session: Any) -> bool:
 
 
 async def ensure_input_channel(session: Any, timeout: float = 5.0) -> bool:
+    """等待 input DataChannel 进入 open；无 wait_for_input_channel 时轮询 readyState。"""
     if session is None:
         return True
     if hasattr(session, "wait_for_input_channel"):
@@ -72,7 +73,7 @@ def _resolve_session(source: SessionSource) -> Any:
 
 
 class StreamKeepaliveLoop:
-    """后台保活循环，用于长耗时操作期间。"""
+    """长耗时操作（场景等待/账号切换）期间的后台 keepalive；async with 自动启停。"""
 
     def __init__(self, session: SessionSource, interval: float = KEEPALIVE_INTERVAL_SEC):
         self._session_source = session
@@ -83,6 +84,7 @@ class StreamKeepaliveLoop:
         return _resolve_session(self._session_source)
 
     async def __aenter__(self):
+        """进入上下文时启动周期性 keepalive 任务。"""
         if self._current_session() is not None:
             self._task = asyncio.create_task(self._run())
         return self
@@ -97,6 +99,7 @@ class StreamKeepaliveLoop:
             self._task = None
 
     async def _run(self):
+        """每 interval 秒发送一次 keepalive；通道非 open 时仅告警不发送。"""
         while True:
             await asyncio.sleep(self._interval)
             session = self._current_session()

@@ -1,3 +1,6 @@
+/**
+ * Agent 实例 API：分页、在线状态、重命名与清理/批量删除。
+ */
 import request from '@/utils/request'
 
 export const agentApi = {

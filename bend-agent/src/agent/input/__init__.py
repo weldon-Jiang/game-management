@@ -1,6 +1,4 @@
-"""
-Input module initialization
-"""
+"""手柄/键盘输入模块。"""
 from .input_controller import InputController, GamepadController, MouseButton, Key
 from .xbox_gamepad import XboxGamepadController, xbox_gamepad_controller, XboxButton, XboxAxis, GamepadInput, GamepadSignal
 from .keyboard_mapper import KeyboardMapper, keyboard_mapper, KeyAction, KeyBinding

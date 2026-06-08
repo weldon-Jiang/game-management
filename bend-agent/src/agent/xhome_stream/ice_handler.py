@@ -1,7 +1,7 @@
 """
-Teredo ICE candidate enrichment for xHome WebRTC (XStreamingDesktop aligned).
+xHome WebRTC 的 Teredo ICE 候选增强（对齐 XStreamingDesktop）。
 
-Synthesizes host candidates from Teredo IPv6 (client4:9002 / udpPort) when present.
+存在 Teredo IPv6 时从 client4:9002 / udpPort 合成 host 候选。
 """
 
 import re
@@ -25,7 +25,7 @@ def is_enabled() -> bool:
 
 
 def _inspect_teredo(ipv6: str) -> Optional[Tuple[str, int]]:
-    """Decode Teredo client IPv4 and mapped UDP port (RFC 4380)."""
+    """解码 Teredo 客户端 IPv4 与映射 UDP 端口（RFC 4380）。"""
     try:
         packed = socket.inet_pton(socket.AF_INET6, ipv6)
         if packed[:4] != b"\x20\x01\x00\x00":
@@ -39,7 +39,7 @@ def _inspect_teredo(ipv6: str) -> Optional[Tuple[str, int]]:
 
 
 def enrich_teredo_candidates(candidates: List[str]) -> List[str]:
-    """XStreamingDesktop-style host candidate synthesis from Teredo lines."""
+    """按 XStreamingDesktop 风格从 Teredo 行合成 host 候选。"""
     if not is_enabled() or not candidates:
         return list(candidates)
 
@@ -77,7 +77,7 @@ def rewrite_candidate(candidate: str, public_ip: Optional[str] = None) -> str:
 
 
 def rewrite_sdp(sdp: str, public_ip: Optional[str] = None) -> str:
-    """Rewrite SDP answer; enrich Teredo ICE lines when enabled."""
+    """重写 SDP answer；启用时增强 Teredo ICE 行。"""
     if not sdp:
         return sdp
 

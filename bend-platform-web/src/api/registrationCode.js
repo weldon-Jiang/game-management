@@ -1,3 +1,6 @@
+/**
+ * Agent 注册码 API：平台批量生成、校验与作废。
+ */
 import request from '@/utils/request'
 
 export const registrationCodeApi = {

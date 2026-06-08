@@ -1,4 +1,4 @@
-"""Parallel SSDP enrich for LAN IP (optional, non-blocking)."""
+"""并行 SSDP 增强局域网 IP（可选、非阻塞）。"""
 
 import asyncio
 from typing import Dict, List

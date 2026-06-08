@@ -176,6 +176,9 @@
 </template>
 
 <script setup>
+/**
+ * 订阅与点数：激活码兑换、当前订阅、点数余额与 VIP 档位、历史订阅筛选。
+ */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Tickets, Refresh } from '@element-plus/icons-vue'
@@ -233,6 +236,7 @@ const loadBalance = async () => {
 }
 
 const handleActivate = async () => {
+  // 激活成功后刷新订阅列表与点数余额（VIP 折扣随之更新）
   if (!activationCode.value.trim()) {
     ElMessage.warning('请输入激活码')
     return

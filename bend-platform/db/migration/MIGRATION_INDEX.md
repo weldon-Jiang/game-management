@@ -28,6 +28,7 @@ Run migrations in lexicographic (filename) order on an existing database. For fr
 - `V20260607_006_automation_billing_event.sql` — add idempotent Step4 billable event records.
 - `V20260607_007_fix_billing_comment_charset.sql` — repair comments for environments that ran V005/V006 before utf8mb4 client charset was enforced.
 - `V20260607_008_system_metrics_trend_index.sql` — add composite index for bounded monitoring trend queries.
+- `V20260608_001_task_game_account_status_comments.sql` — add column comments for task_game_account_status progress fields.
 
 ## Legacy locations (removed)
 

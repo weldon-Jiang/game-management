@@ -5,6 +5,9 @@ import lombok.Data;
 
 import java.util.List;
 
+/**
+ * 游戏账号批量导入请求（平台管理员可指定 merchantId）。
+ */
 @Data
 public class BatchImportRequest {
     private String merchantId;

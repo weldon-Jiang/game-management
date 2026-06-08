@@ -1,6 +1,6 @@
 """
-Machine identity module for Bend Agent
-Generates and persists a unique machine ID based on hardware characteristics
+Bend Agent 机器标识模块。
+基于硬件特征生成并持久化唯一机器 ID。
 """
 import hashlib
 import uuid
@@ -14,13 +14,13 @@ from .logger import get_logger
 
 class MachineIdentity:
     """
-    Machine identity manager
-    Generates and persists a unique machine ID based on hardware characteristics
+    机器标识管理器。
+    基于硬件特征生成并持久化唯一机器 ID。
     """
 
     REGISTRY_PATH = r"SOFTWARE\BendPlatform\Agent"
     MACHINE_ID_KEY = "MachineId"
-    FILE_PATH = None  # Will be set to exe directory in get_machine_id()
+    FILE_PATH = None  # 在 get_machine_id() 中设为 exe 目录
 
     def __init__(self):
         self.logger = get_logger('machine_identity')
@@ -28,9 +28,8 @@ class MachineIdentity:
 
     def get_machine_id(self) -> str:
         """
-        Get or generate a unique machine ID
-        The ID is persisted in Windows Registry and will remain the same
-        even after reinstalling Agent in different paths
+        获取或生成唯一机器 ID。
+        ID 持久化在 Windows 注册表，换路径重装 Agent 后仍保持不变。
         """
         if self._machine_id:
             return self._machine_id
@@ -48,7 +47,7 @@ class MachineIdentity:
         return new_id
 
     def _load_from_registry(self) -> Optional[str]:
-        """Load machine ID from Windows Registry (current user, no admin needed)"""
+        """从 Windows 注册表加载机器 ID（当前用户，无需管理员）"""
         try:
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
@@ -67,7 +66,7 @@ class MachineIdentity:
             return None
 
     def _save_to_registry(self, machine_id: str) -> bool:
-        """Save machine ID to Windows Registry (current user, no admin needed)"""
+        """将机器 ID 保存到 Windows 注册表（当前用户，无需管理员）"""
         try:
             key = winreg.CreateKey(
                 winreg.HKEY_CURRENT_USER,
@@ -83,7 +82,7 @@ class MachineIdentity:
 
     def _generate_machine_id(self) -> str:
         """
-        Generate a unique machine ID based on hardware characteristics
+        基于硬件特征生成唯一机器 ID。
         """
         components = []
 
@@ -118,7 +117,7 @@ class MachineIdentity:
         return f"AGENT-{hash_value[:8].upper()}-{hash_value[8:16].upper()}-{hash_value[16:24].upper()}"
 
     def _get_mac_address(self) -> Optional[str]:
-        """Get the first non-virtual MAC address"""
+        """获取第一个非虚拟 MAC 地址"""
         import subprocess
         try:
             result = subprocess.run(
@@ -139,15 +138,14 @@ class MachineIdentity:
 
     def get_agent_id_from_machine_id(self) -> str:
         """
-        Generate agent ID from machine ID
-        This provides a persistent identifier across installations
+        由机器 ID 生成 Agent ID，跨安装保持同一标识。
         """
         return self.get_machine_id()
 
     def reset_machine_id(self) -> bool:
         """
-        Reset machine ID (for testing or troubleshooting)
-        WARNING: This will cause the platform to recognize the agent as a new installation
+        重置机器 ID（测试或排障用）。
+        警告：平台将把该 Agent 视为全新安装。
         """
         try:
             key = winreg.OpenKey(

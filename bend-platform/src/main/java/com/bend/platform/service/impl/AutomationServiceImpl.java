@@ -23,6 +23,12 @@ import org.springframework.util.StringUtils;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * 自动化任务编排：校验 Agent/计费/账号状态，创建任务并异步下发 Agent。
+ * <p>
+ * 入口 {@link #startAutomation} 对应前端「开始自动化」；批量处理流媒体账号，
+ * 单账号失败不影响同批其他账号。扣费与账号 busy 状态在同一事务内完成。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -38,6 +44,10 @@ public class AutomationServiceImpl implements AutomationService {
     private final TaskExecutorService taskExecutorService;
     private final AgentLoadControlService loadControlService;
 
+    /**
+     * 批量启动自动化：逐流媒体账号校验 → 扣点 → 创建 Task → executeTaskAsync。
+     * 前置：Agent 在线、未超并发、Redis 可用、无活跃任务、游戏账号非 busy、计费通过。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> startAutomation(StartAutomationRequest request, String userId, String merchantId) {
@@ -283,6 +293,9 @@ public class AutomationServiceImpl implements AutomationService {
         return response;
     }
 
+    /**
+     * 停止指定流媒体账号的自动化：WS 通知 Agent、释放账号 busy、取消关联 Task。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void stopAutomation(String streamingAccountId, String merchantId) {

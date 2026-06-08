@@ -267,6 +267,13 @@ class AccountSwitcher:
         return self._accounts.get(account_id)
 
     async def switch_to(self, target_account_id: str) -> AccountSwitchResult:
+        """
+        切换至目标游戏账号（Step4 账号轮询主入口）。
+
+        流程：StreamKeepaliveLoop 保活 → 确保 input 通道 → 引导菜单/主页导航
+        → 按 profile_bound / is_new_user 分支（OCR 选档或新用户登录）→ 回写 profile_bound。
+        退出：成功更新 _current_account_id；失败返回 AccountSwitchResult(success=False)。
+        """
         start_time = time.time()
         from_account = self._current_account_id
 
@@ -633,6 +640,12 @@ class AccountSwitcher:
         strict: bool = False,
         threshold_override: Optional[float] = None,
     ) -> bool:
+        """
+        轮询截帧直至任一 scene_ids 匹配或超时。
+
+        等待期间：FC/UT 场景每 5s 按 A 跳过弹窗；每 8s 检测 input 通道并发送 keepalive。
+        strict=True 时会额外比对 XBOX_UI_AMBIGUOUS_SCENES 以降低误匹配。
+        """
         if not self._scene_detector or not self._frame_getter:
             self.logger.warning(f"跳过场景校验 {scene_ids}（未绑定检测器或截帧）")
             return True
@@ -783,7 +796,7 @@ class AccountSwitcher:
             self.logger.debug(f"保存调试帧失败: {e}")
 
     def _resolve_input_session(self):
-        """Resolve WebRTC/SmartGlass session from stream binding or action executor."""
+        """从串流绑定或动作执行器解析 WebRTC/SmartGlass 会话。"""
         if self._stream_session is not None:
             return self._stream_session
         executor = self._action_executor
@@ -975,7 +988,7 @@ class AccountSwitcher:
         *,
         account_id: Optional[str] = None,
     ) -> AccountSwitchResult:
-        """Passive provisioning: navigate to add-user flow and log in with credentials."""
+        """被动开通：导航到添加用户流程并用凭证登录。"""
         start = time.time()
         host_tag: Optional[str] = None
         try:

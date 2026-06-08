@@ -1,3 +1,6 @@
+/**
+ * 自动化 API：两阶段入口 startStreaming + startAutomation；旧 start/stop 保留兼容。
+ */
 import request from '@/utils/request'
 
 export const automationApi = {

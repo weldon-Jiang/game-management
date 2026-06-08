@@ -5,6 +5,9 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
+/**
+ * 长寿命串流会话：同一 Task 多轮 Step1–4 的 phase、gameActionType 与错误信息。
+ */
 @Data
 @TableName("streaming_session")
 public class StreamingSession {

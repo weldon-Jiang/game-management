@@ -1,3 +1,6 @@
+/**
+ * 任务 API：CRUD、TaskControl 控制面（pause/resume/terminate/window/stream）、详情与事件。
+ */
 import request from '@/utils/request'
 
 export const taskApi = {

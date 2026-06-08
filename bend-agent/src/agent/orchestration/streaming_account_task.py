@@ -1,8 +1,8 @@
 """
-StreamingAccountTask — single-task state machine (two-phase lifecycle).
+StreamingAccountTask — 单任务状态机（两阶段生命周期）。
 
-Phase 1: auth → discovery → stream → READY (wait for start_automation)
-Phase 2: provisioning gate → step4 per game account → CLOSING (only on full success)
+阶段 1：认证 → 发现 → 串流 → READY（等待 start_automation）
+阶段 2：开通门禁 → 逐账号 step4 → CLOSING（仅全部成功时）
 """
 
 import asyncio
@@ -28,7 +28,7 @@ from ..automation.step4_game_automation import step4_execute_gaming
 
 
 class StreamingAccountTask:
-    """Per streaming-account task orchestrator with phase FSM."""
+    """单串流账号任务编排器，内置 phase FSM。"""
 
     def __init__(
         self,
@@ -59,12 +59,11 @@ class StreamingAccountTask:
 
     async def execute(self, check_cancel: Callable[[], bool]) -> AutomationResult:
         """
-        Run the two-phase streaming task lifecycle.
+        执行两阶段串流任务生命周期。
 
-        The method first opens and keeps a stream alive until READY, then waits
-        for the platform to send start_automation. Step4 failures deliberately
-        do not close the stream/window: the task moves to AUTOMATION_FAILED and
-        waits for a retry so users can recover without rerunning Step1-3.
+        先打开并保持串流直至 READY，再等待平台下发 start_automation。
+        Step4 失败时不关闭串流/窗口：任务进入 AUTOMATION_FAILED 等待重试，
+        用户无需重跑 Step1-3。
         """
         task_id = self.runtime.task_id
         focus = InputFocusManager.get_instance()
@@ -130,7 +129,7 @@ class StreamingAccountTask:
             total_matches = 0
 
             while True:
-                # Cancellation is the only path that tears down the stream while waiting in READY.
+                # READY 等待期间，仅取消路径会拆除串流。
                 if check_cancel():
                     await self._cleanup_session(session, destroy_window=True)
                     self.runtime.set_phase(SessionPhase.CLOSED, "Cancelled")
@@ -156,7 +155,7 @@ class StreamingAccountTask:
                         self.runtime.set_phase(SessionPhase.READY, ready_msg)
                         await self._report_session(SessionPhase.READY, ready_msg)
                     automation_event.clear()
-                    # READY is a long-lived manual handoff point; it only exits on start_automation or cancellation.
+                    # READY 为长寿命人工交接点；仅 start_automation 或取消可退出。
                     while not automation_event.is_set():
                         if check_cancel():
                             await self._cleanup_session(session, destroy_window=True)
@@ -173,7 +172,7 @@ class StreamingAccountTask:
 
                 await self._ensure_display_after_stream()
 
-                # Step4 is the only owner of virtual controller input; disable it immediately after Step4 returns.
+                # Step4 是唯一虚拟手柄来源；返回后立即关闭 automation_active。
                 input_gate.set_automation_active(True)
                 step4_result = await step4_execute_gaming(
                     self.context,
@@ -212,7 +211,7 @@ class StreamingAccountTask:
                 automation_event.clear()
                 fail_msg = step4_result.message or "自动化失败"
                 self._last_automation_fail_msg = fail_msg
-                # Keep stream/window resources alive so the user can retry Step4 from the same READY-like session.
+                # 保留串流/窗口，使用户可在同一会话内重试 Step4。
                 self.runtime.set_phase(SessionPhase.AUTOMATION_FAILED, fail_msg)
                 await self._report_session(SessionPhase.AUTOMATION_FAILED, fail_msg)
                 self.logger.warning(
@@ -232,7 +231,7 @@ class StreamingAccountTask:
             await self._cleanup_session(session, destroy_window=True, emit_session_phases=False)
             return AutomationResult(success=False, error_code="EXCEPTION", message=str(exc))
         finally:
-            # Final safety net: no task should leave input focus, decode slots, or registry entries behind.
+            # 最终兜底：任务不得遗留 input 焦点、解码槽或注册表项。
             input_gate.set_automation_active(False)
             focus.pop(task_id)
             release_decode_slot(self._decode_mode)
@@ -284,7 +283,7 @@ class StreamingAccountTask:
     )
 
     def _sync_media_context(self, media_ctx: AgentTaskContext) -> None:
-        """Copy step2/3 stream artifacts so step4 can reconnect WebRTC."""
+        """复制 step2/3 串流产物，供 step4 重连 WebRTC。"""
         for name in self._STREAM_CONTEXT_ATTRS:
             if hasattr(media_ctx, name):
                 setattr(self.context, name, getattr(media_ctx, name))
@@ -307,7 +306,7 @@ class StreamingAccountTask:
         destroy_window: bool,
         emit_session_phases: bool = True,
     ) -> None:
-        """Close stream resources and either destroy or hide the display window."""
+        """关闭串流资源，并销毁或隐藏显示窗口。"""
         await session.close(emit_phases=emit_session_phases)
         if destroy_window:
             await self.window_manager.destroy_by_task(self.runtime.task_id)

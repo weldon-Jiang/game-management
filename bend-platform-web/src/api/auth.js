@@ -1,3 +1,6 @@
+/**
+ * 认证 API：登录、注册、当前用户与 JWT 刷新。
+ */
 import request from '@/utils/request'
 
 export const authApi = {

@@ -18,6 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
+/**
+ * 商户点数账户：余额查询、扣减/充值及 point_transaction 流水。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor

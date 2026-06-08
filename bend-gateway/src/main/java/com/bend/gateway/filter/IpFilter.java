@@ -17,6 +17,11 @@ import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
 
+/**
+ * 网关 IP 黑白名单过滤器（order=-100，优先于限流）。
+ * <p>
+ * whitelist 非空时仅允许名单内 IP；blacklist 命中直接 403。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor

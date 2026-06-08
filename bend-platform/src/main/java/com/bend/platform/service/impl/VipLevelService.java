@@ -12,6 +12,9 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * VIP 等级计算：按累计消费与 merchant_group 门槛匹配 vipLevel 及折扣价。
+ */
 @Service
 @RequiredArgsConstructor
 public class VipLevelService {

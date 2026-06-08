@@ -248,7 +248,7 @@ class AgentAutomationTask:
             await self.platform_client.close()
 
     def _get_active_step(self) -> str:
-        """Resolve the most relevant step label for top-level callbacks."""
+        """为顶层回调解析最相关的步骤标签。"""
         step_order = (
             ("step4", "STEP4"),
             ("step3", "STEP3"),
@@ -269,7 +269,7 @@ class AgentAutomationTask:
         return "STEP1"
 
     async def _report_step_outcome(self, step: str, result: Any) -> bool:
-        """Report step failure/cancellation with the correct platform status."""
+        """以正确平台状态上报步骤失败/取消。"""
         status = "CANCELLED" if result.error_code == "CANCELLED" else "FAILED"
         return await self._report_progress(
             self.context.task_id,

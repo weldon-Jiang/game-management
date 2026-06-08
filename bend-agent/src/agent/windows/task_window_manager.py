@@ -232,11 +232,11 @@ class TaskWindowManager:
         return False
 
     def get_window_id_by_task(self, task_id: str) -> Optional[str]:
-        """Return window_id for task_id."""
+        """返回 task_id 对应的 window_id。"""
         return self._task_to_window.get(task_id)
 
     async def focus_window(self, window_id: str) -> bool:
-        """Bring window to foreground (display_only)."""
+        """将窗口置前（仅显示层）。"""
         if window_id not in self._windows:
             return False
         window = self._windows[window_id]

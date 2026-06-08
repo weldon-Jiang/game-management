@@ -5,6 +5,9 @@ import lombok.Data;
 
 import java.util.List;
 
+/**
+ * 流媒体账号批量导入请求。
+ */
 @Data
 public class StreamingAccountBatchImportRequest {
     private String merchantId;

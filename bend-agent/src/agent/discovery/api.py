@@ -1,7 +1,7 @@
 """
-DiscoveryService — cloud console list + SSDP enrich + power routing.
+DiscoveryService — 云端主机列表 + SSDP 增强 + 电源路由。
 
-Delegates heavy lifting to step2; list/resolve use GSSV + power_manager.
+重逻辑委托 step2；列表/解析使用 GSSV + power_manager。
 """
 
 from dataclasses import dataclass
@@ -15,7 +15,7 @@ from .models import ConsoleTarget
 
 @dataclass
 class ResolveResult:
-    """Console target plus step2 context (WebRTC session must flow into step3)."""
+    """主机目标及 step2 上下文（WebRTC 会话须流入 step3）。"""
 
     console: ConsoleTarget
     context: AgentTaskContext

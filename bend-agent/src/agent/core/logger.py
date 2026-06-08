@@ -1,5 +1,5 @@
 """
-Logging configuration for Bend Agent
+Bend Agent 日志配置
 
 功能说明：
 - 提供统一的日志记录接口

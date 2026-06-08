@@ -1,7 +1,7 @@
 """
-Power routing: On pass / Standby wake / Off error.
+电源路由：开机放行 / 待机唤醒 / 关机报错。
 
-GSSV primary; SmartGlass fallback when configured (P2).
+以 GSSV 为主；配置时 SmartGlass 兜底（P2）。
 """
 
 from dataclasses import dataclass
@@ -112,7 +112,7 @@ class PowerManager:
         return False
 
     async def _smartglass_wake(self, credentials: Any, console: Any, timeout: int) -> bool:
-        """Best-effort SmartGlass wake when GSSV power API unavailable."""
+        """GSSV 电源 API 不可用时尽力 SmartGlass 唤醒。"""
         ip = getattr(console, "ip_address", "")
         if not ip:
             return False

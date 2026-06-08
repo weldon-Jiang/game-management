@@ -1,4 +1,4 @@
-"""Resolve GSSV base URI from task context or credentials."""
+"""从任务上下文或凭证解析 GSSV baseUri。"""
 
 from typing import Any, Optional
 
@@ -12,7 +12,7 @@ def normalize_gssv_base_uri(uri: Optional[str]) -> str:
 
 
 def resolve_gssv_base_uri(source: Any) -> str:
-    """Extract GSSV base URI from AgentTaskContext, StreamingCredentials, or XboxTokens."""
+    """从 AgentTaskContext、StreamingCredentials 或 XboxTokens 提取 GSSV baseUri。"""
     if source is None:
         return DEFAULT_GSSV_BASE_URI
 

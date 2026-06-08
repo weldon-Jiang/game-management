@@ -1,4 +1,4 @@
-"""GSSV URL builders — dynamic baseUri, no hardcoded region."""
+"""GSSV URL 构建器 — 动态 baseUri，无硬编码区域。"""
 
 
 class GssvEndpoints:

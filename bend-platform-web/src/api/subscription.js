@@ -1,3 +1,6 @@
+/**
+ * 商户订阅 API：激活码兑换、当前订阅、自动化启动前校验。
+ */
 import request from '@/utils/request'
 
 export const subscriptionApi = {

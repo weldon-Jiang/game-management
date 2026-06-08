@@ -1,5 +1,5 @@
 """
-StreamingSession — orchestrates auth → discovery → xhome_stream ready chain.
+StreamingSession — 编排 auth → discovery → xhome_stream 就绪链。
 """
 
 from dataclasses import dataclass
@@ -25,7 +25,7 @@ class SessionOpenResult:
 
 class StreamingSession:
     """
-    One streaming account + one console + one media session per task.
+    每个任务对应一个串流账号、一台主机与一个媒体会话。
     """
 
     def __init__(self, task_id: str):
@@ -152,15 +152,15 @@ class StreamingSession:
         return ok
 
     async def _detect_input_mode(self, media: MediaSession) -> str:
-        """Physical gamepad if step3 already bound one; otherwise virtual via DataChannel."""
+        """step3 已绑定物理手柄则用物理输入，否则经 DataChannel 虚拟输入。"""
         ctx = media.context
         if getattr(ctx, "_gamepad_controller", None):
             return "physical"
-        # step3/SDL already owns pygame — avoid re-init joystick (causes native crash on Windows).
+        # step3/SDL 已占用 pygame — 避免重复初始化 joystick（Windows 上可能原生崩溃）。
         return "virtual"
 
     async def close(self, emit_phases: bool = True) -> None:
-        """Tear down media; optionally emit CLOSING/CLOSED session phases."""
+        """拆除媒体资源；可选上报 CLOSING/CLOSED 会话阶段。"""
         if emit_phases:
             await self._emit_phase(SessionPhase.CLOSING, "Closing session")
         if self.media:
@@ -174,7 +174,7 @@ class StreamingSession:
             await self._emit_phase(SessionPhase.CLOSED, "Session closed")
 
     async def _close_partial_media(self) -> None:
-        """Best-effort cleanup for failures after Step2 but before READY."""
+        """Step2 之后、READY 之前失败时的尽力清理。"""
         try:
             if self.media:
                 await self._stream.close(self.media)

@@ -50,7 +50,7 @@ logger = logging.getLogger('microsoft_msal_auth')
 
 
 # ============================================
-# Layer 1: 数据模型层 (Data Models)
+# 第 1 层：数据模型
 # ============================================
 
 class AuthStatus(Enum):
@@ -121,7 +121,7 @@ class AuthenticationResult:
 
 
 # ============================================
-# Layer 2: Token存储层 (Token Storage)
+# 第 2 层：Token 存储
 # ============================================
 
 class TokenStorage:
@@ -156,7 +156,7 @@ class TokenStorage:
         
         关键逻辑：无论程序是直接运行还是打包成exe，都确保token文件存储在程序所在目录
         
-        Returns:
+        返回:
             tokens目录的绝对路径
         """
         import sys
@@ -252,10 +252,10 @@ class TokenStorage:
         """
         获取指定账号的Refresh Token
         
-        Args:
+        参数:
             email: 用户邮箱（作为缓存键）
         
-        Returns:
+        返回:
             Refresh Token或None
         """
         return cls._cache.get(email)
@@ -265,7 +265,7 @@ class TokenStorage:
         """
         设置指定账号的Refresh Token（同时更新缓存和文件）
         
-        Args:
+        参数:
             email: 用户邮箱（作为缓存键）
             refresh_token: 要保存的Refresh Token
         """
@@ -277,7 +277,7 @@ class TokenStorage:
         """
         异步设置指定账号的Refresh Token（带锁）
         
-        Args:
+        参数:
             email: 用户邮箱（作为缓存键）
             refresh_token: 要保存的Refresh Token
         """
@@ -290,7 +290,7 @@ class TokenStorage:
         """
         删除指定账号的Refresh Token
         
-        Args:
+        参数:
             email: 用户邮箱
         """
         if email in cls._cache:
@@ -303,7 +303,7 @@ class TokenStorage:
         """
         异步删除指定账号的Refresh Token（带锁）
         
-        Args:
+        参数:
             email: 用户邮箱
         """
         if email in cls._cache:
@@ -316,14 +316,14 @@ class TokenStorage:
         """
         获取已存储的所有账号列表
         
-        Returns:
+        返回:
             邮箱列表
         """
         return list(cls._cache.keys())
 
 
 # ============================================
-# Layer 3: 微软OAuth认证层 (Microsoft OAuth)
+# 第 3 层：微软 OAuth 认证
 # ============================================
 
 class MicrosoftOAuthClient:
@@ -359,7 +359,7 @@ class MicrosoftOAuthClient:
         
         向微软OAuth服务器请求设备代码，用于用户手动验证
         
-        Returns:
+        返回:
             设备代码信息字典，包含：
             - user_code: 用户需要输入的代码
             - device_code: 后台轮询使用的代码
@@ -396,11 +396,11 @@ class MicrosoftOAuthClient:
         
         在用户完成验证后，定期向服务器轮询获取访问令牌
         
-        Args:
+        参数:
             device_code: 设备代码
             max_wait_seconds: 最大等待时间（秒），超时后立即停止轮询
         
-        Returns:
+        返回:
             MicrosoftTokens对象或None
         """
         import aiohttp
@@ -470,10 +470,10 @@ class MicrosoftOAuthClient:
         """
         使用Refresh Token刷新获取新Token
         
-        Args:
+        参数:
             refresh_token: 已有的Refresh Token
         
-        Returns:
+        返回:
             新的MicrosoftTokens对象或None
         """
         import aiohttp
@@ -510,7 +510,7 @@ class MicrosoftOAuthClient:
 
 
 # ============================================
-# Layer 4: Xbox认证层 (Xbox Auth)
+# 第 4 层：Xbox 认证
 # ============================================
 
 class XboxLiveClient:
@@ -532,10 +532,10 @@ class XboxLiveClient:
         """
         获取Xbox Live令牌
         
-        Args:
+        参数:
             access_token: 微软OAuth访问令牌
         
-        Returns:
+        返回:
             XboxLiveTokens对象或None
         """
         import aiohttp
@@ -567,10 +567,10 @@ class XboxLiveClient:
         """
         获取Xbox User Token
         
-        Args:
+        参数:
             access_token: 微软OAuth访问令牌
         
-        Returns:
+        返回:
             Xbox User Token字符串或None
         """
         import aiohttp
@@ -611,10 +611,10 @@ class XboxLiveClient:
         """
         获取XSTS Token和User Hash
         
-        Args:
+        参数:
             user_token: Xbox User Token
         
-        Returns:
+        返回:
             (XSTS Token, User Hash) 元组，失败返回(None, None)
         """
         import aiohttp
@@ -659,10 +659,10 @@ class XboxLiveClient:
         这是 Xbox Live API 认证的关键步骤。
         参考 XStreamingDesktop 项目的 doXstsAuthorization 方法。
         
-        Args:
+        参数:
             xsts_token: XSTS Token
         
-        Returns:
+        返回:
             GSSV Token 字符串或 None
         """
         import aiohttp
@@ -737,10 +737,10 @@ class XboxLiveClient:
         这是 Xbox Live 主机发现和串流所需的专用 Token。
         参考 XStreamingDesktop 项目的 getStreamToken('xhome') 方法。
         
-        Args:
+        参数:
             gssv_token: GSSV Token
         
-        Returns:
+        返回:
             (gsToken, 默认 baseUri, 原始响应) 或 None
         """
         import aiohttp
@@ -805,10 +805,10 @@ class XboxLiveClient:
         4. 使用 GSSV Token 获取 xHome Token (gsToken) ← 新增
         5. 返回包含完整令牌的 XboxLiveTokens
         
-        Args:
+        参数:
             access_token: 微软 OAuth 访问令牌
         
-        Returns:
+        返回:
             XboxLiveTokens 对象或 None（包含 gs_token）
         """
         try:
@@ -854,7 +854,7 @@ class XboxLiveClient:
 
 
 # ============================================
-# Layer 5: 认证器主类 (Authenticator)
+# 第 5 层：认证器主类
 # ============================================
 
 class MicrosoftMsalAuthenticator:
@@ -884,7 +884,7 @@ class MicrosoftMsalAuthenticator:
         self._user_email = None
         self._microsoft_tokens: Optional[MicrosoftTokens] = None
         self._xbox_tokens: Optional[XboxLiveTokens] = None
-        self._auto_code: Optional[str] = None  # TOTP Secret Key for MFA
+        self._auto_code: Optional[str] = None  # MFA 用 TOTP 密钥
         self._last_device_code_error: Optional[str] = None
         
         # 初始化Token存储（从文件加载已保存的Token）
@@ -923,13 +923,13 @@ class MicrosoftMsalAuthenticator:
         """
         执行完整的认证流程
 
-        Args:
+        参数:
             email: 微软账号邮箱（用于标识和日志）
             password: 明文密码（用于浏览器自动化登录）
             encrypted_password: 加密密码（预留参数）
             auto_code: TOTP Secret Key，用于MFA自动验证码生成
 
-        Returns:
+        返回:
             AuthenticationResult: 认证结果
         """
         self._auth_status = AuthStatus.AUTHENTICATING
@@ -1005,10 +1005,10 @@ class MicrosoftMsalAuthenticator:
         """
         尝试使用Refresh Token刷新获取新Token
         
-        Args:
+        参数:
             email: 用户邮箱
         
-        Returns:
+        返回:
             MicrosoftTokens或None（刷新失败时）
         """
         refresh_token = TokenStorage.get_token(email)
@@ -1029,12 +1029,12 @@ class MicrosoftMsalAuthenticator:
         """
         执行设备码认证流程（浏览器自动化，总时限由 DEVICE_CODE_TIMEOUT 控制）
 
-        Args:
+        参数:
             email: 微软账号邮箱
             password: 微软账号密码（用于自动登录）
             auto_code: TOTP Secret Key，用于MFA自动验证码生成
 
-        Returns:
+        返回:
             (MicrosoftTokens, error_code): 成功时 error_code 为 None
         """
         self._last_device_code_error = None
@@ -1145,7 +1145,7 @@ class MicrosoftMsalAuthenticator:
         """
         获取Xbox Live令牌
         
-        Returns:
+        返回:
             XboxLiveTokens或None
         """
         if not self._microsoft_tokens:

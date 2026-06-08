@@ -1,4 +1,4 @@
-"""Cloud console list via GSSV GET /v6/servers/home."""
+"""通过 GSSV GET /v6/servers/home 获取云端主机列表。"""
 
 from typing import Any, List, Optional
 

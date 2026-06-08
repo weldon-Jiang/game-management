@@ -1,7 +1,7 @@
 """
-XHomeStreamService — PlaySession / WebRTC media path.
+XHomeStreamService — PlaySession / WebRTC 媒体路径。
 
-Wraps step3 init; exposes MediaSession for step4 reuse.
+封装 step3 初始化；暴露 MediaSession 供 step4 复用。
 """
 
 from dataclasses import dataclass
@@ -47,7 +47,7 @@ class XHomeStreamService:
         from ..vision.decode_strategy import resolve_decode_mode
 
         if source_context is not None:
-            # Reuse step2 context so WebRTC session / frame controllers reach step3.
+            # 复用 step2 上下文，使 WebRTC 会话/帧控制器流入 step3。
             context = source_context
             context.task_id = task_id
         else:

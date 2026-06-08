@@ -38,6 +38,7 @@ async def reconnect_input_channel(context: Any, task_logger=None) -> bool:
 
     if lock.locked():
         log.info("输入通道重连已在进行中，等待完成...")
+    # 同 task 串行重连，避免并发 SDP 交换；60s 内最多 2 次
     async with lock:
         try:
             now = time.time()
@@ -82,7 +83,7 @@ def rebind_stream_bindings(
     switcher: Any = None,
     engine: Any = None,
 ) -> None:
-    """将 context.xbox_session 同步到捕获器、手柄协议与账号切换器。"""
+    """重连成功后将会话引用同步到截帧、手柄、切换器与 Step4 引擎（避免仍指向旧 session）。"""
     session = getattr(context, "xbox_session", None)
     if session is None:
         return

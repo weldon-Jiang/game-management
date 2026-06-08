@@ -1,3 +1,6 @@
+/**
+ * Xbox 主机 API：绑定流媒体账号、LAN 发现（discover）、解锁。
+ */
 import request from '@/utils/request'
 
 export const xboxApi = {

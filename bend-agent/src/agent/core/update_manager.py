@@ -16,7 +16,7 @@ from ..core.paths import get_base_dir
 
 
 class UpdateStatus(Enum):
-    """Update status"""
+    """更新状态"""
     CHECKING = "checking"
     COMPATIBLE = "compatible"
     UPDATE_AVAILABLE = "update_available"
@@ -29,7 +29,7 @@ class UpdateStatus(Enum):
 
 @dataclass
 class UpdateInfo:
-    """Update information"""
+    """更新信息"""
     current_version: str
     latest_version: str
     download_url: str
@@ -56,18 +56,18 @@ class UpdateManager:
         self._on_status_change: Optional[Callable] = None
 
     def set_status_callback(self, callback: Callable):
-        """Set callback for status changes"""
+        """设置状态变更回调"""
         self._on_status_change = callback
 
     def _notify_status(self, status: UpdateStatus, progress: int = 0):
-        """Notify status change"""
+        """通知状态变更"""
         self._status = status
         self._progress = progress
         if self._on_status_change:
             self._on_status_change(status, progress)
 
     async def check_update(self) -> Optional[UpdateInfo]:
-        """Check if there's an update available"""
+        """检查是否有可用更新"""
         self._notify_status(UpdateStatus.CHECKING)
 
         try:
@@ -99,7 +99,7 @@ class UpdateManager:
             return None
 
     async def download_update(self, info: UpdateInfo = None) -> bool:
-        """Download the update package"""
+        """下载更新包"""
         update_info = info or self._update_info
         if not update_info:
             self.logger.error("No update info available")
@@ -138,7 +138,7 @@ class UpdateManager:
             return False
 
     async def install_update(self, force: bool = False) -> bool:
-        """Install the downloaded update"""
+        """安装已下载的更新"""
         if not self._download_path or not os.path.exists(self._download_path):
             self.logger.error("No update package found")
             return False
@@ -174,7 +174,7 @@ class UpdateManager:
             return False
 
     def _create_backup(self) -> Optional[str]:
-        """Create backup of current installation"""
+        """创建当前安装的备份"""
         try:
             import shutil
             current_exe = sys.executable
@@ -190,7 +190,7 @@ class UpdateManager:
             return None
 
     def _perform_hot_update(self) -> bool:
-        """Perform hot update without restart"""
+        """执行无需重启的热更新"""
         try:
             update_script = config.get('agent.update_script',
                 os.path.join(get_base_dir(), 'scripts', 'hot_update.py'))
@@ -206,7 +206,7 @@ class UpdateManager:
             return False
 
     def _schedule_update(self) -> bool:
-        """Schedule update to run on next restart"""
+        """安排更新在下次重启时执行"""
         try:
             update_batch = config.get('agent.update_batch',
                 os.path.join(get_base_dir(), 'scripts', 'update.bat'))
@@ -231,7 +231,7 @@ del "%~f0"
             return False
 
     async def auto_update(self) -> bool:
-        """Check and perform update automatically"""
+        """检查并自动执行更新"""
         info = await self.check_update()
         if not info:
             return True
@@ -247,16 +247,16 @@ del "%~f0"
 
     def handle_version_update(self, data: dict):
         """
-        Handle version update notification from platform via WebSocket
+        处理平台经 WebSocket 下发的版本更新通知。
 
-        Args:
-            data: Version update data from platform
-                - version: New version string
-                - downloadUrl: Download URL
-                - md5Checksum: MD5 checksum for verification
-                - changelog: Update changelog
-                - mandatory: Whether update is mandatory
-                - forceRestart: Whether restart is required
+        参数:
+            data: 平台下发的版本数据
+                - version: 新版本号
+                - downloadUrl: 下载地址
+                - md5Checksum: MD5 校验和
+                - changelog: 更新说明
+                - mandatory: 是否强制更新
+                - forceRestart: 是否需重启
         """
         try:
             version = data.get('version')
@@ -289,7 +289,7 @@ del "%~f0"
             self.logger.error(f"Failed to handle version update: {e}")
 
     async def _auto_download_and_install(self):
-        """Auto download and install the update"""
+        """自动下载并安装更新"""
         try:
             downloaded = await self.download_update()
             if downloaded:

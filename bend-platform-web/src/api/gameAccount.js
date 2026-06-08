@@ -1,3 +1,6 @@
+/**
+ * 游戏账号 API：CRUD、批量导入、与流媒体账号 bind/unbind。
+ */
 import request from '@/utils/request'
 
 export const gameAccountApi = {

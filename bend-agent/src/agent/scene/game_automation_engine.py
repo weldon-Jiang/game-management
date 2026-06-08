@@ -172,7 +172,7 @@ class ActionExecutor:
         self.logger.info("动作执行器已绑定手柄协议")
 
     async def _send_gamepad_state(self, gamepad_data: Dict[str, Any]) -> bool:
-        """Send gamepad state via WebRTC DataChannel or legacy SmartGlass session."""
+        """经 WebRTC DataChannel 或遗留 SmartGlass 会话发送手柄状态。"""
         if self._input_gate is not None and not self._input_gate.is_allowed():
             return False
         if not self._xbox_session:

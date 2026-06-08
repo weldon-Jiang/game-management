@@ -1,7 +1,7 @@
 """
-AccountProvisioningModule — passive gate before each GameAction.
+AccountProvisioningModule — 每次 GameAction 前的被动门禁。
 
-Detect → Add (if missing) → Verify. User cannot start this module directly.
+检测 → 添加（缺失时）→ 校验；用户不可直接启动本模块。
 """
 
 import asyncio
@@ -35,7 +35,7 @@ class ProvisioningResult:
 
 
 class AccountProvisioningModule:
-    """Per-task instance; mounted on StreamingAccountTaskRuntime.modules."""
+    """每任务实例；挂载于 StreamingAccountTaskRuntime.modules。"""
 
     STEP_TOTAL = 7
 
@@ -66,7 +66,7 @@ class AccountProvisioningModule:
         frame_getter: Any = None,
         stream_session: Any = None,
     ) -> None:
-        """Late-bind detector/input after step3/step4 init."""
+        """step3/step4 初始化后延迟绑定检测器/输入。"""
         if scene_detector is not None:
             self._detector._scene = scene_detector
             self._adder._scene = scene_detector

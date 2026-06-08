@@ -41,7 +41,7 @@ except ImportError:
 
 
 class _DummyVideoTrack(MediaStreamTrack if AIORTC_AVAILABLE else object):
-    """Placeholder outbound video track required for Xbox SDP offer."""
+    """Xbox SDP offer 所需的占位出站视频轨。"""
 
     kind = "video"
 
@@ -56,7 +56,7 @@ class _DummyVideoTrack(MediaStreamTrack if AIORTC_AVAILABLE else object):
 
 
 class GamepadInputEncoder:
-    """Encode controller state for Xbox input DataChannel (protocol 1.0)."""
+    """为 Xbox input DataChannel 编码手柄状态（协议 1.0）。"""
 
     TRIGGER_MAX = 32767
 
@@ -137,7 +137,7 @@ class CloudStreamSession:
         input_channel = pc.createDataChannel("input", ordered=True, protocol="1.0")
         pc.createDataChannel("message", ordered=False, protocol="messageV1")
 
-        # Xbox cloud client receives A/V from console; do not publish a send track.
+        # Xbox 云端客户端接收主机 A/V；勿发布 send track。
         pc.addTransceiver("audio", direction="recvonly")
         pc.addTransceiver("video", direction="recvonly")
         return pc, input_channel
@@ -150,6 +150,12 @@ class CloudStreamSession:
         gamepad_index: int = 0,
         connection_timeout: float = 30.0,
     ) -> Optional["CloudStreamSession"]:
+        """
+        用 PlaySession 返回的 SDP 完成 WebRTC 握手并建立 CloudStreamSession。
+
+        等待 connectionState=connected 直至 connection_timeout；failed 则 disconnect 并返回 None。
+        未完全 connected 时仍返回 partial session（供后续重连/降级）。
+        """
         if not AIORTC_AVAILABLE:
             return None
 
@@ -220,7 +226,7 @@ class CloudStreamSession:
                 break
 
     def attach_incoming_video_track(self, track) -> None:
-        """Start consuming an inbound WebRTC video track."""
+        """开始消费入站 WebRTC 视频轨。"""
         if track is None or getattr(track, "kind", None) != "video":
             return
         if self._video_consumer_task and not self._video_consumer_task.done():
@@ -229,7 +235,7 @@ class CloudStreamSession:
         self._video_consumer_task = asyncio.create_task(self._consume_video_track(track))
 
     def attach_existing_tracks(self) -> None:
-        """Attach already-negotiated inbound tracks (on_track may have fired earlier)."""
+        """附加已协商的入站轨（on_track 可能已先触发）。"""
         if not self._pc:
             return
         get_transceivers = getattr(self._pc, "getTransceivers", None)
@@ -263,11 +269,11 @@ class CloudStreamSession:
         return self.input_channel_state == "open" and not self._input_channel_closed
 
     def on_input_channel_close(self, callback: Callable[[], None]) -> None:
-        """Register callback invoked when input DataChannel closes."""
+        """注册 input DataChannel 关闭时调用的回调。"""
         self._on_input_channel_close_callbacks.append(callback)
 
     def bind_input_channel_handlers(self) -> None:
-        """Attach open/close listeners to the negotiated input DataChannel."""
+        """为已协商的 input DataChannel 附加 open/close 监听。"""
         if self._input_handlers_bound or self._input_channel is None:
             return
 
@@ -292,6 +298,7 @@ class CloudStreamSession:
                     self.logger.debug(f"input channel close callback error: {exc}")
 
     async def wait_for_input_channel(self, timeout: float = 10.0) -> bool:
+        """轮询 input DataChannel readyState，直至 open 或超时（Step2/切换器按键前置条件）。"""
         if self._input_channel is None:
             return False
         deadline = time.time() + timeout
@@ -339,6 +346,7 @@ class CloudStreamSession:
         ) if ok else False
 
     async def get_frame(self, timeout: float = 1.0) -> Optional[np.ndarray]:
+        """获取最新 WebRTC 解码帧副本；无新帧时等待 _frame_event 直至 timeout。"""
         deadline = time.time() + timeout
         while time.time() < deadline:
             with self._frame_lock:
@@ -367,6 +375,7 @@ class CloudStreamSession:
         }
 
     async def disconnect(self) -> None:
+        """取消视频消费协程并关闭 PeerConnection，释放 GPU/网络资源。"""
         if self._video_consumer_task:
             self._video_consumer_task.cancel()
             try:

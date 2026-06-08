@@ -140,6 +140,10 @@
 </template>
 
 <script setup>
+/**
+ * 任务详情：多轮 streaming_session 切换、WS+轮询监控、TaskControlBar 控制面。
+ * startAutomation 触发两阶段第二阶段（串流就绪后 Step4）。
+ */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -325,6 +329,7 @@ const handleTerminate = async () => {
 }
 
 const handleStartAutomation = async (gameActionType) => {
+  // POST /tasks/{id}/start-automation → WS start_game_automation
   await taskApi.startAutomation(taskId.value, { gameActionType })
   ElMessage.success('自动化已启动')
 }

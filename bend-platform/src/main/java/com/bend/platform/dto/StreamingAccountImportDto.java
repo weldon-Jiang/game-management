@@ -4,6 +4,9 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
+/**
+ * 单条流媒体账号导入行。
+ */
 @Data
 public class StreamingAccountImportDto {
 

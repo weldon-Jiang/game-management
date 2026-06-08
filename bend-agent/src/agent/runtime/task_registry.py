@@ -1,8 +1,7 @@
 """
-TaskRuntimeRegistry — taskId-scoped runtime lookup for parallel task isolation.
+TaskRuntimeRegistry — 按 taskId 查找运行时以实现并行任务隔离。
 
-All WS task_control messages must resolve through this registry; missing taskId
-or unknown taskId is rejected.
+所有 WS task_control 须经本注册表解析；缺失或未知 taskId 将被拒绝。
 """
 
 import asyncio
@@ -17,7 +16,7 @@ from .phase_fsm import PauseMode, PhaseFSM, SessionPhase
 
 @dataclass
 class StreamingAccountTaskRuntime:
-    """Per-task runtime bundle bound to one streaming account + one taskId."""
+    """绑定一个串流账号与一个 taskId 的每任务运行时包。"""
 
     task_id: str
     context: AgentTaskContext
@@ -38,6 +37,11 @@ class StreamingAccountTaskRuntime:
         phase: SessionPhase,
         message: str = "",
     ) -> SessionPhase:
+        """
+        应用经校验的阶段迁移并通知平台监听器。
+
+        非法迁移记录日志并忽略，避免 stray WS 控制消息崩溃任务协程。
+        """
         if not self.phase_fsm.can_transition(phase):
             get_logger("task_registry").warning(
                 "Ignored invalid phase transition: %s -> %s (%s)",
@@ -56,9 +60,9 @@ class StreamingAccountTaskRuntime:
 
 class TaskRuntimeRegistry:
     """
-    Global registry: taskId -> StreamingAccountTaskRuntime.
+    全局注册表：taskId -> StreamingAccountTaskRuntime。
 
-    Thread-safe for lookups from WS handlers and scheduler coroutines.
+    线程安全，供 WS 处理器与调度器协程查找。
     """
 
     _instance: Optional["TaskRuntimeRegistry"] = None
@@ -75,6 +79,12 @@ class TaskRuntimeRegistry:
         return cls._instance
 
     def register(self, runtime: StreamingAccountTaskRuntime, replace: bool = False) -> None:
+        """
+        绑定 taskId 与运行时包。
+
+        replace=True 用于平台复用长寿命 taskId，Agent 须在重跑 Step1-3 前
+        丢弃陈旧运行时状态。
+        """
         with self._lock:
             if runtime.task_id in self._runtimes:
                 if not replace:

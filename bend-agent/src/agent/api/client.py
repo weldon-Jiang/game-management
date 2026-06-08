@@ -1,5 +1,5 @@
 """
-API client for Bend Agent to communicate with backend server
+Bend Agent 与后端通信的 API 客户端。
 
 功能说明：
 - 封装所有与后端服务器的HTTP通信

@@ -1,7 +1,7 @@
 """
-Session phase finite-state machine for StreamingAccountTask.
+StreamingAccountTask 的会话阶段有限状态机。
 
-Phases align with platform streaming_session.phase and task_control contract.
+阶段与平台 streaming_session.phase 及 task_control 契约对齐。
 """
 
 from enum import Enum
@@ -30,7 +30,8 @@ class PauseMode(str, Enum):
     AFTER_MATCH = "after_match"
 
 
-# Valid transitions: from_phase -> set of allowed target phases
+# 合法迁移：from_phase -> 允许的目标 phase 集合
+# AUTOMATION_FAILED 允许回到 AUTOMATING/READY，支撑 Step4 失败保留串流后的重试语义。
 _TRANSITIONS: Dict[SessionPhase, FrozenSet[SessionPhase]] = {
     SessionPhase.OPENING: frozenset({
         SessionPhase.AUTHENTICATING,
@@ -115,7 +116,7 @@ _TERMINAL: Set[SessionPhase] = {SessionPhase.CLOSED, SessionPhase.FAILED}
 
 
 class PhaseFSM:
-    """Per-task session phase state machine with transition validation."""
+    """带迁移校验的每任务会话阶段状态机。"""
 
     def __init__(self, initial: SessionPhase = SessionPhase.OPENING):
         self._phase = initial
@@ -155,13 +156,19 @@ class PhaseFSM:
         )
 
     def can_start_automation(self) -> bool:
+        """仅 READY 与 AUTOMATION_FAILED 可接收 start_game_automation。"""
         return self._phase in (
             SessionPhase.READY,
             SessionPhase.AUTOMATION_FAILED,
         )
 
     def can_restart_streaming(self) -> bool:
-        """After automating/paused, restart streaming is forbidden."""
+        """
+        自动化/暂停后禁止重启串流。
+
+        同一 taskId 的 Step1-3 重跑须在 automation_started 置位前完成，
+        否则平台会拆掉进行中的 Step4 会话。
+        """
         return not self._automation_started
 
     @staticmethod

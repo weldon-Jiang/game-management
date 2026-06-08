@@ -102,6 +102,9 @@
 </template>
 
 <script setup>
+/**
+ * 商户自助注册：校验注册码后创建 merchant_owner 账号。
+ */
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'

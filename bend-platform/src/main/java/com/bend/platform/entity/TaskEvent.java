@@ -5,6 +5,10 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
+/**
+ * 任务事件流水：Agent 回调与平台控制面写入，供详情页时间线展示。
+ * scope/phase/sessionId 区分任务级、会话级与账号级事件。
+ */
 @Data
 @TableName("task_event")
 public class TaskEvent {

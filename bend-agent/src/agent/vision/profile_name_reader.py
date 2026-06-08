@@ -1,7 +1,7 @@
 """
-Read Xbox profile gamertag from scene-6 account picker frames.
+从场景 6 账号选择帧读取 Xbox 档案 Gamertag。
 
-Uses EasyOCR on the focused row in the left profile list (960x540 coords).
+在左侧档案列表焦点行使用 EasyOCR（960×540 坐标）。
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import numpy as np
 
 from ..core.logger import get_logger
 
-# Scene 6 profile list on normalized 960x540 stream frame
+# 场景 6 档案列表在归一化 960×540 串流帧上的区域
 SCENE6_LIST_LEFT = 78
 SCENE6_LIST_TOP = 95
 SCENE6_LIST_RIGHT = 320
@@ -35,12 +35,12 @@ def _get_ocr_reader():
 
 
 def normalize_gamertag(name: str) -> str:
-    """Lowercase alphanumeric key for fuzzy gamertag comparison."""
+    """用于模糊 Gamertag 比对的小写字母数字键。"""
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
 
 
 def gamertag_matches(detected: Optional[str], target: str) -> bool:
-    """Return True when OCR text likely matches the target gamertag."""
+    """OCR 文本很可能匹配目标 Gamertag 时返回 True。"""
     if not detected or not target:
         return False
     det = normalize_gamertag(detected)
@@ -57,7 +57,7 @@ def _green_ratio(hsv_crop: np.ndarray) -> float:
 
 def detect_focused_row_y(image: np.ndarray) -> Optional[int]:
     """
-    Find Y center of the green focus bar in the scene-6 profile list.
+    检测场景 6 档案列表中绿色焦点条的 Y 轴中心。
     """
     h, w = image.shape[:2]
     scale_x = w / 960.0
@@ -125,7 +125,7 @@ def _ocr_text(crop: np.ndarray) -> str:
 
 
 def read_focused_gamertag(image: Any) -> str:
-    """OCR gamertag on the currently focused profile row."""
+    """对当前焦点档案行 OCR Gamertag。"""
     if image is None:
         return ""
     if hasattr(image, "data"):
@@ -139,7 +139,7 @@ def read_focused_gamertag(image: Any) -> str:
 
 
 def read_list_gamertags(image: Any) -> List[str]:
-    """OCR all visible gamertags in the left profile list (fallback)."""
+    """OCR 左侧列表全部可见 Gamertag（兜底）。"""
     if image is None:
         return []
     if hasattr(image, "data"):

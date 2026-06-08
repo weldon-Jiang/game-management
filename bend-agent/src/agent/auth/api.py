@@ -1,7 +1,7 @@
 """
-AuthService — graded token chain for streaming infrastructure.
+AuthService — 串流基础设施的分级令牌链。
 
-Wraps existing MSAL auth; session/discovery/stream consume StreamingCredentials only.
+封装现有 MSAL 认证；session/discovery/stream 仅消费 StreamingCredentials。
 """
 
 from dataclasses import dataclass, field
@@ -28,7 +28,7 @@ class StreamingCredentials:
 
 
 class AuthService:
-    """Authenticate streaming account and produce token bundle."""
+    """认证串流账号并产出令牌包。"""
 
     def __init__(self):
         self.logger = get_logger("auth_service")
@@ -38,7 +38,7 @@ class AuthService:
         return self._cache.get(email.lower())
 
     async def refresh_if_needed(self, email: str) -> Optional[StreamingCredentials]:
-        """Return cached credentials if still valid; otherwise re-authenticate."""
+        """凭证仍有效则返回缓存；否则重新认证。"""
         cached = self.get_cached_credentials(email)
         if cached and cached.gs_token:
             return cached
@@ -72,7 +72,7 @@ class AuthService:
         )
 
         async def _noop_report(*_args, **_kwargs):
-            """Internal auth has no platform task; do not report auth_* progress."""
+            """内部认证无平台任务上下文，不上报 auth_* 进度。"""
             return None
 
         result = await step1_execute_login(

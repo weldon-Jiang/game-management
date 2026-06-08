@@ -1,3 +1,6 @@
+/**
+ * 激活码 API：生成、定价预览、兑换（activate 走 merchant-subscription）。
+ */
 import request from '@/utils/request'
 
 export const activationApi = {

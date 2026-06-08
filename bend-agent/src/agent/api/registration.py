@@ -1,6 +1,6 @@
 """
-Registration Code Activator for Bend Agent
-Handles the registration code activation flow
+Bend Agent 注册码激活器。
+处理注册码激活流程。
 """
 import asyncio
 import json
@@ -17,7 +17,7 @@ from ..core.system_resource_detector import SystemResourceDetector
 
 @dataclass
 class AgentCredentials:
-    """Agent credentials after activation"""
+    """激活后的 Agent 凭证"""
     agent_id: str
     agent_secret: str
     merchant_id: str
@@ -27,8 +27,8 @@ class AgentCredentials:
 @dataclass
 class AgentSystemInfo:
     """
-    Agent system information for registration
-    Only includes static fields that don't change frequently
+    注册用的 Agent 系统信息。
+    仅包含不常变化的静态字段。
     """
     os_type: str
     os_version: str
@@ -36,7 +36,7 @@ class AgentSystemInfo:
     max_concurrent_tasks: int
 
     def to_dict(self):
-        """Convert to dictionary for API request"""
+        """转换为 API 请求用的字典"""
         return {
             'osType': self.os_type,
             'osVersion': self.os_version,
@@ -47,8 +47,8 @@ class AgentSystemInfo:
 
 class RegistrationActivator:
     """
-    Handles Agent registration code activation
-    Manages credentials storage and validation
+    处理 Agent 注册码激活。
+    管理凭证存储与校验。
     """
 
     def __init__(self):
@@ -60,36 +60,36 @@ class RegistrationActivator:
 
     def _get_config_dir(self) -> str:
         """
-        Determine the appropriate configuration directory based on runtime environment.
+        根据运行环境确定配置目录。
         
-        Returns:
-            Path to the credentials directory:
-            - Development: Project root / credentials
-            - Production (frozen): Executable directory / credentials
-            - Fallback: APPDATA / BendPlatform / Agent
+        返回:
+            凭证目录路径：
+            - 开发环境：项目根目录 / credentials
+            - 生产（PyInstaller 打包）：可执行文件目录 / credentials
+            - 兜底：APPDATA / BendPlatform / Agent
         """
-        # Check if running from a frozen executable (PyInstaller)
+        # 是否 PyInstaller 打包运行
         if getattr(sys, 'frozen', False):
-            # Running as compiled executable
+            # 打包可执行文件模式
             exe_dir = os.path.dirname(sys.executable)
             config_dir = os.path.join(exe_dir, 'credentials')
             self.logger.info(f"Running as frozen executable, using credentials directory: {config_dir}")
             return config_dir
         
-        # Check if running from project directory (development)
-        # Try to find the project root by looking for known files/directories
+        # 开发模式：从项目目录定位
+        # 向上查找已知标记文件/目录
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        # Go up several levels to find the project root
+        # 向上最多 5 层寻找项目根
         for _ in range(5):
             parent_dir = os.path.dirname(current_dir)
-            # Check for project markers
+            # 检查项目标记
             if os.path.exists(os.path.join(parent_dir, 'configs', 'agent.yaml')):
                 config_dir = os.path.join(parent_dir, 'credentials')
                 self.logger.info(f"Running in development mode, using credentials directory: {config_dir}")
                 return config_dir
             current_dir = parent_dir
         
-        # Fallback to APPDATA directory (original behavior)
+        # 兜底：APPDATA 目录（原行为）
         fallback_dir = os.path.join(os.environ.get('APPDATA', ''), 'BendPlatform', 'Agent')
         self.logger.info(f"Using fallback credentials directory: {fallback_dir}")
         return fallback_dir
@@ -97,10 +97,10 @@ class RegistrationActivator:
     @classmethod
     def get_system_info(cls) -> AgentSystemInfo:
         """
-        Get system information for registration
+        获取注册用系统信息。
         
-        Returns:
-            AgentSystemInfo containing static system details
+        返回:
+            含静态系统信息的 AgentSystemInfo
         """
         detector = SystemResourceDetector()
         info = detector.get_system_info()
@@ -116,16 +116,16 @@ class RegistrationActivator:
 
     async def activate(self, registration_code: str) -> AgentCredentials:
         """
-        Activate Agent using registration code
+        使用注册码激活 Agent。
 
-        Args:
-            registration_code: The registration code provided by merchant
+        参数:
+            registration_code: 商户提供的注册码
 
-        Returns:
-            AgentCredentials containing agent_id, agent_secret, merchant_id
+        返回:
+            含 agent_id、agent_secret、merchant_id 的 AgentCredentials
 
-        Raises:
-            Exception if activation fails
+        抛出:
+            激活失败时抛出 Exception
         """
         self.logger.info("Starting Agent activation with registration code...")
 
@@ -167,7 +167,7 @@ class RegistrationActivator:
         agent_secret: str,
         system_info: AgentSystemInfo
     ) -> dict:
-        """Send activation request to backend"""
+        """向后端发送激活请求"""
         import aiohttp
 
         base_url = config.backend_url
@@ -201,9 +201,8 @@ class RegistrationActivator:
 
     def _get_or_generate_agent_id(self) -> str:
         """
-        Get or generate a persistent agent ID based on machine identity.
-        The agent ID is derived from the machine's unique identifier,
-        ensuring the same ID is generated even after reinstalling in different paths.
+        基于机器标识获取或生成持久 Agent ID。
+        Agent ID 源自机器唯一标识，换路径重装后仍保持一致。
         """
         existing = self._load_existing_agent_id()
         if existing:
@@ -215,7 +214,7 @@ class RegistrationActivator:
         return new_id
 
     def _load_existing_agent_id(self) -> Optional[str]:
-        """Load existing agent ID from credentials file"""
+        """从凭证文件加载已有 Agent ID"""
         if os.path.exists(self._credentials_file):
             try:
                 with open(self._credentials_file, 'r', encoding='utf-8') as f:
@@ -226,7 +225,7 @@ class RegistrationActivator:
         return None
 
     def _save_agent_id(self, agent_id: str):
-        """Save agent ID for future use"""
+        """保存 Agent ID 供后续使用"""
         try:
             data = {}
             if os.path.exists(self._credentials_file):
@@ -239,12 +238,12 @@ class RegistrationActivator:
             self.logger.error(f"Failed to save agent ID: {e}")
 
     def _generate_agent_secret(self) -> str:
-        """Generate agent secret key"""
+        """生成 Agent 密钥"""
         import secrets
         return secrets.token_hex(32)
 
     def _save_credentials(self):
-        """Save credentials to file"""
+        """将凭证保存到文件"""
         if self._credentials is None:
             return
 
@@ -261,7 +260,7 @@ class RegistrationActivator:
         self.logger.info(f"Credentials saved to {self._credentials_file}")
 
     def load_credentials(self) -> Optional[AgentCredentials]:
-        """Load credentials from file"""
+        """从文件加载凭证"""
         if not os.path.exists(self._credentials_file):
             return None
 
@@ -283,17 +282,17 @@ class RegistrationActivator:
             return None
 
     def get_credentials(self) -> Optional[AgentCredentials]:
-        """Get current credentials"""
+        """获取当前凭证"""
         if self._credentials is None:
             self._credentials = self.load_credentials()
         return self._credentials
 
     def has_credentials(self) -> bool:
-        """Check if credentials exist"""
+        """检查凭证是否存在"""
         return self.get_credentials() is not None
 
     def clear_credentials(self):
-        """Clear stored credentials"""
+        """清除已存储凭证"""
         self._credentials = None
         if os.path.exists(self._credentials_file):
             os.remove(self._credentials_file)

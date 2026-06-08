@@ -141,6 +141,10 @@
 </template>
 
 <script setup>
+/**
+ * Agent 实例列表：在线状态筛选、跳转任务、重命名。
+ *  destructive：单删/批量删/清理未安装/清理离线（均需二次确认，不可恢复）。
+ */
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { Refresh } from '@element-plus/icons-vue'
@@ -238,6 +242,7 @@ const loadData = async () => {
 }
 
 const handleDelete = async (agent) => {
+  // 物理删除 Agent 注册记录；运行中任务需后端拒绝或先停止
   try {
     await ElMessageBox.confirm(
       `确定要删除Agent "${getAgentDisplayName(agent)}" 吗？删除后无法恢复。`,
@@ -332,6 +337,7 @@ const handleCleanupUninstalled = async () => {
 }
 
 const handleCleanupOffline = async () => {
+  // 清理超过 30 天未上线的 Agent 记录
   try {
     await ElMessageBox.confirm(
       '确定要清理所有离线超过30分钟的Agent吗？清理后无法恢复。',

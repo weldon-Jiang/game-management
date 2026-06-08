@@ -1,5 +1,5 @@
 """
-Scene Detector - Detects Xbox UI states and scenes
+场景检测器 — 检测 Xbox UI 状态与场景。
 """
 import asyncio
 from typing import Optional, Dict, List
@@ -10,7 +10,7 @@ from ..vision.template_matcher import TemplateMatcher, MatchResult
 
 
 class SceneState(Enum):
-    """Xbox UI scene states"""
+    """Xbox UI 场景状态"""
     UNKNOWN = "unknown"
     HOME = "home"
     LOGIN = "login"
@@ -25,8 +25,8 @@ class SceneState(Enum):
 
 class SceneDetector:
     """
-    Detects Xbox UI scenes using template matching
-    Maintains scene state and transitions
+    使用模板匹配检测 Xbox UI 场景。
+    维护场景状态与迁移。
     """
 
     def __init__(self, template_matcher: TemplateMatcher):
@@ -48,11 +48,11 @@ class SceneDetector:
 
     @property
     def current_scene(self) -> SceneState:
-        """Get current scene state"""
+        """获取当前场景状态"""
         return self._current_scene
 
     def set_scene(self, new_scene: SceneState):
-        """Manually set scene state"""
+        """手动设置场景状态"""
         if self._current_scene != new_scene:
             old_scene = self._current_scene
             self._current_scene = new_scene
@@ -60,11 +60,11 @@ class SceneDetector:
             self._trigger_callback('scene_changed', new_scene, old_scene)
 
     def on_scene_changed(self, callback):
-        """Register scene change callback"""
+        """注册场景变更回调"""
         self._callbacks['scene_changed'] = callback
 
     def _trigger_callback(self, event: str, *args):
-        """Trigger registered callback"""
+        """触发已注册回调"""
         if event in self._callbacks:
             try:
                 self._callbacks[event](*args)
@@ -73,13 +73,13 @@ class SceneDetector:
 
     async def detect_scene(self, frame) -> SceneState:
         """
-        Detect current scene from frame
+        从帧检测当前场景。
 
-        Args:
-            frame: Current video frame (numpy array)
+        参数:
+            frame: 当前视频帧（numpy 数组）
 
-        Returns:
-            Detected scene state
+        返回:
+            检测到的场景状态
         """
         best_match = None
         best_confidence = 0.0
@@ -106,16 +106,16 @@ class SceneDetector:
         poll_interval: float = 1.0
     ) -> bool:
         """
-        Wait for specific scene to appear
+        等待指定场景出现。
 
-        Args:
-            frame_getter: Async function that returns current frame
-            target_scene: Scene to wait for
-            timeout: Maximum wait time
-            poll_interval: Time between checks
+        参数:
+            frame_getter: 返回当前帧的异步函数
+            target_scene: 等待的目标场景
+            timeout: 最长等待时间
+            poll_interval: 轮询间隔
 
-        Returns:
-            True if scene appeared, False if timeout
+        返回:
+            场景出现为 True，超时为 False
         """
         import time
 
@@ -132,15 +132,15 @@ class SceneDetector:
         return False
 
     async def wait_for_home(self, frame_getter, timeout: float = 30.0) -> bool:
-        """Convenience method to wait for home screen"""
+        """等待主页的便捷方法"""
         return await self.wait_for_scene(frame_geter, SceneState.HOME, timeout)
 
     async def wait_for_login(self, frame_getter, timeout: float = 30.0) -> bool:
-        """Convenience method to wait for login screen"""
+        """等待登录页的便捷方法"""
         return await self.wait_for_scene(frame_geter, SceneState.LOGIN, timeout)
 
     def register_scene_template(self, scene: SceneState, template_name: str):
-        """Register additional template for scene detection"""
+        """为场景检测注册额外模板"""
         if scene not in self._scene_templates:
             self._scene_templates[scene] = []
         if template_name not in self._scene_templates[scene]:

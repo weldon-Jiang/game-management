@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
-# Re-export pause mode for scheduler / platform alignment
+# 再导出 PauseMode，供调度器与平台侧对齐
 class PauseMode(str, Enum):
     IMMEDIATE = "immediate"
     AFTER_MATCH = "after_match"

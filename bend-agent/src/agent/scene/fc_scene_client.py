@@ -42,7 +42,7 @@ class FCSceneResult:
 
 
 class FCSceneClient:
-    """HTTP client for remote scene recognition via FC server."""
+    """经 FC Server 远程场景识别的 HTTP 客户端。"""
 
     def __init__(
         self,

@@ -1,7 +1,7 @@
 """
-WebSocket task_control message handler.
+WebSocket task_control 消息处理器。
 
-Contract: every control message MUST include taskId; cross-task operations rejected.
+契约：每条控制消息必须含 taskId；跨任务操作将被拒绝。
 """
 
 from typing import Any, Callable, Dict, Optional
@@ -13,7 +13,7 @@ from .task_registry import TaskRuntimeRegistry
 
 
 class TaskControlHandler:
-    """Routes task_control WS actions to the correct task runtime."""
+    """将 task_control WS 动作路由到对应任务运行时。"""
 
     def __init__(
         self,
@@ -30,11 +30,9 @@ class TaskControlHandler:
 
     async def handle(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Dispatch a task_control command to the runtime that owns taskId.
+        将 task_control 命令分发给拥有 taskId 的运行时。
 
-        Control messages are scoped to a single task runtime. This prevents a
-        stale WebSocket command from pausing or terminating another concurrent
-        task that happens to be running on the same Agent process.
+        控制消息限定在单任务运行时内，防止陈旧 WS 命令误操作其他并发任务。
         """
         task_id = data.get("taskId") or data.get("task_id")
         action = (data.get("action") or "").lower()
@@ -77,11 +75,10 @@ class TaskControlHandler:
 
     async def _pause(self, runtime, data: Dict) -> Dict:
         """
-        Pause automation without closing stream resources.
+        暂停自动化且不关闭串流资源。
 
-        Immediate pause blocks input through context/InputGate now; after_match
-        records intent so Step4 can finish the current match before entering a
-        paused phase.
+        immediate 通过 InputGate 立即拦截输入；after_match 记录意图，
+        待 Step4 完成当前比赛后再进入暂停阶段。
         """
         mode_str = (data.get("mode") or "immediate").lower()
         mode = (
@@ -112,7 +109,7 @@ class TaskControlHandler:
         runtime.context.resume()
         prev = runtime.phase_before_pause
         runtime.phase_before_pause = None
-        # READY/AUTOMATION_FAILED resume returns to manual decision state; only an already-started Step4 returns to automating.
+        # READY/AUTOMATION_FAILED 恢复后回到手动决策态；已启动的 Step4 才回到 automating。
         if prev == SessionPhase.READY or prev == SessionPhase.AUTOMATION_FAILED or not runtime.phase_fsm.automation_started:
             phase = runtime.set_phase(SessionPhase.READY, "Resumed")
         else:
@@ -125,7 +122,7 @@ class TaskControlHandler:
         return await self._terminate(runtime, data)
 
     async def _terminate(self, runtime, data: Dict) -> Dict:
-        """Force task shutdown and let the scheduler perform per-task cleanup."""
+        """强制终止任务，由调度器执行单任务级清理。"""
         runtime.cancel_event.set()
         runtime.set_phase(SessionPhase.CLOSING, "Terminating")
         if self._scheduler and hasattr(self._scheduler, "force_terminate_task"):
@@ -182,10 +179,9 @@ class TaskControlHandler:
 
     async def _start_automation(self, runtime, data: Dict) -> Dict:
         """
-        Release the two-phase READY gate and start Step4 automation.
+        释放两阶段 READY 门闩并启动 Step4 自动化。
 
-        The selected gameActionType is stored on the task context but Step4 is
-        still responsible for applying it after game-account login succeeds.
+        所选 gameActionType 写入 task context，Step4 仍须在账号登录成功后应用。
         """
         if not runtime.phase_fsm.can_start_automation():
             return {

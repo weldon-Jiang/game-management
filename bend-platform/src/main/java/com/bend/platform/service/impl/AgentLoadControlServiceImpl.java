@@ -12,6 +12,9 @@ import org.springframework.stereotype.Service;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Agent 并发负载控制：Redis/内存计数 task 数，canAcceptTask 与 increment/decrement 配对。
+ */
 @Service
 public class AgentLoadControlServiceImpl implements AgentLoadControlService {
 

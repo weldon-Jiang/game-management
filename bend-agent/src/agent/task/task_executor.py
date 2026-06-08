@@ -400,8 +400,7 @@ class HighConcurrencyTaskExecutor:
         if not isinstance(params, dict):
             params = {}
 
-        # Platform currently sends automation payload fields at the message top level.
-        # Keep supporting the older nested "params" shape while normalizing to one dict.
+        # 平台当前将自动化载荷字段放在消息顶层；同时兼容旧版嵌套 params 并归一化为同一 dict。
         for key in (
             'taskId',
             'streamingAccount',

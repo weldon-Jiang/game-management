@@ -9,6 +9,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 
+/**
+ * 长寿命 streaming_session 生命周期：创建、phase 迁移与 gameActionType 锁定。
+ */
 @Service
 @RequiredArgsConstructor
 public class StreamingSessionServiceImpl implements StreamingSessionService {

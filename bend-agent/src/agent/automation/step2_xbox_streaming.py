@@ -51,7 +51,7 @@ def _matcher_xbox_to_context(matcher_xbox: MatcherXboxInfo) -> XboxInfo:
 
 
 def _format_xbox_match_message(match_result: XboxMatchResult) -> str:
-    """Format Xbox match failure/success message from XboxMatchResult fields."""
+    """根据 XboxMatchResult 字段格式化匹配失败/成功消息。"""
     reason = match_result.match_reason or "Xbox主机匹配失败"
     if match_result.error_code:
         msg = f"[{match_result.error_code}] {reason}"
@@ -1219,12 +1219,12 @@ async def _is_xbox_occupied(xbox_host_id: str, context: AgentTaskContext, logger
     - 本函数不执行 lock，仅查询；适用于 matcher 在选择阶段做过滤
     - 平台 API 不可达时返回 False（降级为不阻塞匹配，与 matcher 行为一致）
 
-    Args:
+    参数:
         xbox_host_id: Xbox 主机 ID
         context: 任务上下文
         logger: 日志记录器
 
-    Returns:
+    返回:
         bool: True 表示被其他 Agent/任务占用；False 表示空闲或无法判断
     """
     try:
@@ -1337,7 +1337,7 @@ async def _smart_match_xbox_with_wakeup(
     3. 自动匹配：云端列表筛选电源状态 → 过滤占用 → 随机选择
     4. 选中的主机若处于待机状态，通过云端 API 自动唤醒
 
-    Args:
+    参数:
         context: 任务上下文
         gs_token: Xbox Live gsToken
         logger: 日志记录器
@@ -1347,7 +1347,7 @@ async def _smart_match_xbox_with_wakeup(
         wakeup_enabled: 是否启用自动唤醒
         wakeup_timeout: 唤醒超时时间（秒）
 
-    Returns:
+    返回:
         XboxMatchResult: 包含匹配结果或详细错误信息的对象
     """
     try:
@@ -1440,12 +1440,12 @@ async def _wakeup_assigned_xbox(
     """
     唤醒指定的 Xbox 主机
     
-    Args:
+    参数:
         gs_token: Xbox Live gsToken
         xbox: Xbox 主机信息
         logger: 日志记录器
         
-    Returns:
+    返回:
         XboxWakeupResult
     """
     try:
@@ -1468,7 +1468,7 @@ async def _wakeup_assigned_xbox(
 def _print_no_match_help(logger, error_code: str = "", error_details: Dict[str, Any] = None):
     """打印无可用 Xbox 的帮助信息
     
-    Args:
+    参数:
         logger: 日志记录器
         error_code: 错误码
         error_details: 错误详情字典

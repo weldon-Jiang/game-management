@@ -26,6 +26,9 @@
 </template>
 
 <script setup>
+/**
+ * 任务事件时间线：展示 task_event 流水，scope/phase 映射为中文标签。
+ */
 import { ref, watch, nextTick, onMounted } from 'vue'
 import {
   getSessionPhaseText,

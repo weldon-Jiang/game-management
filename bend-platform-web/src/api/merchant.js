@@ -1,3 +1,6 @@
+/**
+ * 商户 API：平台管理员 CRUD 与状态切换。
+ */
 import request from '@/utils/request'
 
 export const merchantApi = {

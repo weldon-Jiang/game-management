@@ -162,6 +162,10 @@
 </template>
 
 <script setup>
+/**
+ * Agent 版本管理：发布/下架、强制/可选更新、热更新 vs 重启。
+ * notifyAll 通过 WS version_update 推送已发布版本至所有在线 Agent。
+ */
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
@@ -274,6 +278,7 @@ const handleDelete = async (row) => {
 }
 
 const handleNotifyAll = async (row) => {
+  // 向所有在线 Agent 广播 version_update；successCount 为 WS 投递成功数
   await ElMessageBox.confirm(
     `确定要通知所有在线Agent更新到版本 ${row.version} 吗？`,
     '通知所有Agent',

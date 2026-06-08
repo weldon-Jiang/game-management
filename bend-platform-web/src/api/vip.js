@@ -1,3 +1,6 @@
+/**
+ * VIP 档位 API：当前商户等级与各档定价信息。
+ */
 import request from '@/utils/request'
 
 export const vipApi = {

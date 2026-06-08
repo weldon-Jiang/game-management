@@ -1,3 +1,4 @@
+/** API 模块统一导出入口（views 通过 @/api 按需引用）。 */
 export * from './auth'
 export * from './merchant'
 export * from './vip'

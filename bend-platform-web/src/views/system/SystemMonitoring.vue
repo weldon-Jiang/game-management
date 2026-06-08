@@ -138,6 +138,7 @@ const autoRefresh = ref(false)
 const overview = ref({})
 let refreshTimer = null
 
+/** 将后端 trends 映射为页面展示的三条 sparkline 序列。 */
 const trendItems = computed(() => {
   const trends = overview.value.trends || {}
   return [
@@ -147,6 +148,7 @@ const trendItems = computed(() => {
   ]
 })
 
+/** 拉取平台管理员总览；后端有 60s 缓存，频繁手动刷新不会每次都打满指标查询。 */
 const loadOverview = async () => {
   loading.value = true
   try {
@@ -165,6 +167,7 @@ const loadOverview = async () => {
 const handleAutoRefreshChange = () => {
   clearRefreshTimer()
   if (autoRefresh.value) {
+    // 与后端 overview 缓存周期对齐，避免无意义的高频请求。
     refreshTimer = window.setInterval(loadOverview, 60000)
   }
 }
@@ -176,6 +179,7 @@ const clearRefreshTimer = () => {
   }
 }
 
+/** 进度条与 sparkline 高度共用，防止异常采样值撑破 UI。 */
 const clampPercent = (value) => Math.max(0, Math.min(100, Number(value) || 0))
 
 const formatPercent = (value) => {

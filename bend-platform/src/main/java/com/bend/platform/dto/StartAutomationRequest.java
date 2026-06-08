@@ -8,6 +8,10 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 import java.util.List;
 
+/**
+ * 启动自动化请求（旧一步式入口，现由 start-streaming + start-automation 两阶段替代）。
+ * 批量创建 automation 类型 Task 并下发 Agent。
+ */
 @Data
 public class StartAutomationRequest {
 

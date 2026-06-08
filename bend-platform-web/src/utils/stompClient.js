@@ -1,3 +1,8 @@
+/**
+ * STOMP WebSocket 客户端封装。
+ *
+ * 任务进度等实时推送经网关 /ws/stomp 订阅；连接为进程级单例，避免详情页反复打开时重复握手。
+ */
 let stompClient = null
 let connectionPromise = null
 
@@ -14,11 +19,13 @@ export const connectStomp = () => {
       return
     }
 
+    // 已连接则直接复用，减少任务详情页切换时的重复订阅开销。
     if (stompClient && stompClient.connected) {
       resolve(stompClient)
       return
     }
 
+    // 并发 connect 调用共享同一 Promise，避免短时间多次 activate 造成重复连接。
     if (connectionPromise) {
       connectionPromise.then(resolve).catch(reject)
       return
@@ -65,6 +72,7 @@ export const connectStomp = () => {
 
     connectionPromise = new Promise((res, rej) => {
       stompClient.activate()
+      // 10 秒未连上则失败，上层 useTaskMonitor 会降级为纯轮询。
       setTimeout(() => {
         if (!stompClient?.connected) {
           rej(new Error('连接超时'))
@@ -84,6 +92,10 @@ export const disconnectStomp = () => {
   }
 }
 
+/**
+ * 订阅 STOMP topic 并解析 JSON 消息体。
+ * @returns {Promise<{ unsubscribe: Function }>} 订阅句柄，组件卸载时需调用 unsubscribe。
+ */
 export const subscribeToTopic = (topic, callback) => {
   return connectStomp().then(client => {
     return client.subscribe(topic, (message) => {
@@ -91,6 +103,7 @@ export const subscribeToTopic = (topic, callback) => {
         const data = JSON.parse(message.body)
         callback(data)
       } catch (e) {
+        // 非 JSON 或协议变更时不抛错，避免打断轮询兜底链路。
         console.error('Failed to parse message:', e)
       }
     })

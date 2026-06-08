@@ -63,6 +63,10 @@
 </template>
 
 <script setup>
+/**
+ * 任务控制条：pause/resume/cancel/terminate、窗口 show/hide/focus、重连串流、启动 Step4。
+ * 按钮可见性由 taskStatus + sessionPhase 联合判定（见下方 computed 注释）。
+ */
 import { computed, ref } from 'vue'
 import { isTaskTerminal, getGameActionTypeText } from '@/utils/constants'
 

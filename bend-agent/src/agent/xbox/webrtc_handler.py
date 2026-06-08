@@ -247,7 +247,7 @@ class XboxWebRTCHandler:
             return None
 
     async def create_offer_async(self) -> Optional[str]:
-        """Create WebRTC offer via aiortc when available, else static SDPBuilder."""
+        """可用时经 aiortc 创建 WebRTC offer，否则用静态 SDPBuilder。"""
         if AIORTC_AVAILABLE and CloudStreamSession is not None:
             try:
                 self._state = WebRTCState.CREATING_OFFER
@@ -269,7 +269,7 @@ class XboxWebRTCHandler:
         return self.create_offer()
 
     def handle_answer(self, answer_sdp: str) -> bool:
-        """Sync wrapper; prefer handle_answer_async in async code paths."""
+        """同步包装；异步路径优先 handle_answer_async。"""
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -380,7 +380,7 @@ class XboxWebRTCHandler:
         gamepad_index: int = 0,
         connection_timeout: float = 30.0,
     ):
-        """Build CloudStreamSession after SDP exchange."""
+        """SDP 交换后构建 CloudStreamSession。"""
         if not AIORTC_AVAILABLE or CloudStreamSession is None:
             return None
 

@@ -6,6 +6,9 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import java.time.LocalDateTime;
 
+/**
+ * 商户注册码：Agent 首次注册或商户自助开通时的一次性凭证。
+ */
 @Data
 @TableName("merchant_registration_code")
 public class MerchantRegistrationCode {

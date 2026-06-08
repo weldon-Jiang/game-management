@@ -15,6 +15,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+/**
+ * 商户 VIP 分组 CRUD 及与商户 vipLevel 的关联校验。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor

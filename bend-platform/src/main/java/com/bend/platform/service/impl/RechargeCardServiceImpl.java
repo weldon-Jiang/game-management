@@ -23,6 +23,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * 充值卡批次生成、卡密查询/导出与商户点数入账。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor

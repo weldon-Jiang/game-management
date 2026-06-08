@@ -309,7 +309,7 @@ async def _init_stream_window(
 
 
 async def _start_sdl_display_pump(context: AgentTaskContext, logger) -> None:
-    """Keep SDL window responsive: blit WebRTC frames during step3/ready wait."""
+    """保持 SDL 窗口响应：在 step3/就绪等待期间刷新 WebRTC 帧。"""
     existing = getattr(context, "_sdl_display_task", None)
     if existing and not existing.done():
         return
@@ -352,7 +352,7 @@ async def _start_sdl_display_pump(context: AgentTaskContext, logger) -> None:
 
 
 async def _stop_sdl_display_pump(context: AgentTaskContext) -> None:
-    """Stop the READY-stage display pump before Step4 starts its own display loop."""
+    """Step4 启动自有显示循环前停止 READY 阶段显示泵。"""
     task = getattr(context, "_sdl_display_task", None)
     if task and not task.done():
         task.cancel()
@@ -364,7 +364,7 @@ async def _stop_sdl_display_pump(context: AgentTaskContext) -> None:
 
 
 def _wire_sdl_close_handler(context: AgentTaskContext) -> None:
-    """Bind title-bar close to context.window_close_callback (display-only)."""
+    """将标题栏关闭绑定到 window_close_callback（仅显示层）。"""
     sdl = context.sdl_window
     if not sdl:
         return
@@ -382,7 +382,7 @@ def _wire_sdl_close_handler(context: AgentTaskContext) -> None:
 
 
 async def step3_close_display(context: AgentTaskContext) -> None:
-    """Destroy SDL window and stop display pump; automation/stream unchanged."""
+    """销毁 SDL 窗口并停止显示泵；自动化/串流不受影响。"""
     logger = get_logger(f"step3_display_{context.task_id}")
     await _stop_sdl_display_pump(context)
     sdl = getattr(context, "sdl_window", None)
@@ -398,7 +398,7 @@ async def step3_close_display(context: AgentTaskContext) -> None:
 
 
 def _sdl_window_is_active(sdl: Any) -> bool:
-    """True when SDL window object exists and is still running (not user-closed)."""
+    """SDL 窗口存在且仍在运行（未被用户关闭）时为 True。"""
     if sdl is None:
         return False
     if getattr(sdl, "is_running", False):
@@ -408,10 +408,10 @@ def _sdl_window_is_active(sdl: Any) -> bool:
 
 async def step3_ensure_display(context: AgentTaskContext) -> bool:
     """
-    Ensure SDL display is visible for the task.
+    确保任务的 SDL 窗口可见。
 
-    - Active window already present → show + refresh display pump (skip recreate)
-    - User closed / destroyed → recreate from existing stream context
+    - 已有活动窗口 → 显示并刷新显示泵（跳过重建）
+    - 用户已关闭/销毁 → 基于现有串流上下文重建
     """
     logger = get_logger(f"step3_display_{context.task_id}")
     stream_logger = get_stream_logger(context.streaming_account_email)
@@ -445,9 +445,9 @@ async def step3_reopen_display(
     stream_logger=None,
 ) -> bool:
     """
-    Re-open SDL display using existing WebRTC/frame_capture context.
+    基于现有 WebRTC/frame_capture 上下文重新打开 SDL 窗口。
 
-    Skips auth, discovery, and stream negotiation.
+    跳过认证、发现与串流协商。
     """
     logger = logger or get_logger(f"step3_display_{context.task_id}")
     stream_logger = stream_logger or get_stream_logger(context.streaming_account_email)
@@ -745,7 +745,7 @@ async def _validate_stream_readiness(
 
 
 def _bind_input_channel_close_handler(context: AgentTaskContext, logger) -> None:
-    """Register callback so step4 knows when input channel drops."""
+    """注册回调，供 step4 感知 input 通道断开。"""
     session = getattr(context, "_cloud_stream_session", None) or getattr(
         context, "xbox_session", None
     )
@@ -818,7 +818,7 @@ async def _ensure_controller_protocol(
     logger,
     stream_logger,
 ) -> None:
-    """Bind ControllerProtocol to cloud session even without a physical gamepad."""
+    """即使没有物理手柄也绑定 ControllerProtocol 到云端会话。"""
     if getattr(context, "_controller_protocol", None):
         return
 

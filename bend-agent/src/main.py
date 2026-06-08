@@ -1,5 +1,5 @@
 """
-Bend Agent - Main entry point
+Bend Agent 主入口。
 """
 import asyncio
 import sys
@@ -22,7 +22,7 @@ from agent.core.central_manager import CentralManager
 
 
 class AgentRunner:
-    """Agent runner with registration code activation"""
+    """带注册码激活的 Agent 运行器。"""
 
     def __init__(self):
         self.activator = RegistrationActivator()
@@ -30,7 +30,7 @@ class AgentRunner:
         self.logger = get_logger('runner')
 
     async def run_with_activation(self):
-        """Run with registration code activation if needed"""
+        """需要时通过注册码激活后运行。"""
         credentials = self.activator.get_credentials()
 
         if credentials is None:
@@ -61,7 +61,7 @@ class AgentRunner:
         return credentials
 
     async def run(self, registration_code: str = None):
-        """Run the agent"""
+        """运行 Agent。"""
         self.logger.info("Initializing Bend Agent...")
 
         credentials = None

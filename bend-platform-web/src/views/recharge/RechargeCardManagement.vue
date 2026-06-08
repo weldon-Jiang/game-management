@@ -196,6 +196,10 @@
 </template>
 
 <script setup>
+/**
+ * 充值卡管理：批次生成（平台管理员）、卡密查询/导出。
+ * 卡状态流转：unused → sold → used；面额=denomination+bonusPoints（点）。
+ */
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { rechargeCardApi } from '@/api'
@@ -302,6 +306,7 @@ const onTabChange = () => {
 }
 
 const showBatchDialog = () => {
+  // 重置表单默认值；提交后异步生成卡密，批次 status 经 pending→generating→completed
   Object.assign(batchForm, {
     name: '',
     cardType: 'platform_card',

@@ -1,3 +1,6 @@
+/**
+ * 商户用户 API：操作员账号 CRUD 与密码重置。
+ */
 import request from '@/utils/request'
 
 export const userApi = {

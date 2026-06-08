@@ -174,6 +174,10 @@
 </template>
 
 <script setup>
+/**
+ * 商户 VIP 分组：各订阅类型的原价/折扣价（表单元，提交转分）。
+ * 新增时 vipLevel 自动递增；amountThreshold 为升级门槛（元→分）。
+ */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
@@ -276,6 +280,7 @@ const loadData = async () => {
 const showDialog = (type, row = null) => {
   dialogType.value = type
   if (type === 'edit' && row) {
+    // 后端价格为分，表单展示为元
     Object.assign(formData, {
       id: row.id,
       name: row.name,
@@ -321,6 +326,7 @@ const handleSubmit = async () => {
 
   submitLoading.value = true
   try {
+    // 表单元 → 后端分；折扣价不得高于原价（formRules 已校验）
     const submitData = {
       name: formData.name,
       amountThreshold: Math.round(formData.amountThreshold * 100),

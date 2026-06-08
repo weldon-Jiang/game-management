@@ -18,6 +18,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+/**
+ * 首页仪表盘统计：按商户隔离聚合资源与任务/Agent 在线数。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor

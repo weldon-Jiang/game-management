@@ -1,3 +1,6 @@
+/**
+ * 计费 API：点数余额、充值卡、订阅与 VIP 分组（merchantGroupApi 同文件导出）。
+ */
 import request from '@/utils/request'
 
 export const billingApi = {

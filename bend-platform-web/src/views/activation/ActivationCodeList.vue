@@ -346,6 +346,11 @@
 </template>
 
 <script setup>
+/**
+ * 激活码管理：生成/列表/复制。
+ * 定价按商户 VIP 档位（loadPrices）；平台管理员可选目标商户。
+ * 订阅类型：points（点数×单价）、window_account/account/host/full（资源数×折扣价）。
+ */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, CopyDocument, SuccessFilled, InfoFilled } from '@element-plus/icons-vue'
@@ -403,6 +408,7 @@ const selectedCount = computed(() => {
 })
 
 const calculateTotalPrice = computed(() => {
+  // points：点数 × 折扣单价；资源类：绑定资源数量 × 折扣价
   if (generateFormData.subscriptionType === 'points' && generateFormData.pointsAmount) {
     return generateFormData.pointsAmount * generateFormData.discountPrice
   }
@@ -475,6 +481,7 @@ const showGenerateDialog = async () => {
 }
 
 const loadPrices = async () => {
+  // 按 merchantId + subscriptionType 拉取 VIP 档位原价/折扣价（后端单位为分）
   try {
     const params = {}
     if (generateFormData.merchantId) {

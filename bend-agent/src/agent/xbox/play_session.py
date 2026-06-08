@@ -158,7 +158,7 @@ class XboxPlaySessionManager:
             await self._aiohttp_session.close()
 
     def _build_headers(self, content_type: bool = False) -> Dict[str, str]:
-        """Build xHome headers with the browser device identity."""
+        """使用浏览器设备标识构建 xHome 请求头。"""
         headers = {
             'Authorization': f'Bearer {self._access_token}',
             'Accept': 'application/json',
@@ -697,7 +697,7 @@ class XboxPlaySessionManager:
         return None
 
     async def get_configuration(self) -> Optional[Dict[str, Any]]:
-        """Fetch session configuration for xHome diagnostics and parity with browser clients."""
+        """获取 xHome 会话配置（诊断及与浏览器客户端对齐）。"""
         session = self._current_session
         if not session or not session.session_path:
             return None
@@ -726,7 +726,7 @@ class XboxPlaySessionManager:
         return None
 
     async def send_keepalive(self) -> bool:
-        """Send xHome session keepalive to keep the cloud session active."""
+        """发送 xHome 会话 keepalive 以保持云端会话活跃。"""
         session = self._current_session
         if not session or not session.session_path:
             return False
@@ -755,7 +755,7 @@ class XboxPlaySessionManager:
         return False
 
     def start_keepalive_loop(self, interval: float = 30.0) -> None:
-        """Start a best-effort xHome keepalive loop for the active PlaySession."""
+        """为活动 PlaySession 启动尽力而为的 xHome keepalive 循环。"""
         if self._keepalive_task and not self._keepalive_task.done():
             return
 

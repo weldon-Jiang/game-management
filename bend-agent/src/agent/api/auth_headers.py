@@ -1,4 +1,4 @@
-"""Shared HTTP auth header helpers for Agent API clients."""
+"""Agent API 客户端共用的 HTTP 认证头辅助函数。"""
 
 import base64
 from typing import Dict, Optional
@@ -9,7 +9,7 @@ def build_agent_auth_headers(
     agent_secret: Optional[str],
     extra: Optional[Dict[str, str]] = None,
 ) -> Dict[str, str]:
-    """Build standard Agent HTTP headers with Base64-encoded secret."""
+    """构建标准 Agent HTTP 请求头（Secret 经 Base64 编码）。"""
     headers: Dict[str, str] = {"Content-Type": "application/json"}
     if extra:
         headers.update(extra)

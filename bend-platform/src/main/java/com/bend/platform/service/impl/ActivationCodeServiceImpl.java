@@ -18,6 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * 激活码生成、定价（VIP 档位）与列表查询。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor

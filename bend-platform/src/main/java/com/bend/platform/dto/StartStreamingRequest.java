@@ -5,6 +5,9 @@ import lombok.Data;
 
 import java.util.List;
 
+/**
+ * 启动串流任务请求（两阶段入口第一阶段：Step1–3 串流准备）。
+ */
 @Data
 public class StartStreamingRequest {
 

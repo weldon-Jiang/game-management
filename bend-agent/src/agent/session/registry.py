@@ -1,4 +1,4 @@
-"""SessionRegistry — one MediaSession per streaming account task."""
+"""SessionRegistry — 每个串流账号任务一个 MediaSession。"""
 
 import threading
 from typing import Dict, Optional

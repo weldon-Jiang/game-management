@@ -43,7 +43,7 @@ def _grid_pos(ch: str) -> Tuple[int, int]:
 
 
 class OnScreenKeyboard:
-    """On-screen 小键盘输入器（网格导航）。"""
+    """屏幕小键盘输入器（网格导航）。"""
 
     def __init__(
         self,

@@ -7,6 +7,10 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 网关配置绑定（prefix=bend.gateway）：限流、IP 过滤、熔断开关。
+ * 路径级限流见 {@link RateLimit#paths}，默认 qps/burst 见 {@link DefaultLimit}。
+ */
 @Data
 @Component
 @ConfigurationProperties(prefix = "bend.gateway")

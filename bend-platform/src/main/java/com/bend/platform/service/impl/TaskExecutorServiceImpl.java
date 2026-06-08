@@ -27,6 +27,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+/**
+ * 任务下发执行器：异步线程池内恢复 UserContext，校验 Agent 负载与在线状态，
+ * 初始化 TaskGameAccountStatus 后通过 WebSocket 将 task 载荷发送给 Agent。
+ */
 @Slf4j
 @Service
 public class TaskExecutorServiceImpl implements TaskExecutorService {
@@ -47,6 +51,7 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** 在线程池中执行 {@link #executeTask}，并在 finally 清理 UserContext。 */
     @Override
     public CompletableFuture<Void> executeTaskAsync(Task task) {
         LoginUserInfo userInfo = UserContext.getUserInfo();
@@ -77,6 +82,10 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
         }, taskExecutor);
     }
 
+    /**
+     * 同步执行任务下发：负载/在线检查 → running → 创建账号状态 → WS 发送。
+     * 发送失败或异常时 decrement 负载并将任务置 failed。
+     */
     @Override
     public void executeTask(Task task) {
         String agentId = task.getTargetAgentId();
@@ -204,6 +213,7 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
         return new GameAccountSelection(ids, limits);
     }
 
+    /** 平台侧取消 running 任务并同步子账号状态；Agent 侧 cancel 由 TaskControl WS 负责。 */
     @Override
     public void cancelTask(String taskId) {
         Task task = taskMapper.selectById(taskId);
@@ -226,6 +236,7 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
         }
     }
 
+    /** 组装 WS task 载荷：gameAccounts 明细 + task.params 合并；gameActionPending 时 phase=streaming_only。 */
     private ObjectNode buildTaskData(Task task, GameAccountSelection selection) throws Exception {
         ObjectNode taskData = objectMapper.createObjectNode();
         taskData.put("taskId", task.getId());

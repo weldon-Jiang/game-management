@@ -895,9 +895,7 @@ class CentralManager:
         self.logger.info(f"Task stop requested: {task_id}")
 
     async def _handle_task_control(self, data: Dict):
-        """
-        Handle task_control WS messages. taskId is mandatory.
-        """
+        """处理 task_control WebSocket 消息；taskId 必填。"""
         task_id = data.get('taskId') or data.get('task_id')
         if not task_id:
             self.logger.warning("task_control rejected: missing taskId")

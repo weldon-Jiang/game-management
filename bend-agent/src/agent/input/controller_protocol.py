@@ -194,6 +194,7 @@ class ControllerProtocol:
         self._input_gate = None
 
     def set_input_gate(self, gate) -> None:
+        """绑定 InputGate：暂停/非自动化期拦截 send_signal。"""
         self._input_gate = gate
 
     def set_stream_controller(self, controller):

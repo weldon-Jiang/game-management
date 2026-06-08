@@ -29,6 +29,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * 订阅激活与资源绑定：激活码兑换、订阅 CRUD、自动化启动前资源/点数校验。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor

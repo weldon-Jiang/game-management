@@ -462,14 +462,14 @@ class StreamingTemplateManager:
             return False
 
 
-# Scenes required for account provisioning, switching, and FC launch navigation.
+# 账号开通、切换与 FC 启动导航所需的场景。
 STEP4_REQUIRED_SCENE_IDS = [
     1, 2, 3, 4, 5, 6, 7, 10, 24, 101, 126, 127, 147, 149, 203,
 ]
 
 
 def required_template_names(scene_ids: Optional[List[int]] = None) -> List[str]:
-    """Return template filenames ({scene}.{template}.png) for the given scenes."""
+    """返回指定场景的模板文件名（{scene}.{template}.png）。"""
     target_scenes = set(scene_ids or STEP4_REQUIRED_SCENE_IDS)
     names: List[str] = []
     for schema in SCENE_SCHEMAS:
@@ -487,9 +487,9 @@ def validate_templates(
     scene_ids: Optional[List[int]] = None,
 ) -> Tuple[bool, List[str]]:
     """
-    Check that required PNG templates exist under template_dir.
+    检查 template_dir 下必需的 PNG 模板是否存在。
 
-    Returns (ok, missing_filenames).
+    返回 (ok, missing_filenames)。
     """
     root = Path(template_dir)
     missing = [

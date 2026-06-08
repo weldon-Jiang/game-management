@@ -79,6 +79,10 @@
 </template>
 
 <script setup>
+/**
+ * 启动自动化向导：选 Agent/游戏账号 → startStreaming（Step1–3）→ 轮询 sessionPhase 至 ready。
+ * gameActionType 在 ready 后由详情页 TaskControlBar 触发 startAutomation。
+ */
 import { ref, reactive, watch, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'

@@ -29,7 +29,7 @@ _DEBUG_ENABLED = os.getenv("BEND_DEBUG_SESSION", "").strip().lower() in ("1", "t
 
 
 def _normalize_progress_fields(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    """Map camelCase callback fields to report_progress keyword arguments."""
+    """将回调字段 camelCase 映射为 report_progress 关键字参数。"""
     normalized = dict(kwargs)
     field_aliases = {
         "gameAccountId": "game_account_id",
@@ -318,7 +318,7 @@ class PlatformApiClient:
         position_index: Optional[int] = None,
         game_name: Optional[str] = None,
     ) -> bool:
-        """Persist profile_bound / position_index / gameName after console login."""
+        """主机登录后回写 profile_bound / position_index / gameName。"""
         url = self._get_callback_url(f'game-account/{game_account_id}/profile-binding')
         headers = await self._get_headers()
         payload: Dict[str, Any] = {"profileBound": profile_bound}
@@ -368,7 +368,7 @@ class PlatformApiClient:
         coins_delta: int = 0,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Report an idempotent Step4 billable event."""
+        """上报幂等的 Step4 计费事件。"""
         url = self._get_callback_url('billing-event')
         headers = await self._get_headers()
         payload: Dict[str, Any] = {

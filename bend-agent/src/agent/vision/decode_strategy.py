@@ -1,5 +1,5 @@
 """
-GPU-first decode with CPU fallback when concurrent task limit exceeded.
+GPU 优先解码；并发超限时回退 CPU。
 """
 
 import threading
@@ -19,11 +19,11 @@ def get_max_gpu_decodes() -> int:
 
 def resolve_decode_mode(requested: str = "auto") -> str:
     """
-    Resolve decode mode for a new task.
+    为新任务选择解码模式。
 
-    - gpu: force GPU
-    - cpu: force CPU
-    - auto: GPU if under limit, else CPU
+    - gpu: 强制 GPU
+    - cpu: 强制 CPU
+    - auto: 未超 GPU 并发上限时用 GPU，否则 CPU
     """
     global _active_gpu_decodes
     requested = (requested or "auto").lower()

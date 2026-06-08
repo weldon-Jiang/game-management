@@ -1,7 +1,8 @@
 """
-Xbox discovery module for Bend Agent
-Discovers Xbox consoles on the local network using SSDP and Xbox SmartGlass protocol
-Supports Xbox Live cloud-based discovery for remote and online Xbox detection
+Bend Agent 的 Xbox 发现模块。
+
+使用 SSDP 与 Xbox SmartGlass 协议发现局域网 Xbox；
+支持 Xbox Live 云端发现以检测远程/在线主机。
 """
 import asyncio
 import socket
@@ -20,7 +21,7 @@ from ..gssv.network_util import is_blocked_scan_ip, pick_local_lan_ip
 
 @dataclass
 class XboxInfo:
-    """Xbox console information"""
+    """Xbox 主机信息"""
     device_id: str
     name: str
     ip_address: str
@@ -35,14 +36,14 @@ class XboxInfo:
 
 class XboxDiscovery:
     """
-    Xbox console discovery using multiple methods:
+    多种方式发现 Xbox 主机：
 
-    1. Xbox Live Cloud API (优先)
+    1. Xbox Live 云端 API（优先）
        - 需要 Bearer Token
        - 可发现远程在线的 Xbox
        - 返回完整的服务器信息 (serverId, playPath, powerState)
 
-    2. SSDP (Simple Service Discovery Protocol)
+    2. SSDP（Simple Service Discovery Protocol）
        - 无需认证
        - 本地网络发现
        - 支持 Xbox 特定搜索
@@ -194,17 +195,17 @@ class XboxDiscovery:
 
     async def start_discovery(self, interval: int = 60):
         """
-        Start periodic Xbox discovery
+        启动周期性 Xbox 发现。
 
-        Args:
-            interval: Discovery interval in seconds
+        参数:
+            interval: 发现间隔（秒）
         """
         self._running = True
         self._discovery_task = asyncio.create_task(self._discovery_loop(interval))
         self.logger.info(f"Xbox discovery started with interval {interval}s")
 
     async def stop_discovery(self):
-        """Stop Xbox discovery"""
+        """停止 Xbox 发现"""
         self._running = False
         if self._discovery_task:
             self._discovery_task.cancel()
@@ -215,7 +216,7 @@ class XboxDiscovery:
         self.logger.info("Xbox discovery stopped")
 
     async def _discovery_loop(self, interval: int):
-        """Periodic discovery loop"""
+        """周期性发现循环"""
         while self._running:
             try:
                 await self.discover()
@@ -228,19 +229,19 @@ class XboxDiscovery:
 
     async def discover(self, use_cloud_first: bool = True) -> List[XboxInfo]:
         """
-        Perform Xbox discovery on the local network
+        在局域网执行 Xbox 发现。
 
-        Discovery order (when use_cloud_first=True):
-        1. Xbox Live Cloud API (优先，需 Bearer Token)
-        2. SSDP discovery
-        3. Network port scan
-        4. ARP scan (备选)
+        发现顺序（use_cloud_first=True 时）：
+        1. Xbox Live 云端 API（优先，需 Bearer Token）
+        2. SSDP 发现
+        3. 网络端口扫描
+        4. ARP 扫描（备选）
 
-        Args:
+        参数:
             use_cloud_first: 是否优先使用云端发现
 
-        Returns:
-            List of discovered Xbox consoles
+        返回:
+            已发现 Xbox 主机列表
         """
         self.logger.info("开始Xbox发现...")
 
@@ -311,7 +312,7 @@ class XboxDiscovery:
             return []
 
     async def _ssdp_discover(self) -> List[Dict[str, str]]:
-        """Send SSDP M-SEARCH request and collect responses"""
+        """发送 SSDP M-SEARCH 并收集响应。"""
         devices = []
 
         try:
@@ -372,7 +373,7 @@ class XboxDiscovery:
         return devices
 
     async def _scan_local_network(self) -> List[str]:
-        """Scan local network for devices with open Xbox ports"""
+        """扫描局域网开放 Xbox 端口的设备。"""
         found_ips = []
         local_ip = self._get_local_ip()
         if not local_ip:
@@ -426,11 +427,11 @@ class XboxDiscovery:
         return found_ips
 
     def _get_local_ip(self) -> Optional[str]:
-        """Prefer RFC1918 LAN address; ignore proxy fake-ip ranges."""
+        """优先 RFC1918 局域网地址；忽略代理假 IP 段。"""
         return pick_local_lan_ip()
 
     async def _broadcast_ping(self) -> List[str]:
-        """Send broadcast ping to discover devices"""
+        """广播 ping 发现设备。"""
         found_ips = []
         local_ip = self._get_local_ip()
         if not local_ip:
@@ -462,7 +463,7 @@ class XboxDiscovery:
         return found_ips
 
     async def _arp_scan(self) -> List[str]:
-        """Perform ARP scan using system arp command"""
+        """使用系统 arp 命令执行 ARP 扫描。"""
         found_ips = []
         local_ip = self._get_local_ip()
         if not local_ip:
@@ -502,7 +503,7 @@ class XboxDiscovery:
         return found_ips
 
     def _parse_ssdp_response(self, response: str) -> Optional[Dict[str, str]]:
-        """Parse SSDP NOTIFY or M-SEARCH response"""
+        """解析 SSDP NOTIFY 或 M-SEARCH 响应。"""
         device = {}
 
         for line in response.split('\r\n'):
@@ -529,7 +530,7 @@ class XboxDiscovery:
         通过 SSDP 发现的设备已经包含了 Xbox 关键词确认，
         因此跳过 SmartGlass 端口验证，直接使用发现的 IP。
         
-        Args:
+        参数:
             device: SSDP 发现的设备信息
             skip_validation: 是否跳过端口验证（SSDP 已确认是 Xbox）
         """
@@ -594,10 +595,10 @@ class XboxDiscovery:
         2. 发送握手请求
         3. 验证响应
         
-        Args:
+        参数:
             ip: 设备 IP 地址
             
-        Returns:
+        返回:
             验证成功返回设备信息字典，失败返回 None
         """
         for port in self.XBOX_VALIDATION_PORTS:
@@ -709,7 +710,7 @@ class XboxDiscovery:
         return "Xbox Unknown"
 
     def _extract_name_from_location(self, location: str) -> str:
-        """Extract Xbox name from location URL"""
+        """从 location URL 提取 Xbox 名称。"""
         try:
             if location.startswith('http://'):
                 host = location[7:]
@@ -721,35 +722,35 @@ class XboxDiscovery:
         return "Xbox"
 
     def _generate_device_id(self, ip: str) -> str:
-        """Generate a device ID from IP address"""
+        """由 IP 地址生成设备 ID。"""
         hash_val = hashlib.md5(ip.encode()).hexdigest()
         return f"XBOX-{hash_val[:8].upper()}"
 
     def get_discovered_xboxes(self) -> List[XboxInfo]:
-        """Get list of all discovered Xbox consoles"""
+        """获取全部已发现 Xbox 主机列表"""
         return list(self._discovered_xboxes.values())
 
     def get_xbox_by_ip(self, ip: str) -> Optional[XboxInfo]:
-        """Get Xbox info by IP address"""
+        """按 IP 地址获取 Xbox 信息"""
         for xbox in self._discovered_xboxes.values():
             if xbox.ip_address == ip:
                 return xbox
         return None
 
     def get_xbox_by_id(self, device_id: str) -> Optional[XboxInfo]:
-        """Get Xbox info by device ID"""
+        """按设备 ID 获取 Xbox 信息"""
         return self._discovered_xboxes.get(device_id)
 
     async def test_connection(self, ip: str, port: int = None) -> bool:
         """
-        Test connection to an Xbox console
+        测试与 Xbox 主机的连接。
 
-        Args:
-            ip: Xbox IP address
-            port: Port number (default: SMARTGLASS_PORT)
+        参数:
+            ip: Xbox IP 地址
+            port: 端口号（默认 SMARTGLASS_PORT）
 
-        Returns:
-            True if connection successful
+        返回:
+            连接成功为 True
         """
         port = port or self.SMARTGLASS_PORT
 

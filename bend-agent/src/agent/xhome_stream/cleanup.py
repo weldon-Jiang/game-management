@@ -1,4 +1,4 @@
-"""Shared cleanup helpers for xHome media contexts."""
+"""xHome 媒体上下文共用的清理辅助函数。"""
 
 from typing import Any
 
@@ -6,7 +6,7 @@ from ..core.logger import get_logger
 
 
 async def close_media_context(context: Any, logger=None) -> None:
-    """Release display, capture, WebRTC, PlaySession, input, and host locks."""
+    """释放显示、截帧、WebRTC、PlaySession、input 与主机锁。"""
     log = logger or get_logger("xhome_cleanup")
     if context is None:
         return

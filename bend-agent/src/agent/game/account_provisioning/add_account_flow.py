@@ -1,4 +1,4 @@
-"""AddAccountFlow — add Microsoft account on Xbox host and sync gamertag to platform."""
+"""AddAccountFlow — 在 Xbox 主机添加微软账号并同步 Gamertag 到平台。"""
 
 from typing import Any, Callable, Optional
 

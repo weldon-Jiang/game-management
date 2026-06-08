@@ -125,6 +125,9 @@
 </template>
 
 <script setup>
+/**
+ * 商户 CRUD：平台管理员维护商户主体（名称/手机号/系统商户标记）。
+ */
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'

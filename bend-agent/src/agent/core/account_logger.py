@@ -1,5 +1,5 @@
 """
-Account-specific logging for Bend Agent
+Bend Agent 按账号分文件日志
 
 功能说明：
 - 为流媒体账号创建独立的登录/串流日志

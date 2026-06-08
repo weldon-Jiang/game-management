@@ -98,6 +98,9 @@
 </template>
 
 <script setup>
+/**
+ * 首页仪表盘：按角色展示资源统计卡片与快捷入口；定时刷新当前时间。
+ */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { OfficeBuilding, User, VideoPlay, Monitor, Coin, Key, CreditCard, Cpu, Trophy, Box, Wallet, Tickets } from '@element-plus/icons-vue'

@@ -1,5 +1,5 @@
 """
-Xbox streaming controller for Bend Agent
+Bend Agent Xbox 串流控制器
 
 功能说明：
 - 通过SmartGlass协议控制Xbox主机
@@ -559,13 +559,13 @@ class XboxStreamController:
         """
         使用 Xbox Live Token 连接到 Xbox 主机
 
-        Args:
+        参数:
             xbox_ip: Xbox IP 地址
             xbox_token: Xbox Live Token
             user_hash: 用户哈希 (uhs)
             port: SmartGlass 端口（可选，默认5050）
 
-        Returns:
+        返回:
             True: 连接成功
             False: 连接失败
         """
@@ -612,11 +612,11 @@ class XboxStreamController:
         """
         使用 Xbox Live Token 执行握手
 
-        Args:
+        参数:
             xbox_token: Xbox Live Token
             user_hash: 用户哈希
 
-        Returns:
+        返回:
             True: 握手成功
             False: 握手失败
         """
@@ -639,11 +639,11 @@ class XboxStreamController:
         """
         构建带 Token 的握手请求
 
-        Args:
+        参数:
             xbox_token: Xbox Live Token
             user_hash: 用户哈希
 
-        Returns:
+        返回:
             握手请求字节数据
         """
         content = json.dumps({
@@ -667,11 +667,11 @@ class XboxStreamController:
         """
         绑定流媒体账号到当前 Xbox 会话
 
-        Args:
+        参数:
             streaming_account_id: 流媒体账号ID
             email: 微软账号邮箱
 
-        Returns:
+        返回:
             True: 绑定成功
             False: 绑定失败
         """

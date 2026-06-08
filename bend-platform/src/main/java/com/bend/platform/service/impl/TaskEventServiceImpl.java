@@ -12,6 +12,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+/**
+ * 任务事件查询与写入：Agent 回调/控制面经 record 落库，详情页按 taskId/sessionId 分页拉取。
+ */
 @Service
 @RequiredArgsConstructor
 public class TaskEventServiceImpl implements TaskEventService {
@@ -54,6 +57,7 @@ public class TaskEventServiceImpl implements TaskEventService {
         return taskEventMapper.selectList(wrapper);
     }
 
+    /** 写入单条任务事件（架构红线：回调/控制面统一入口，禁止 Mapper 直连）。 */
     @Override
     public void record(TaskEvent event) {
         taskEventMapper.insert(event);

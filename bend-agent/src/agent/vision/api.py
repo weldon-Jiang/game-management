@@ -1,7 +1,7 @@
 """
-VisionService — unified decode pipeline + TemplateMatcher API.
+VisionService — 统一解码管线与 TemplateMatcher API。
 
-Frames come from WebRTC/GPU decode only; never from SDL window back-buffer.
+帧仅来自 WebRTC/GPU 解码；绝不来自 SDL 窗口后缓冲。
 """
 
 from typing import Any, Callable, List, Optional
@@ -13,7 +13,7 @@ from ..scene.streaming_scene_detector import StreamingSceneDetector
 
 
 class TemplateMatcher:
-    """Unified template matching for step4 and account_provisioning."""
+    """step4 与 account_provisioning 的统一模板匹配。"""
 
     def __init__(
         self,
@@ -40,7 +40,7 @@ class TemplateMatcher:
         )
 
     def preload(self, scene_ids: Optional[List[int]] = None) -> None:
-        """Warm template cache for given scenes (lazy load on first match otherwise)."""
+        """预热指定场景模板缓存（否则首次匹配时懒加载）。"""
         self.logger.debug("Template preload requested for %s", scene_ids or "all")
 
     def recognize_scene(self, frame: Any, scene_id: Optional[int] = None):
@@ -71,7 +71,7 @@ class TemplateMatcher:
 
 
 class VisionPipeline:
-    """Decode + frame source; display window is decoupled."""
+    """解码 + 帧源；显示窗口已解耦。"""
 
     def __init__(self, mode: str = "auto"):
         self.logger = get_logger("vision_pipeline")
@@ -95,7 +95,7 @@ class VisionPipeline:
 
 
 class VisionService:
-    """Factory for VisionPipeline and TemplateMatcher."""
+    """VisionPipeline 与 TemplateMatcher 工厂。"""
 
     @staticmethod
     def create_pipeline(mode: str = "auto") -> VisionPipeline:

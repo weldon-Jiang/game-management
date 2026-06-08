@@ -1,3 +1,5 @@
+-- 开发环境维护脚本：将指定 streaming_account 及其 game_account 重置为 idle。
+-- 使用前请替换下方 ID；非版本化脚本，勿在生产环境盲目执行。
 USE bend_platform;
 
 UPDATE streaming_account 

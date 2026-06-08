@@ -7,6 +7,9 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
+/**
+ * 商户订阅记录：激活码兑换后生成的有效订阅及绑定资源。
+ */
 @Data
 @TableName("subscription")
 public class Subscription {

@@ -1,5 +1,5 @@
 """
-WebSocket client for real-time communication with backend
+与后端实时通信的 WebSocket 客户端。
 
 功能说明：
 - 建立与后端服务器的WebSocket长连接
@@ -184,7 +184,7 @@ class WSClient:
                         url, extra_headers=extra_headers, ping_interval=None
                     )
                 except TypeError:
-                    # Older websockets: extra_headers not supported
+                    # 旧版 websockets 不支持 extra_headers
                     legacy_url = f"{url}?agentSecret={self.agent_secret}"
                     self._ws = await websockets.connect(legacy_url, ping_interval=None)
                 # 检查连接是否被替换（可能被其他重连任务覆盖）
@@ -356,7 +356,7 @@ class WSClient:
             return False
 
     def _schedule_reconnect(self) -> asyncio.Task:
-        """Schedule one background reconnect task at most."""
+        """最多调度一个后台重连任务。"""
         if self._reconnect_task and not self._reconnect_task.done():
             return self._reconnect_task
         self._reconnect_task = asyncio.create_task(self._trigger_reconnect())
@@ -374,7 +374,7 @@ class WSClient:
                 self._reconnect_task = None
 
     async def _ensure_heartbeat_task(self):
-        """Keep exactly one heartbeat loop alive."""
+        """保持仅一个心跳循环存活。"""
         current = asyncio.current_task()
         if self._heartbeat_task and not self._heartbeat_task.done():
             if self._heartbeat_task is current:

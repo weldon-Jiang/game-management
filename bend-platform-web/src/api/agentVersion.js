@@ -1,3 +1,6 @@
+/**
+ * Agent 版本 API：发布/下架、notifyAll 推送 version_update。
+ */
 import request from '@/utils/request'
 
 export const agentVersionApi = {

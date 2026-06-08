@@ -5,6 +5,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+/**
+ * 单条游戏账号导入行（Excel/CSV 解析后映射）。
+ */
 @Data
 public class GameAccountImportDto {
 

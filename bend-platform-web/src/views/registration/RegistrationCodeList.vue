@@ -188,6 +188,9 @@
 </template>
 
 <script setup>
+/**
+ * 商户注册码管理：平台管理员批量生成、复制、作废；商户自助注册入口凭证。
+ */
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, CopyDocument, Delete } from '@element-plus/icons-vue'

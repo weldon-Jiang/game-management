@@ -1,6 +1,6 @@
 """
-System tray module for Bend Agent
-Provides system tray icon and menu for Windows
+Bend Agent 系统托盘模块。
+提供 Windows 系统托盘图标与菜单。
 """
 import os
 import sys
@@ -13,8 +13,8 @@ from ..core.logger import get_logger
 
 class SystemTray:
     """
-    System tray manager for Bend Agent
-    Provides system tray icon, menu, and notifications
+    Bend Agent 系统托盘管理器。
+    提供托盘图标、菜单与通知。
     """
 
     def __init__(self):
@@ -26,10 +26,10 @@ class SystemTray:
 
     def initialize(self, window=None):
         """
-        Initialize system tray
+        初始化系统托盘。
 
-        Args:
-            window: Parent window reference
+        参数:
+            window: 父窗口引用
         """
         try:
             import pystray
@@ -67,7 +67,7 @@ class SystemTray:
             self.logger.error(f"Failed to initialize system tray: {e}")
 
     def _create_default_icon(self):
-        """Create a simple icon image"""
+        """创建简单图标图像"""
         try:
             from PIL import Image, ImageDraw
 
@@ -85,7 +85,7 @@ class SystemTray:
             return None
 
     def run(self):
-        """Run system tray in a separate thread"""
+        """在独立线程运行系统托盘"""
         if not self._tray_icon:
             return
 
@@ -97,14 +97,14 @@ class SystemTray:
         self.logger.info("System tray started")
 
     def stop(self):
-        """Stop system tray"""
+        """停止系统托盘"""
         self._running = False
         if self._tray_icon:
             self._tray_icon.stop()
             self.logger.info("System tray stopped")
 
     def _on_show_console(self, icon=None, item=None):
-        """Show console window"""
+        """显示控制台窗口"""
         try:
             if self._window:
                 self._window.show()
@@ -113,15 +113,15 @@ class SystemTray:
             self.logger.error(f"Failed to show console: {e}")
 
     def _on_show_settings(self, icon=None, item=None):
-        """Show settings window"""
+        """显示设置窗口"""
         self.logger.info("Show settings")
 
     def _on_check_update(self, icon=None, item=None):
-        """Check for updates"""
+        """检查更新"""
         self.logger.info("Checking for updates")
 
     def _on_show_about(self, icon=None, item=None):
-        """Show about dialog"""
+        """显示关于对话框"""
         try:
             import tkinter as tk
             from tkinter import messagebox
@@ -137,24 +137,24 @@ class SystemTray:
             self.logger.error(f"Failed to show about: {e}")
 
     def _on_exit(self, icon=None, item=None):
-        """Exit application"""
+        """退出应用"""
         self.logger.info("Exit requested from system tray")
         self._running = False
         if self._tray_icon:
             self._tray_icon.stop()
 
     def update_status(self, status: str):
-        """Update tray tooltip"""
+        """更新托盘提示文字"""
         if self._tray_icon:
             self._tray_icon.title = f"Bend Agent - {status}"
 
     def show_notification(self, title: str, message: str):
         """
-        Show system notification
+        显示系统通知。
 
-        Args:
-            title: Notification title
-            message: Notification message
+        参数:
+            title: 通知标题
+            message: 通知内容
         """
         if not self._tray_icon:
             return

@@ -24,7 +24,7 @@ def get_base_dir() -> str:
 
 
 def get_agent_root() -> Path:
-    """Return bend-agent install root (configs/, templates/, logs/)."""
+    """返回 bend-agent 安装根目录（configs/、templates/、logs/）。"""
     base = Path(get_base_dir()).resolve()
     if getattr(sys, 'frozen', False):
         return base
@@ -35,7 +35,7 @@ def get_agent_root() -> Path:
 
 
 def resolve_agent_path(path: Union[str, Path]) -> Path:
-    """Resolve a config path relative to bend-agent root when not absolute."""
+    """非绝对路径时相对于 bend-agent 根目录解析配置路径。"""
     candidate = Path(path)
     if candidate.is_absolute():
         return candidate

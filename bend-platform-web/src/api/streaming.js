@@ -1,3 +1,6 @@
+/**
+ * 流媒体账号 API：列表、凭据、批量导入与 Xbox 主机绑定查询。
+ */
 import request from '@/utils/request'
 
 export const streamingApi = {

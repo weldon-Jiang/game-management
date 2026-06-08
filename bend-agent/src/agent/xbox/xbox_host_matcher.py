@@ -226,7 +226,7 @@ class XboxHostMatcher:
         return xboxes
 
     def _from_discovered_xbox(self, discovered: DiscoveredXboxInfo) -> XboxInfo:
-        """Convert XboxDiscovery result to matcher-local XboxInfo."""
+        """将 XboxDiscovery 结果转换为匹配器本地 XboxInfo。"""
         return XboxInfo(
             id=discovered.device_id,
             device_id=discovered.device_id,

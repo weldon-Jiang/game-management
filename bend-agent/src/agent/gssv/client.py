@@ -1,4 +1,4 @@
-"""GSSV HTTP client with dynamic baseUri and Bearer auth."""
+"""动态 baseUri 与 Bearer 认证的 GSSV HTTP 客户端。"""
 
 from typing import Any, Dict, Optional
 
@@ -10,7 +10,7 @@ from .endpoints import GssvEndpoints
 
 
 class GssvClient:
-    """Shared aiohttp client for GSSV APIs."""
+    """GSSV API 共用的 aiohttp 客户端。"""
 
     def __init__(
         self,

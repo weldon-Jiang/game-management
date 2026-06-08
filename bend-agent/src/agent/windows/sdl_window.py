@@ -212,7 +212,7 @@ class SDLStreamWindow:
         return None
 
     def _bring_to_front(self):
-        """Best-effort foreground request for the visible SDL task window."""
+        """尽力将可见 SDL 任务窗口置前。"""
         if sys.platform != 'win32':
             return
         try:
@@ -244,11 +244,11 @@ class SDLStreamWindow:
             self.logger.warning(f"前置窗口失败: {e}")
 
     def set_close_callback(self, callback: Optional[Callable[[], None]]) -> None:
-        """Invoked when user clicks the title-bar close button."""
+        """用户点击标题栏关闭按钮时调用。"""
         self._close_callback = callback
 
     def _apply_window_constraints(self):
-        """Windows: fixed client area, standard caption with close/minimize, no resize."""
+        """Windows：固定客户区、标准标题栏（关闭/最小化）、不可缩放。"""
         if sys.platform != 'win32':
             return
         try:
@@ -539,7 +539,7 @@ class SDLStreamWindow:
         self.logger.info("SDL窗口已关闭")
 
     async def destroy(self):
-        """Alias for task cleanup; does not call pygame.quit() if keyboard mapper still active."""
+        """任务清理别名；键盘映射仍活跃时不调用 pygame.quit()。"""
         self._running = False
         self._state = SDLWindowState.CLOSED
         if sys.platform == "win32":

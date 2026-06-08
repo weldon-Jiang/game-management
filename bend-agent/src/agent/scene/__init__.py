@@ -1,6 +1,4 @@
-"""
-Scene module initialization
-"""
+"""场景检测与游戏自动化引擎。"""
 from .scene_detector import SceneDetector, SceneState
 from .optimized_scene_detector import (
     OptimizedSceneDetector,

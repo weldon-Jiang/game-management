@@ -86,7 +86,7 @@ class MFAType(Enum):
     """MFA 验证类型"""
     SMS = "sms"                   # 短信验证码
     EMAIL = "email"              # 邮件验证码
-    APP = "app"                  # Authenticator App
+    APP = "app"                  # Authenticator 应用
     PHONE = "phone"              # 电话验证
     UNKNOWN = "unknown"           # 未知类型
 
@@ -186,7 +186,7 @@ class DeviceCodeAuthenticator:
         
         使用存储的auto_code (TOTP Secret Key) 生成6位动态验证码
         
-        Returns:
+        返回:
             Optional[str]: 生成的验证码，失败返回None
         """
         if not self._auto_code:
@@ -226,7 +226,7 @@ class DeviceCodeAuthenticator:
         
         查找并点击验证码验证按钮
         
-        Returns:
+        返回:
             bool: 提交是否成功
         """
         try:

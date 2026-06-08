@@ -1,8 +1,7 @@
 """
-InputFocusManager — physical input isolation across parallel tasks.
+InputFocusManager — 并行任务间的物理输入隔离。
 
-Only the stack-top task receives physical gamepad/keyboard hooks.
-Automation virtual input via DataChannel is unaffected.
+仅栈顶任务接收物理手柄/键盘钩子；经 DataChannel 的自动化虚拟输入不受影响。
 """
 
 import threading
@@ -12,7 +11,7 @@ from ..core.logger import get_logger
 
 
 class InputFocusManager:
-    """Maintains a focus stack; top taskId owns physical input routing."""
+    """维护焦点栈；栈顶 taskId 拥有物理输入路由。"""
 
     _instance: Optional["InputFocusManager"] = None
 
@@ -29,6 +28,7 @@ class InputFocusManager:
         return cls._instance
 
     def push(self, task_id: str) -> None:
+        """任务启动时入栈，栈顶任务获得物理手柄/键盘路由。"""
         with self._lock:
             if task_id in self._stack:
                 self._stack.remove(task_id)
@@ -37,6 +37,7 @@ class InputFocusManager:
             self.logger.info("Input focus pushed: %s (stack=%s)", task_id, self._stack)
 
     def pop(self, task_id: str) -> None:
+        """任务结束出栈，焦点回落到上一任务或 None。"""
         with self._lock:
             if task_id in self._stack:
                 self._stack.remove(task_id)
@@ -48,6 +49,7 @@ class InputFocusManager:
             )
 
     def focus(self, task_id: str) -> bool:
+        """task_control focus_window：将已有任务提升至栈顶（须已在栈内）。"""
         with self._lock:
             if task_id not in self._stack:
                 self.logger.warning("focus(%s): task not in stack", task_id)
@@ -67,4 +69,5 @@ class InputFocusManager:
             return self._focused_task_id
 
     def should_accept_physical_input(self, task_id: str) -> bool:
+        """物理输入钩子入口：仅栈顶 taskId 返回 True（DataChannel 自动化不受此限）。"""
         return self.is_focused(task_id)

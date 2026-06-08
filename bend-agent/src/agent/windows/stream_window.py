@@ -1,5 +1,5 @@
 """
-Stream Window Manager - Manages Xbox streaming window state
+串流窗口管理器 — 管理 Xbox 串流窗口状态
 
 功能说明：
 - 管理Xbox流媒体窗口的状态

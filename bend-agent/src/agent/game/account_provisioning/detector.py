@@ -1,4 +1,4 @@
-"""ProfileDetector — checks whether a game account profile exists on the console."""
+"""ProfileDetector — 检查主机上是否存在游戏账号档案。"""
 
 from typing import Any
 

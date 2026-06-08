@@ -1,4 +1,4 @@
-"""Discovery DTOs (kept separate to avoid circular imports)."""
+"""发现层 DTO（独立文件以避免循环导入）。"""
 
 from dataclasses import dataclass
 

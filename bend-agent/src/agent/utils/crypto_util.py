@@ -39,7 +39,7 @@ def get_aes_key() -> bytes:
     - 密钥长度 < 16 字节时：补足到 16 字节（用0填充）
     - 密钥长度为 16/24/32 字节时：直接作为 AES-128/192/256 密钥
 
-    Returns:
+    返回:
         16 字节的密钥
     """
     secret = config.get('aes.secret')
@@ -63,11 +63,11 @@ def zero_pad(data: bytes, block_size: int = 16) -> bytes:
 
     数据长度不是 block_size 的倍数时，在末尾添加 0x00 直到满足倍数
 
-    Args:
+    参数:
         data: 原始数据
         block_size: 块大小（默认16）
 
-    Returns:
+    返回:
         填充后的数据
     """
     remainder = len(data) % block_size
@@ -83,10 +83,10 @@ def zero_unpad(data: bytes) -> bytes:
 
     移除末尾的 0x00
 
-    Args:
+    参数:
         data: 填充后的数据
 
-    Returns:
+    返回:
         原始数据
     """
     return data.rstrip(b'\x00')
@@ -101,14 +101,14 @@ def decrypt_aes_hex(encrypted_hex: str, key: Optional[bytes] = None) -> str:
     - ZeroPadding（手动填充）
     - 十六进制输出
 
-    Args:
+    参数:
         encrypted_hex: 十六进制加密字符串
         key: AES密钥（可选，默认使用配置密钥）
 
-    Returns:
+    返回:
         明文字符串
 
-    Raises:
+    抛出:
         CryptoError: 解密失败
     """
     if not encrypted_hex:
@@ -137,11 +137,11 @@ def decrypt_aes_base64(encrypted_base64: str, key: Optional[bytes] = None) -> st
     """
     AES 解密（Base64输入）
 
-    Args:
+    参数:
         encrypted_base64: Base64加密字符串
         key: AES密钥（可选）
 
-    Returns:
+    返回:
         明文字符串
     """
     if not encrypted_base64:
@@ -174,10 +174,10 @@ def decrypt_password(encrypted_password: str) -> str:
     1. 十六进制加密字符串
     2. Base64加密字符串
 
-    Args:
+    参数:
         encrypted_password: 加密的密码字符串
 
-    Returns:
+    返回:
         明文密码
     """
     if not encrypted_password:
@@ -187,8 +187,7 @@ def decrypt_password(encrypted_password: str) -> str:
         encrypted = encrypted_password[4:]
         return decrypt_aes_hex(encrypted)
 
-    # Platform stores AES ciphertext as hex. Hex strings can also look like
-    # valid base64, so prefer hex when the shape is unambiguous.
+    # 平台以十六进制存储 AES 密文；十六进制串也可能形似 base64，形态明确时优先按 hex 解密。
     if is_hex_ciphertext(encrypted_password):
         return decrypt_aes_hex(encrypted_password)
 
@@ -226,11 +225,11 @@ def encrypt_aes_hex(plain_text: str, key: Optional[bytes] = None) -> str:
 
     用于测试对比
 
-    Args:
+    参数:
         plain_text: 明文字符串
         key: AES密钥（可选）
 
-    Returns:
+    返回:
         十六进制加密字符串
     """
     if not plain_text:
@@ -256,10 +255,10 @@ def decrypt_json(encrypted_json: str) -> Dict[str, Any]:
     """
     解密 JSON 字符串
 
-    Args:
+    参数:
         encrypted_json: 加密的 JSON 字符串
 
-    Returns:
+    返回:
         解密后的字典
     """
     try:
@@ -273,11 +272,11 @@ def safe_decrypt(encrypted: str, default: str = "") -> str:
     """
     安全解密（不抛出异常）
 
-    Args:
+    参数:
         encrypted: 加密字符串
         default: 解密失败时返回的默认值
 
-    Returns:
+    返回:
         明文字符串或默认值
     """
     try:

@@ -19,6 +19,11 @@ import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
+/**
+ * 网关 Redis 滑动窗口限流（order=-90）。
+ * <p>
+ * 按 clientId + path 计数，path 可配置独立 qps/burst；Redis 异常时降级放行。
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor

@@ -33,7 +33,7 @@ from .task_context import AgentTaskContext, GameAccountInfo, XboxInfo, Automatio
 from ..window.window_manager import StreamingWindowManager
 from ..orchestration.streaming_account_task import StreamingAccountTask
 from ..runtime.task_registry import TaskRuntimeRegistry, StreamingAccountTaskRuntime
-from ..runtime.task_control_handler import TaskControlHandler  # noqa: F401 — re-exported via get_active_scheduler
+from ..runtime.task_control_handler import TaskControlHandler  # noqa: F401 — 经 get_active_scheduler 再导出
 from ..runtime.input_focus import InputFocusManager
 from ..runtime.phase_fsm import SessionPhase
 from ..core.config import config
@@ -44,6 +44,7 @@ _active_scheduler: Optional["AutomationScheduler"] = None
 
 
 def get_active_scheduler() -> Optional["AutomationScheduler"]:
+    """返回进程级调度器单例；单任务不得在 finally 中 close（会误杀并发任务）。"""
     return _active_scheduler
 
 
@@ -408,6 +409,12 @@ class AutomationScheduler:
         task_id: str,
         game_action_type: Optional[str] = None,
     ) -> bool:
+        """
+        释放单任务的两阶段 READY 门闩。
+
+        平台 WS start_game_automation 最终会 set automation_start_event；
+        StreamingAccountTask 在该 event 上等待后再进入 Step4。
+        """
         runtime = self._registry.get(task_id)
         if not runtime:
             return False
@@ -501,6 +508,7 @@ class AutomationScheduler:
                 self._task_contexts.pop(task_id, None)
             self._registry.unregister(task_id)
 
+            # 仅释放当前任务的并发槽位；禁止在此调用 scheduler.close() 误杀其他任务。
             self._semaphore.release()
 
             self.logger.info(f"任务 {task_id} 协程结束")
@@ -550,11 +558,11 @@ class AutomationScheduler:
         return False
 
     async def stop_task(self, task_id: str) -> bool:
-        """Stop task and release stream/window resources."""
+        """停止任务并释放串流/窗口资源。"""
         return await self.force_terminate_task(task_id)
 
     async def close_display_window(self, task_id: str) -> bool:
-        """Close SDL display only; keep stream and automation running."""
+        """仅关闭 SDL 显示；保持串流与自动化运行。"""
         context = self._task_contexts.get(task_id)
         if not context:
             return False
@@ -569,7 +577,7 @@ class AutomationScheduler:
         return True
 
     async def ensure_display_window(self, task_id: str) -> bool:
-        """Show existing SDL window or recreate if user closed it."""
+        """显示已有 SDL 窗口；用户已关闭则重建。"""
         context = self._task_contexts.get(task_id)
         if not context:
             self.logger.warning("ensure_display_window: no context for %s", task_id)
@@ -588,11 +596,11 @@ class AutomationScheduler:
         return ok
 
     async def reopen_display_window(self, task_id: str) -> bool:
-        """Alias for ensure_display_window (recreate when closed, skip when active)."""
+        """ensure_display_window 别名（关闭时重建，活动则跳过）。"""
         return await self.ensure_display_window(task_id)
 
     async def force_terminate_task(self, task_id: str) -> bool:
-        """Cancel task, destroy SDL window, and disconnect stream."""
+        """取消任务、销毁 SDL 窗口并断开串流。"""
         cancel_event = self._cancel_events.get(task_id)
         if cancel_event:
             cancel_event.set()
@@ -634,7 +642,12 @@ class AutomationScheduler:
             self._task_objects.pop(task_id, None)
 
     async def ensure_task_slot(self, task_id: str, relaunch: bool = False) -> bool:
-        """Release stale runtime state before (re)starting a task."""
+        """
+        （重新）启动任务前释放陈旧运行时状态。
+
+        relaunch=True 先终止旧协程，使复用平台 taskId 可安全重跑 Step1-3
+        且不泄漏窗口/串流资源。
+        """
         active = get_active_scheduler()
         if active and active is not self and task_id in active._running_tasks:
             if relaunch:
@@ -722,7 +735,7 @@ class AutomationScheduler:
         return self._registry.list_active_task_ids()
 
     async def handle_task_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Entry point for WS task_control messages."""
+        """WS task_control 消息入口。"""
         return await self._task_control.handle(data)
 
     async def stop_all_tasks(self):

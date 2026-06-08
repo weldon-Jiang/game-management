@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 
+/**
+ * 任务主状态枚举及合法状态迁移（pending→running→completed/failed/cancelled）。
+ */
 public enum TaskStatus {
 
     PENDING("pending", "待处理"),

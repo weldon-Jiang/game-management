@@ -9,6 +9,9 @@
 </template>
 
 <script setup>
+/**
+ * 串流会话阶段步骤条：streaming_session.phase → el-steps 活跃步骤索引。
+ */
 import { computed } from 'vue'
 
 const props = defineProps({

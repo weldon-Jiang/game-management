@@ -81,13 +81,20 @@ import {
   getProvisioningPhaseText
 } from '@/utils/constants'
 
+/**
+ * 任务详情页：单任务内各游戏账号的执行进度表。
+ * 展示开通阶段、自动化 phase、场次/金币/DR 及 skip 操作；计费相关字段来自后端 join 的游戏账号快照。
+ */
 defineProps({
   rows: { type: Array, default: () => [] },
+  /** 转会等非比赛模式可隐藏「本次场次」列 */
   showMatchProgress: { type: Boolean, default: true },
+  /** 历史 session 只读查看时不展示 skip 按钮 */
   readonly: { type: Boolean, default: false }
 })
 defineEmits(['skip'])
 
+/** 格式化账号开通/档案绑定进度；进行中阶段附带 step/total 供运维判断卡在哪一步。 */
 function formatProvisioningDisplay(row) {
   const phase = String(row.provisioningPhase || '').toLowerCase()
   const message = row.provisioningMessage || getProvisioningPhaseText(row.provisioningPhase)

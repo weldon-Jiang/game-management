@@ -1,4 +1,4 @@
-"""Console discovery + match (no WebRTC). Delegates to step2 match helpers until full migration."""
+"""主机发现与匹配（无 WebRTC）；完全迁移前委托 step2 匹配辅助函数。"""
 
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
@@ -21,7 +21,7 @@ async def resolve_console_target(
     check_cancel: Callable[[], bool],
     report_progress: Optional[Callable] = None,
 ) -> ConsoleResolveResult:
-    """Match one authorized family Xbox; does not open PlaySession/WebRTC."""
+    """匹配一台已授权的家庭 Xbox；不打开 PlaySession/WebRTC。"""
     from ..automation.step2_xbox_streaming import (
         _check_xbox_availability,
         _format_xbox_match_message,

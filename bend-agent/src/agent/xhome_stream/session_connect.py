@@ -1,4 +1,4 @@
-"""WebRTC stream establishment (PlaySession + SDP). Separated from discovery."""
+"""WebRTC 串流建立（PlaySession + SDP），与发现分离。"""
 
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -12,7 +12,7 @@ async def establish_webrtc_stream(
     check_cancel: Optional[Callable[[], bool]] = None,
     report_progress: Optional[Callable] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
-    """Open PlaySession and negotiate WebRTC on an already-matched console."""
+    """在已匹配主机上打开 PlaySession 并协商 WebRTC。"""
     from ..automation.step2_xbox_streaming import _connect_to_xbox
 
     logger = get_logger(f"xhome_connect_{context.task_id}")
@@ -33,7 +33,7 @@ async def reconnect_webrtc_stream(
     logger=None,
     stream_logger=None,
 ) -> bool:
-    """Reuse PlaySession / rebuild and re-negotiate SDP."""
+    """复用 PlaySession / 重建并重新协商 SDP。"""
     from ..automation.step2_xbox_streaming import reconnect_cloud_stream_session
 
     log = logger or get_logger(f"xhome_reconnect_{context.task_id}")

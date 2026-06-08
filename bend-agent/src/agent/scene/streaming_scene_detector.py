@@ -125,7 +125,7 @@ class StreamingSceneDetector:
     def _load_template_from_streaming_dat(
         self, scene_id: int, template_id: int
     ) -> Optional[np.ndarray]:
-        """Fallback to streaming/data/templates.dat when PNG is unavailable."""
+        """PNG 不可用时回退到 streaming/data/templates.dat。"""
         try:
             from ..vision.template_manager import StreamingTemplateManager
 
@@ -275,7 +275,7 @@ class StreamingSceneDetector:
             return self._recognize_all_scenes(frame, threshold)
 
     def _normalize_frame(self, frame: np.ndarray, scene_id: int) -> np.ndarray:
-        """Resize frame to schema scene size (templates are authored at 960x540)."""
+        """将帧缩放到 schema 场景尺寸（模板按 960×540 制作）。"""
         configs = self._scene_configs.get(scene_id)
         if not configs:
             return frame

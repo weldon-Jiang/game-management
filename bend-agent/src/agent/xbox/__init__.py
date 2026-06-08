@@ -1,6 +1,4 @@
-"""
-Xbox module for Bend Agent
-"""
+"""Xbox 串流与 WebRTC 模块。"""
 from .xbox_discovery import XboxDiscovery, xbox_discovery, XboxInfo
 from .stream_controller import XboxStreamController, xbox_stream_controller, StreamState, StreamConfig
 from .play_session import XboxPlaySessionManager, xbox_play_session_manager, PlaySession, PlaySessionConfig, SessionState, SDPConfiguration

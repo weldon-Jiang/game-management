@@ -124,7 +124,7 @@ class KeyboardMapper:
         self._on_window_close: Optional[Callable[[], None]] = None
 
     def set_window_close_handler(self, handler: Optional[Callable[[], None]]) -> None:
-        """Called when user clicks the SDL window close button (hide, not quit)."""
+        """用户点击 SDL 窗口关闭按钮时调用（隐藏，非退出进程）。"""
         self._on_window_close = handler
 
     def register_action_callback(self, callback: Callable[[KeyAction, bool], None]):
@@ -143,7 +143,7 @@ class KeyboardMapper:
 
         try:
             pygame.init()
-            # Reuse the SDL stream window if step3 already created one.
+            # 若 step3 已创建 SDL 串流窗口则复用
             if pygame.display.get_surface() is None:
                 pygame.display.set_mode((1, 1), pygame.NOFRAME)
         except Exception:
@@ -225,7 +225,7 @@ class KeyboardMapper:
             except asyncio.CancelledError:
                 pass
 
-        # Do not call pygame.display.quit(); it would destroy the SDL stream window.
+        # 勿调用 pygame.display.quit()，会销毁 SDL 串流窗口
         self.logger.info("键盘映射已停止")
 
     def map_key_to_action(self, key: str) -> Optional[KeyAction]:

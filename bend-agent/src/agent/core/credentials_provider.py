@@ -74,14 +74,14 @@ class CredentialsProvider:
         2. 开发环境下项目根目录下的 credentials 文件夹
         3. APPDATA/BendPlatform/Agent
         """
-        # Check if running from a frozen executable (PyInstaller)
+        # 是否 PyInstaller 打包运行
         if getattr(sys, 'frozen', False):
             exe_dir = os.path.dirname(sys.executable)
             config_dir = os.path.join(exe_dir, 'credentials')
             self.logger.info(f"Running as frozen executable, using credentials directory: {config_dir}")
             return config_dir
         
-        # Check if running from project directory (development)
+        # 开发模式：从项目目录定位
         current_dir = os.path.dirname(os.path.abspath(__file__))
         for _ in range(5):
             parent_dir = os.path.dirname(current_dir)
@@ -91,7 +91,7 @@ class CredentialsProvider:
                 return config_dir
             current_dir = parent_dir
         
-        # Fallback to APPDATA directory
+        # 兜底：APPDATA 目录
         fallback_dir = os.path.join(os.environ.get('APPDATA', ''), 'BendPlatform', 'Agent')
         self.logger.info(f"Using fallback credentials directory: {fallback_dir}")
         return fallback_dir

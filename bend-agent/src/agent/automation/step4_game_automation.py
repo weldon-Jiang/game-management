@@ -58,7 +58,7 @@ VALID_TASK_TYPES = frozenset({
     'weekend_league',
 })
 
-# expected_screen -> Streaming scene IDs (Xbox system UI 1-9, football UT menus 100+)
+# expected_screen -> Streaming 场景 ID（Xbox 系统 UI 1-9，足球 UT 菜单 100+）
 EXPECTED_SCREEN_SCENES: Dict[str, list] = {
     'MAIN_MENU': [127, 149, 147, 101],
     'MATCH_START': [168, 176],
@@ -127,7 +127,7 @@ def _resolve_template_dir() -> str:
 
 
 async def _validate_step4_templates(logger) -> Optional[str]:
-    """Return an error message when required templates are missing."""
+    """必需模板缺失时返回错误消息。"""
     from ..vision.template_manager import validate_templates
 
     template_dir = _resolve_template_dir()
@@ -168,7 +168,7 @@ async def _apply_fc_controller_actions(
     actions: list,
     logger,
 ) -> None:
-    """Apply controller actions returned by FC server."""
+    """应用 FC 服务器返回的手柄动作。"""
     protocol = getattr(context, '_controller_protocol', None)
     if not protocol or not actions:
         return
@@ -224,7 +224,7 @@ async def _apply_fc_controller_actions(
 
 
 async def _ensure_fc_scene_client(context: AgentTaskContext, logger):
-    """Create FC remote scene client when enabled in config."""
+    """配置启用时创建 FC 远程场景客户端。"""
     if getattr(context, '_fc_scene_client', None) is not None:
         return context._fc_scene_client
 
@@ -256,11 +256,10 @@ async def _match_expected_screen(
     timeout_sec: float = 25.0,
 ) -> bool:
     """
-    Wait until the expected FC/Xbox scene appears before continuing automation.
+    等待期望的 FC/Xbox 场景出现后再继续自动化。
 
-    The loop exits only on a positive scene match or timeout. A timeout is not a
-    task cancellation by itself; callers decide whether to retry, pause for
-    manual intervention, or skip the current account.
+    仅在场景匹配成功或超时时退出；超时本身不取消任务，由调用方决定重试、
+    暂停人工介入或跳过当前账号。
     """
     scene_ids = EXPECTED_SCREEN_SCENES.get(expected_screen)
     if not scene_ids:
@@ -319,9 +318,9 @@ def _normalize_game_action_type(game_action_type: Optional[str]) -> str:
 
 def _apply_task_type(context: AgentTaskContext, game_account: GameAccountInfo, logger) -> str:
     """
-    Apply platform game action type after login is confirmed (AGENTS R006/R007).
+    登录确认后应用平台 gameActionType（AGENTS R006/R007）。
 
-    Returns the normalized game_action_type string.
+    返回归一化后的 game_action_type 字符串。
     """
     game_action_type = _normalize_game_action_type(context.game_action_type)
     if game_action_type == 'auction_transfer':
@@ -340,7 +339,7 @@ def _apply_task_type(context: AgentTaskContext, game_account: GameAccountInfo, l
 
 
 def _resolve_billing_unit(game_action_type: str, completed_before: int) -> str:
-    """Resolve billable unit for the current Step4 action."""
+    """解析当前 Step4 动作的计费单元。"""
     action_type = _normalize_game_action_type(game_action_type)
     if action_type == 'auction_transfer':
         return 'transfer_round'
@@ -358,7 +357,7 @@ async def _report_billable_event(
     unit_index: int,
     logger,
 ) -> None:
-    """Report billable events without blocking Step4 execution on callback errors."""
+    """上报计费事件；回调失败不阻塞 Step4 执行。"""
     if platform_client is None:
         return
     reporter = getattr(platform_client, 'report_billing_event', None)
@@ -408,11 +407,10 @@ async def _pause_for_manual_fc_launch(
     stream_logger,
 ) -> bool:
     """
-    Pause Step4 for manual FC recovery and wait for platform resume.
+    暂停 Step4 供人工恢复 FC，并等待平台 resume。
 
-    This keeps the stream/window alive and marks the session paused so the user
-    can operate the Xbox window. It returns False only when the task is cancelled
-    while waiting.
+    保持串流/窗口不关闭，会话标记为 paused 以便用户操作 Xbox 窗口。
+    仅在等待期间任务被取消时返回 False。
     """
     from ..runtime.phase_fsm import SessionPhase
 
@@ -580,10 +578,10 @@ async def _report_step4_failure(
     logger,
 ) -> None:
     """
-    Report Step4 failure with either terminal or retryable session semantics.
+    上报 Step4 失败，区分终态或可重试会话语义。
 
-    keep_session_alive=True is used by the two-phase task: Step4 failure moves
-    the session to automation_failed while preserving stream/window resources.
+    keep_session_alive=True 用于两阶段任务：Step4 失败将会话置为 automation_failed，
+    同时保留串流/窗口资源。
     """
     if keep_session_alive:
         logger.error("%s (stream kept alive for retry)", error_msg)
@@ -612,7 +610,7 @@ async def _report_input_channel_event(
     phase: str,
     logger,
 ) -> None:
-    """Report input channel recovery without changing task terminal state."""
+    """上报 input 通道恢复，不改变任务终态。"""
     try:
         await report_progress(
             context.task_id,
@@ -747,7 +745,7 @@ async def step4_execute_gaming(
             global_scene_queue = asyncio.Queue(maxsize=5)
             global_cancel_event = asyncio.Event()
 
-            # Step4 owns these loops while automating; finally must stop all three to avoid orphan frame readers.
+            # Step4 自动化期间独占这些循环；finally 须停止三者，避免孤儿帧读取协程。
             capture_task = asyncio.create_task(
                 _capture_loop(context, global_frame_queue, global_cancel_event, logger)
             )

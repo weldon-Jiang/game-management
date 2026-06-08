@@ -294,6 +294,9 @@
 </template>
 
 <script setup>
+/**
+ * 商户用户管理：平台/商户管理员维护操作员账号、角色与启用状态。
+ */
 import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'

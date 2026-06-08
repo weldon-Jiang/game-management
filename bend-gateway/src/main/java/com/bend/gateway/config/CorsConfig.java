@@ -8,6 +8,9 @@ import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
 import java.util.Arrays;
 
+/**
+ * 全局 CORS 配置：允许前端跨域访问 Gateway（8060）上的 /api 与 /ws。
+ */
 @Configuration
 public class CorsConfig {
 

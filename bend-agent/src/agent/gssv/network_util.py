@@ -1,10 +1,10 @@
-"""Local network helpers — avoid scanning proxy/TUN fake-ip ranges."""
+"""本地网络辅助 — 避免扫描代理/TUN 假 IP 段。"""
 
 import ipaddress
 import socket
 from typing import List, Optional, Tuple
 
-# Clash/sing-box and similar proxies often use 198.18.0.0/15 for fake-ip.
+# Clash/sing-box 等代理常用 198.18.0.0/15 作为 fake-ip。
 BLOCKED_SCAN_NETWORKS = (
     ipaddress.ip_network("198.18.0.0/15"),
     ipaddress.ip_network("0.0.0.0/8"),
@@ -28,7 +28,7 @@ def is_private_lan_ip(ip: str) -> bool:
 
 def pick_local_lan_ip() -> Optional[str]:
     """
-    Prefer RFC1918 interface addresses; fall back to route probe only if private.
+    优先 RFC1918 网卡地址；仅当为私网时才回退到路由探测。
     """
     candidates: List[str] = []
 
@@ -72,7 +72,7 @@ def fit_display_size(
     max_h: int,
     margin: int = 48,
 ) -> Tuple[int, int]:
-    """Compute window client size that fits screen while preserving aspect ratio."""
+    """计算适配屏幕的窗口客户区尺寸，并保持宽高比。"""
     if video_w <= 0 or video_h <= 0:
         return max_w, max_h
 

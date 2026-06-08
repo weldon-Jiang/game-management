@@ -1,4 +1,4 @@
-"""Xbox xHome client device identity helpers."""
+"""Xbox xHome 客户端设备标识辅助函数。"""
 
 import json
 import platform
@@ -10,7 +10,7 @@ def build_x_ms_device_info(
     height: int = 1080,
     browser_version: str = "131.0.0.0",
 ) -> str:
-    """Build the X-MS-Device-Info header expected by xHome GSSV APIs."""
+    """构建 xHome GSSV API 所需的 X-MS-Device-Info 头。"""
     os_version = platform.version() or "10.0"
     payload: Dict[str, Any] = {
         "appInfo": {
@@ -44,7 +44,7 @@ def build_x_ms_device_info(
         },
     }
     return json.dumps(payload, separators=(",", ":"))
-"""X-MS-Device-Info header builder (XStreamingDesktop aligned)."""
+"""X-MS-Device-Info 头构建器（对齐 XStreamingDesktop）。"""
 
 import json
 import platform
@@ -57,7 +57,7 @@ def build_device_info(
     os_name: str = "windows",
     device_type: str = "desktop",
 ) -> str:
-    """Return JSON string for X-MS-Device-Info request header."""
+    """返回 X-MS-Device-Info 请求头的 JSON 字符串。"""
     info: Dict[str, Any] = {
         "appInfo": {
             "env": {

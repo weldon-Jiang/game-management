@@ -1,9 +1,8 @@
 """
-Windows / PowerShell UTF-8 bootstrap for console and redirected logs.
+Windows / PowerShell UTF-8 引导（控制台与重定向日志）。
 
-Call ensure_utf8_stdio() as early as possible in any entry script (main.py,
-run_live_task.py, etc.) so Chinese log messages render correctly in the
-terminal and when output is redirected to a file.
+在入口脚本（main.py、run_live_task.py 等）尽可能早调用 ensure_utf8_stdio()，
+确保中文日志在终端及重定向到文件时正确显示。
 """
 from __future__ import annotations
 
@@ -27,9 +26,9 @@ def _configure_windows_console() -> None:
 
 def ensure_utf8_stdio(*, force: bool = False) -> None:
     """
-    Force UTF-8 on stdout/stderr and align the Windows console code page.
+    强制 stdout/stderr 使用 UTF-8，并同步 Windows 控制台代码页。
 
-    Safe to call multiple times; subsequent calls are no-ops unless force=True.
+    可多次调用；除非 force=True，后续调用为 no-op。
     """
     if getattr(ensure_utf8_stdio, "_done", False) and not force:
         return

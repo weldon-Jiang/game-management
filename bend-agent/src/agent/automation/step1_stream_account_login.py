@@ -553,11 +553,11 @@ def _get_auth_error_suggestion(error_code: str, auth_type: str) -> str:
       会被自动处理（自动回退到设备码认证），不会上报到这里
     - 这里的错误码表示：所有自动恢复机制都失败后的最终错误
     
-    Args:
+    参数:
         error_code: 错误码
         auth_type: 认证类型 ("Microsoft" 或 "Xbox Live")
         
-    Returns:
+    返回:
         解决方案提示字符串
     """
     suggestions = {

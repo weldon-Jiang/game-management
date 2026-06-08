@@ -4,6 +4,9 @@ import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 import java.time.LocalDateTime;
 
+/**
+ * 商户 VIP 分组：各订阅类型的原价/折扣价（分）与升级门槛。
+ */
 @Data
 @TableName("merchant_group")
 public class MerchantGroup {
