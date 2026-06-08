@@ -126,10 +126,11 @@
       :close-on-click-modal="false"
     >
       <el-form
+        v-if="dialogVisible"
         ref="formRef"
         :model="formData"
         :rules="formRules"
-        label-width="110px"
+        label-width="auto"
         class="dialog-form"
       >
         <el-form-item v-if="authStore.isPlatformAdmin" label="所属商户" prop="merchantId">
@@ -212,7 +213,8 @@
           <div class="form-hint">切换账号时 Agent 会按游戏昵称在「您是谁」列表中自动定位</div>
         </el-form-item>
         <el-form-item label="每日最大场次" prop="dailyMatchLimit">
-          <el-input-number v-model="formData.dailyMatchLimit" :min="0" :max="99" style="width: 100%" />
+          <el-input-number v-model="formData.dailyMatchLimit" :min="0" :max="3" style="width: 100%" />
+          <div class="form-hint">取值 0~3，默认每天最多 3 场</div>
         </el-form-item>
         <el-form-item label="自动化间隔(小时)" prop="cooldownHours">
           <el-input-number v-model="formData.cooldownHours" :min="23" :max="720" style="width: 100%" />
@@ -359,6 +361,9 @@ const importMerchantId = ref('')
 const passwordVisible = ref(false)  // 是否显示真实密码
 const passwordLoaded = ref(false)   // 密码是否已加载
 
+/** 每日最大比赛场次上限（与后端一致） */
+const MAX_DAILY_MATCH_LIMIT = 3
+
 /**
  * 表单数据
  */
@@ -388,6 +393,22 @@ const formRules = {
   email: [
     { required: true, message: '请输入邮箱', trigger: 'blur' },
     { type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' }
+  ],
+  dailyMatchLimit: [
+    {
+      validator: (_rule, value, callback) => {
+        if (value == null || value === '') {
+          callback(new Error('请设置每日最大场次'))
+          return
+        }
+        if (value < 0 || value > MAX_DAILY_MATCH_LIMIT) {
+          callback(new Error(`每日最大场次不能超过 ${MAX_DAILY_MATCH_LIMIT}`))
+          return
+        }
+        callback()
+      },
+      trigger: 'change'
+    }
   ]
 }
 
@@ -452,7 +473,7 @@ const showEditDialog = async (row) => {
   formData.platform = row.platform || 'xbox'
   formData.positionIndex = row.positionIndex ?? -1
   formData.profileBound = !!row.profileBound
-  formData.dailyMatchLimit = row.dailyMatchLimit ?? 3
+  formData.dailyMatchLimit = Math.min(MAX_DAILY_MATCH_LIMIT, Math.max(0, row.dailyMatchLimit ?? 3))
   formData.cooldownHours = row.cooldownHours ?? 23
   passwordVisible.value = false
   passwordLoaded.value = false
@@ -644,12 +665,18 @@ const handleImport = async () => {
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim())
       if (values.length >= 2 && values[emailIdx] && values[passwordIdx]) {
+        const dailyLimitRaw = dailyLimitIdx >= 0 && values[dailyLimitIdx] !== '' ? Number(values[dailyLimitIdx]) : undefined
+        if (dailyLimitRaw != null && !Number.isNaN(dailyLimitRaw)
+            && (dailyLimitRaw < 0 || dailyLimitRaw > MAX_DAILY_MATCH_LIMIT)) {
+          ElMessage.warning(`第 ${i + 1} 行：每日最大场次必须在 0~${MAX_DAILY_MATCH_LIMIT} 之间`)
+          return
+        }
         accounts.push({
           gameName: gameNameIdx >= 0 ? (values[gameNameIdx] || '') : '',
           email: values[emailIdx],
           password: values[passwordIdx] || '',
           platform: platformIdx >= 0 ? (values[platformIdx] || 'xbox') : 'xbox',
-          dailyMatchLimit: dailyLimitIdx >= 0 && values[dailyLimitIdx] ? Number(values[dailyLimitIdx]) : undefined,
+          dailyMatchLimit: dailyLimitRaw,
           cooldownHours: cooldownIdx >= 0 && values[cooldownIdx] ? Number(values[cooldownIdx]) : undefined
         })
       }

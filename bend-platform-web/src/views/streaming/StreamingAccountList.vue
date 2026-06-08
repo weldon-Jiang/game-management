@@ -468,6 +468,9 @@ const goTaskMonitor = (row) => {
   if (row.agentId) {
     query.agentId = row.agentId
   }
+  if (row.merchantId) {
+    query.merchantId = row.merchantId
+  }
   router.push({ name: 'Tasks', query })
 }
 

@@ -270,7 +270,8 @@ public interface ResultCode {
         UNLOCK_FAILED(18007, "解锁失败"),
         ALREADY_LOCKED(18008, "已被其他主机锁定"),
         BIND_STREAMING_ACCOUNT(18009, "已关联流媒体账号"),
-        PLATFORM_MISMATCH(18010, "游戏账号平台与流媒体账号不一致，无法关联");
+        PLATFORM_MISMATCH(18010, "游戏账号平台与流媒体账号不一致，无法关联"),
+        DAILY_MATCH_LIMIT_INVALID(18011, "每日最大场次不能超过3");
 
         private final int code;
         private final String message;

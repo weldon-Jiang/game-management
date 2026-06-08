@@ -481,6 +481,37 @@ const loadOnlineAgents = async () => {
   }
 }
 
+const resolveMerchantFromRoute = async () => {
+  if (!authStore.isPlatformAdmin || filterMerchantId.value) {
+    return
+  }
+  if (route.query.merchantId) {
+    filterMerchantId.value = route.query.merchantId
+    return
+  }
+  if (route.query.agentId) {
+    try {
+      const res = await agentApi.getById(route.query.agentId)
+      if ((res.code === 0 || res.code === 200) && res.data?.merchantId) {
+        filterMerchantId.value = res.data.merchantId
+        return
+      }
+    } catch (error) {
+      console.error('Failed to resolve agent merchant:', error)
+    }
+  }
+  if (route.query.streamingAccountId) {
+    try {
+      const res = await streamingApi.getById(route.query.streamingAccountId)
+      if ((res.code === 0 || res.code === 200) && res.data?.merchantId) {
+        filterMerchantId.value = res.data.merchantId
+      }
+    } catch (error) {
+      console.error('Failed to resolve streaming account merchant:', error)
+    }
+  }
+}
+
 const initFromRoute = async () => {
   // 支持从 Agent/串流账号页面跳转时带入筛选条件，减少用户手动定位任务。
   if (route.query.status) {
@@ -489,25 +520,18 @@ const initFromRoute = async () => {
   if (route.query.streamingAccountId) {
     filterStreamingAccountId.value = route.query.streamingAccountId
   }
-
   if (route.query.agentId) {
     filterAgentId.value = route.query.agentId
-    if (authStore.isPlatformAdmin) {
-      try {
-        // 平台管理员从 agentId 反查 merchantId 后，才能加载该商户下的筛选项。
-        const res = await agentApi.getById(route.query.agentId)
-        if ((res.code === 0 || res.code === 200) && res.data?.merchantId) {
-          filterMerchantId.value = res.data.merchantId
-        }
-      } catch (error) {
-        console.error('Failed to resolve agent merchant:', error)
-      }
-    }
   }
+  await resolveMerchantFromRoute()
 }
 
 const applyDefaultAgentFilter = () => {
   if (filterAgentId.value) {
+    return
+  }
+  // 从 Agent/串流页跳转时只使用路由带入的筛选，不自动套用默认 Agent。
+  if (route.query.agentId || route.query.streamingAccountId) {
     return
   }
   const saved = localStorage.getItem(TASK_LIST_AGENT_KEY)

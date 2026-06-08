@@ -60,6 +60,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GameAccountServiceImpl implements GameAccountService {
 
+    /** 每日最大比赛场次上限（与库表默认值及业务规则一致） */
+    private static final int MAX_DAILY_MATCH_LIMIT = 3;
+
     private final GameAccountMapper gameAccountMapper;
     private final StreamingAccountMapper streamingAccountMapper;
     private final MerchantMapper merchantMapper;
@@ -89,7 +92,7 @@ public class GameAccountServiceImpl implements GameAccountService {
         entity.setGameName(normalizeOptionalGameName(account.getGameName()));
         entity.setEmail(account.getEmail());
         entity.setPlatform(accountPlatform);
-        entity.setDailyMatchLimit(account.getDailyMatchLimit() != null ? account.getDailyMatchLimit() : 3);
+        entity.setDailyMatchLimit(normalizeDailyMatchLimit(account.getDailyMatchLimit()));
         entity.setCooldownHours(normalizeCooldownHours(account.getCooldownHours()));
         entity.setTotalCoins(0);
         entity.setTodayCoins(0);
@@ -138,6 +141,12 @@ public class GameAccountServiceImpl implements GameAccountService {
                 gamertagSet.add(dto.getGameName());
             }
 
+            if (dto.getDailyMatchLimit() != null
+                    && (dto.getDailyMatchLimit() < 0 || dto.getDailyMatchLimit() > MAX_DAILY_MATCH_LIMIT)) {
+                errors.add(String.format("第%d行: 每日最大场次必须在0-%d之间", rowNum, MAX_DAILY_MATCH_LIMIT));
+                continue;
+            }
+
             if (dto.getPlatform() != null && !dto.getPlatform().isBlank()
                     && PlatformType.fromCode(dto.getPlatform()) == null) {
                 errors.add(String.format("第%d行: 平台类型无效，仅支持 xbox、playstation", rowNum));
@@ -159,7 +168,7 @@ public class GameAccountServiceImpl implements GameAccountService {
                 entity.setGameName(normalizeOptionalGameName(dto.getGameName()));
                 entity.setEmail(dto.getEmail());
                 entity.setPlatform(PlatformTypeUtil.normalizeOrDefault(dto.getPlatform()));
-                entity.setDailyMatchLimit(dto.getDailyMatchLimit() != null ? dto.getDailyMatchLimit() : 3);
+                entity.setDailyMatchLimit(normalizeDailyMatchLimit(dto.getDailyMatchLimit()));
                 entity.setCooldownHours(normalizeCooldownHours(dto.getCooldownHours()));
                 entity.setTotalCoins(0);
                 entity.setTodayCoins(0);
@@ -317,7 +326,7 @@ public class GameAccountServiceImpl implements GameAccountService {
             existing.setProfileBound(account.getProfileBound());
         }
         if (account.getDailyMatchLimit() != null) {
-            existing.setDailyMatchLimit(account.getDailyMatchLimit());
+            existing.setDailyMatchLimit(normalizeDailyMatchLimit(account.getDailyMatchLimit()));
         }
         if (account.getCooldownHours() != null) {
             existing.setCooldownHours(normalizeCooldownHours(account.getCooldownHours()));
@@ -513,6 +522,19 @@ public class GameAccountServiceImpl implements GameAccountService {
 
     private Integer normalizeCooldownHours(Integer value) {
         return value == null || value < 23 ? 23 : value;
+    }
+
+    /**
+     * 校验并规范化每日最大场次：默认 3，合法范围 0~{@link #MAX_DAILY_MATCH_LIMIT}。
+     */
+    private Integer normalizeDailyMatchLimit(Integer value) {
+        if (value == null) {
+            return MAX_DAILY_MATCH_LIMIT;
+        }
+        if (value < 0 || value > MAX_DAILY_MATCH_LIMIT) {
+            throw new BusinessException(ResultCode.GameAccount.DAILY_MATCH_LIMIT_INVALID);
+        }
+        return value;
     }
 
     @Override

@@ -563,6 +563,56 @@
   color: var(--text-secondary);
 }
 
+/*
+ * 弹框内表单：Grid 标签列 max-content 自适应，列间距 12px，禁止标签换行。
+ * 不用固定 180px（短标签左侧空太大）；不用 label-width="auto"（弹框隐藏时测宽为 0）。
+ */
+.el-dialog .el-form:not(.el-form--inline) {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 18px;
+  align-items: start;
+}
+
+.el-dialog .el-form:not(.el-form--inline) .el-form-item {
+  display: contents;
+}
+
+.el-dialog .el-form:not(.el-form--inline) .el-form-item__label-wrap {
+  grid-column: 1;
+  justify-self: end;
+  width: auto !important;
+  max-width: none !important;
+  flex: none !important;
+  margin: 0 !important;
+}
+
+.el-dialog .el-form:not(.el-form--inline) .el-form-item__label {
+  width: auto !important;
+  min-width: auto !important;
+  max-width: none !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  height: auto !important;
+  line-height: 32px !important;
+  padding-right: 0 !important;
+  text-align: right;
+  justify-content: flex-end;
+}
+
+.el-dialog .el-form:not(.el-form--inline) .el-form-item__content {
+  grid-column: 2;
+  flex: none;
+  min-width: 0;
+  margin-left: 0 !important;
+}
+
+/* 分隔线、说明块等非表单项占满整行 */
+.el-dialog .el-form:not(.el-form--inline) > :not(.el-form-item) {
+  grid-column: 1 / -1;
+}
+
 .el-form-item__error {
   color: var(--danger);
 }

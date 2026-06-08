@@ -116,7 +116,7 @@ public class GameAccount {
     private Boolean profileBound;
 
     /**
-     * 每日比赛限制场次
+     * 每日比赛限制场次（0~3，默认 3）
      * 每天最多进行的游戏场次
      */
     private Integer dailyMatchLimit;

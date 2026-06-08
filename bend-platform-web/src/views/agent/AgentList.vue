@@ -124,7 +124,7 @@
     </div>
 
     <el-dialog v-model="nameDialogVisible" title="编辑Agent名称" width="480px" :close-on-click-modal="false">
-      <el-form label-width="90px">
+      <el-form v-if="nameDialogVisible" label-width="auto" class="dialog-form">
         <el-form-item label="Agent ID">
           <span class="text-muted">{{ editingAgent?.agentId }}</span>
         </el-form-item>
@@ -178,7 +178,11 @@ const pagination = reactive({
 })
 
 const goAgentTasks = (agent) => {
-  router.push({ name: 'Tasks', query: { agentId: agent.agentId } })
+  const query = { agentId: agent.agentId }
+  if (agent.merchantId) {
+    query.merchantId = agent.merchantId
+  }
+  router.push({ name: 'Tasks', query })
 }
 
 const showNameDialog = (agent) => {
