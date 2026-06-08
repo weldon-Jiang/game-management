@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS `task` (
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
+    `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
     PRIMARY KEY (`id`),
     KEY `idx_target_agent` (`target_agent_id`),
     KEY `idx_streaming_account` (`streaming_account_id`),

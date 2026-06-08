@@ -39,10 +39,9 @@ if ($Services.Count -gt 0 -and -not $PSBoundParameters.ContainsKey('Profile')) {
     $Profile = 'full'
 }
 
-$BuildFlag = if ($NoBuild) { @() } else { @('--build') }
 $ServiceDesc = if ($Services.Count -gt 0) { ($Services -join ', ') } else { 'all' }
 $BuildDesc = if ($NoBuild) { 'no-build' } else { 'build' }
 
 Write-Host "[$Tag] env-file=$EnvFile, profile=$Profile, services=$ServiceDesc, mode=$BuildDesc starting..." -ForegroundColor $Color
-docker compose --env-file $EnvFile -f docker-compose.yml --profile $Profile up -d @BuildFlag @Services
+& (Join-Path $PSScriptRoot 'compose-up.ps1') -EnvFile $EnvFile -Profile $Profile -Services $Services -NoBuild:$NoBuild
 docker compose --env-file $EnvFile -f docker-compose.yml ps

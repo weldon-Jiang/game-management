@@ -19,6 +19,7 @@ public class BendGatewayProperties {
     private RateLimit rateLimit = new RateLimit();
     private IpFilter ipFilter = new IpFilter();
     private CircuitBreaker circuitBreaker = new CircuitBreaker();
+    private Cors cors = new Cors();
 
     @Data
     public static class RateLimit {
@@ -50,5 +51,13 @@ public class BendGatewayProperties {
     @Data
     public static class CircuitBreaker {
         private boolean enabled = true;
+    }
+
+    /** 网关 CORS：生产环境应配置具体域名白名单。 */
+    @Data
+    public static class Cors {
+        private List<String> allowedOriginPatterns = new ArrayList<>(List.of("*"));
+        private boolean allowCredentials = true;
+        private long maxAge = 3600L;
     }
 }

@@ -41,7 +41,7 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
         }
 
         String path = exchange.getRequest().getURI().getPath();
-        String clientId = getClientId(exchange.getRequest());
+        String clientId = getClientId(exchange.getRequest(), path);
 
         BendGatewayProperties.PathLimit pathLimit = findPathLimit(path, rateLimit);
         int qps = pathLimit != null ? pathLimit.getQps() : rateLimit.getDefaultLimit().getQps();
@@ -73,7 +73,40 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
                 });
     }
 
-    private String getClientId(ServerHttpRequest request) {
+    /**
+     * Agent 相关路径优先按 X-Agent-Id（或 WS 路径中的 agentId）限流，避免 NAT 共享 IP 误伤。
+     */
+    private String getClientId(ServerHttpRequest request, String path) {
+        if (isAgentScopedPath(path)) {
+            String agentId = request.getHeaders().getFirst("X-Agent-Id");
+            if (agentId == null || agentId.isBlank()) {
+                agentId = extractAgentIdFromWsPath(path);
+            }
+            if (agentId != null && !agentId.isBlank()) {
+                return "agent:" + agentId;
+            }
+        }
+        return getClientIp(request);
+    }
+
+    private boolean isAgentScopedPath(String path) {
+        return path.startsWith("/api/agents/")
+                || path.startsWith("/api/agent-callback/")
+                || path.startsWith("/api/v1/agent-callback/")
+                || path.startsWith("/ws/agent/");
+    }
+
+    private String extractAgentIdFromWsPath(String path) {
+        String prefix = "/ws/agent/";
+        if (!path.startsWith(prefix)) {
+            return null;
+        }
+        String remainder = path.substring(prefix.length());
+        int slash = remainder.indexOf('/');
+        return slash >= 0 ? remainder.substring(0, slash) : remainder;
+    }
+
+    private String getClientIp(ServerHttpRequest request) {
         String xForwardedFor = request.getHeaders().getFirst("X-Forwarded-For");
         if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
             return xForwardedFor.split(",")[0].trim();
@@ -84,7 +117,9 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
             return xRealIp;
         }
 
-        return request.getRemoteAddress() != null ? request.getRemoteAddress().getAddress().getHostAddress() : "unknown";
+        return request.getRemoteAddress() != null
+                ? request.getRemoteAddress().getAddress().getHostAddress()
+                : "unknown";
     }
 
     private BendGatewayProperties.PathLimit findPathLimit(String path, BendGatewayProperties.RateLimit rateLimit) {

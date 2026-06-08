@@ -9,7 +9,7 @@ import com.bend.platform.service.TaskService;
 import com.bend.platform.enums.GameActionType;
 import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.util.UserContext;
-import com.bend.platform.websocket.WebSocketMessageService;
+import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -51,7 +51,6 @@ public class TaskController {
 
     private final TaskService taskService;
     private final TaskGameAccountStatusService statusService;
-    private final WebSocketMessageService messageService;
 
     /**
      * 创建任务
@@ -133,7 +132,7 @@ public class TaskController {
      */
     @PostMapping("/{id}/assign/{agentId}")
     public ApiResponse<Task> assign(@PathVariable String id, @PathVariable String agentId) {
-        if (!messageService.isAgentOnline(agentId)) {
+        if (!AgentWebSocketEndpoint.isAgentOnline(agentId)) {
             return ApiResponse.error(400, "Agent不在线");
         }
         Task task = taskService.assignToAgent(id, agentId);
@@ -183,18 +182,6 @@ public class TaskController {
     }
 
     /**
-     * 取消任务
-     *
-     * @param id 任务ID
-     * @return 任务信息
-     */
-    @PostMapping("/{id}/cancel")
-    public ApiResponse<Task> cancel(@PathVariable String id) {
-        Task task = taskService.cancel(id);
-        return ApiResponse.success("取消成功", task);
-    }
-
-    /**
      * 重试任务
      *
      * @param id 任务ID
@@ -204,72 +191,6 @@ public class TaskController {
     public ApiResponse<Task> retry(@PathVariable String id) {
         Task task = taskService.retry(id);
         return ApiResponse.success("重试成功", task);
-    }
-
-    /**
-     * 暂停任务
-     *
-     * @param id 任务ID
-     * @return 任务信息
-     */
-    @PostMapping("/{id}/pause")
-    public ApiResponse<Task> pause(@PathVariable String id) {
-        log.info("暂停任务 - TaskID: {}", id);
-        Task task = taskService.findById(id);
-        if (task == null) {
-            return ApiResponse.error(404, "任务不存在");
-        }
-
-        taskService.pause(id);
-
-        messageService.sendToAgent(task.getTargetAgentId(), "pause", Map.of("taskId", id));
-
-        task = taskService.findById(id);
-        return ApiResponse.success("任务已暂停", task);
-    }
-
-    /**
-     * 恢复任务
-     *
-     * @param id 任务ID
-     * @return 任务信息
-     */
-    @PostMapping("/{id}/resume")
-    public ApiResponse<Task> resume(@PathVariable String id) {
-        log.info("恢复任务 - TaskID: {}", id);
-        Task task = taskService.findById(id);
-        if (task == null) {
-            return ApiResponse.error(404, "任务不存在");
-        }
-
-        taskService.resume(id);
-
-        messageService.sendToAgent(task.getTargetAgentId(), "resume", Map.of("taskId", id));
-
-        task = taskService.findById(id);
-        return ApiResponse.success("任务已恢复", task);
-    }
-
-    /**
-     * 停止任务
-     *
-     * @param id 任务ID
-     * @return 任务信息
-     */
-    @PostMapping("/{id}/stop")
-    public ApiResponse<Task> stop(@PathVariable String id) {
-        log.info("停止任务 - TaskID: {}", id);
-        Task task = taskService.findById(id);
-        if (task == null) {
-            return ApiResponse.error(404, "任务不存在");
-        }
-
-        taskService.stop(id);
-
-        messageService.sendToAgent(task.getTargetAgentId(), "stop", Map.of("taskId", id));
-
-        task = taskService.findById(id);
-        return ApiResponse.success("任务已停止", task);
     }
 
     /**
@@ -325,47 +246,4 @@ public class TaskController {
         return ApiResponse.success(statuses);
     }
 
-    /**
-     * 显示任务窗口
-     *
-     * @param id 任务ID
-     * @return 操作结果
-     */
-    @PostMapping("/{id}/window/show")
-    public ApiResponse<Void> showWindow(@PathVariable String id) {
-        log.info("显示任务窗口 - TaskID: {}", id);
-        Task task = taskService.findById(id);
-        if (task == null) {
-            return ApiResponse.error(404, "任务不存在");
-        }
-
-        if (task.getTargetAgentId() == null) {
-            return ApiResponse.error(400, "任务未分配Agent");
-        }
-
-        messageService.sendToAgent(task.getTargetAgentId(), "window_show", Map.of("taskId", id));
-        return ApiResponse.success("窗口显示命令已发送", null);
-    }
-
-    /**
-     * 隐藏任务窗口
-     *
-     * @param id 任务ID
-     * @return 操作结果
-     */
-    @PostMapping("/{id}/window/hide")
-    public ApiResponse<Void> hideWindow(@PathVariable String id) {
-        log.info("隐藏任务窗口 - TaskID: {}", id);
-        Task task = taskService.findById(id);
-        if (task == null) {
-            return ApiResponse.error(404, "任务不存在");
-        }
-
-        if (task.getTargetAgentId() == null) {
-            return ApiResponse.error(400, "任务未分配Agent");
-        }
-
-        messageService.sendToAgent(task.getTargetAgentId(), "window_hide", Map.of("taskId", id));
-        return ApiResponse.success("窗口隐藏命令已发送", null);
-    }
 }

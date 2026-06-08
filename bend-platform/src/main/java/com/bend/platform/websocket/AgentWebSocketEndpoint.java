@@ -5,6 +5,7 @@ import com.bend.platform.util.AgentAuthUtils;
 import com.bend.platform.entity.AgentInstance;
 import com.bend.platform.entity.AgentVersion;
 import com.bend.platform.entity.XboxHost;
+import com.bend.platform.service.AgentDisconnectGraceService;
 import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.service.TaskService;
@@ -69,6 +70,27 @@ public class AgentWebSocketEndpoint {
         }
     }
 
+    private static long getWsMaxIdleTimeoutMs() {
+        if (applicationContext == null) {
+            return 180_000L;
+        }
+        Long timeout = applicationContext.getEnvironment()
+                .getProperty("agent.ws_max_idle_timeout_ms", Long.class, 180_000L);
+        return timeout != null ? timeout : 180_000L;
+    }
+
+    private static AgentDisconnectGraceService getDisconnectGraceService() {
+        if (applicationContext == null) {
+            return null;
+        }
+        try {
+            return applicationContext.getBean(AgentDisconnectGraceService.class);
+        } catch (Exception e) {
+            log.warn("AgentDisconnectGraceService 未就绪", e);
+            return null;
+        }
+    }
+
     @OnOpen
     public void onOpen(Session session, @PathParam("agentId") String agentId) {
         log.info("Agent WebSocket连接请求 - AgentID: {}, SessionID: {}", agentId, session.getId());
@@ -101,11 +123,16 @@ public class AgentWebSocketEndpoint {
         AGENT_SESSIONS.put(agentId, session);
         AGENT_RECONNECT_COUNT.remove(agentId);
 
+        AgentDisconnectGraceService graceService = getDisconnectGraceService();
+        if (graceService != null) {
+            graceService.clearOnWsReconnect(agentId);
+        }
+
         if (agentInstanceService != null) {
             agentInstanceService.updateHeartbeat(agentId, "online", null, null, null);
         }
 
-        session.setMaxIdleTimeout(120000);
+        session.setMaxIdleTimeout(getWsMaxIdleTimeoutMs());
 
         Map<String, Object> connectedData = new HashMap<>();
         connectedData.put("agentId", agentId);
@@ -117,14 +144,6 @@ public class AgentWebSocketEndpoint {
         adminEventData.put("agentId", agentId);
         adminEventData.put("event", "online");
         broadcastToAdmins("agent_online", adminEventData);
-
-        if (taskService != null) {
-            try {
-                taskService.cleanupIncompleteTasksAndRestoreAccounts(agentId);
-            } catch (Exception e) {
-                log.error("Agent上线时清理未完成任务失败 - AgentID: {}", agentId, e);
-            }
-        }
 
         log.info("Agent连接成功 - AgentID: {}, 当前连接数: {}", agentId, AGENT_SESSIONS.size());
     }
@@ -187,28 +206,16 @@ public class AgentWebSocketEndpoint {
             return;
         }
 
-        // 清理该Agent关联的流媒体账号
-        try {
-            if (streamingAccountService != null) {
-                streamingAccountService.clearAgentBindingByAgentId(agentId);
-            }
-        } catch (Exception e) {
-            log.error("清理流媒体账号Agent绑定失败 - AgentID: {}", agentId, e);
-        }
-
-        // 清理该Agent关联的未完成任务
-        try {
-            if (taskService != null) {
-                taskService.cleanupIncompleteTasksAndRestoreAccounts(agentId);
-            }
-        } catch (Exception e) {
-            log.error("清理未完成任务失败 - AgentID: {}", agentId, e);
+        // 进入断线宽限期：闪断不立即清理任务，由 AgentDisconnectGraceChecker 在超时后处理
+        AgentDisconnectGraceService graceService = getDisconnectGraceService();
+        if (graceService != null) {
+            graceService.markWsDisconnected(agentId);
         }
 
         Map<String, Object> adminEventData = new HashMap<>();
         adminEventData.put("agentId", agentId);
-        adminEventData.put("event", "offline");
-        broadcastToAdmins("agent_offline", adminEventData);
+        adminEventData.put("event", "reconnecting");
+        broadcastToAdmins("agent_reconnecting", adminEventData);
     }
 
     @OnError

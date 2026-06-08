@@ -43,6 +43,7 @@ public class AutomationServiceImpl implements AutomationService {
     private final AutomationUsageService automationUsageService;
     private final TaskExecutorService taskExecutorService;
     private final AgentLoadControlService loadControlService;
+    private final TaskWsDispatchService taskWsDispatchService;
 
     /**
      * 批量启动自动化：逐流媒体账号校验 → 扣点 → 创建 Task → executeTaskAsync。
@@ -266,7 +267,8 @@ public class AutomationServiceImpl implements AutomationService {
                 gameAccountService.updateAgentId(ga.getId(), agentId);
             }
 
-            taskExecutorService.executeTaskAsync(created);
+            final Task asyncTask = created;
+            taskWsDispatchService.dispatchAfterCommit(() -> taskExecutorService.executeTaskAsync(asyncTask));
 
             Map<String, Object> result = new HashMap<>();
             result.put("streamingAccountId", streamingAccountId);

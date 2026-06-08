@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 from ..auth.api import AuthService, StreamingCredentials
-from ..core.logger import get_logger
+from ..core.task_logger import get_task_logger
 from ..discovery.api import DiscoveryService
 from ..discovery.models import ConsoleTarget
 from ..runtime.phase_fsm import SessionPhase
@@ -30,7 +30,7 @@ class StreamingSession:
 
     def __init__(self, task_id: str):
         self.task_id = task_id
-        self.logger = get_logger(f"streaming_session_{task_id}")
+        self.task_logger = get_task_logger(task_id)
         self._auth = AuthService()
         self._discovery = DiscoveryService()
         self._stream = XHomeStreamService()
@@ -133,7 +133,7 @@ class StreamingSession:
                 message="SESSION_READY",
             )
         except Exception as exc:
-            self.logger.error("Session open failed: %s", exc, exc_info=True)
+            self.task_logger.error("Session open failed: %s", exc, exc_info=True)
             await self._close_partial_media()
             await self._emit_phase(SessionPhase.FAILED, str(exc))
             return SessionOpenResult(
@@ -183,4 +183,4 @@ class StreamingSession:
                 await self._stream.close_context(self._stream_context)
                 self._stream_context = None
         except Exception as cleanup_exc:
-            self.logger.warning("Partial session cleanup failed: %s", cleanup_exc)
+            self.task_logger.warning("Partial session cleanup failed: %s", cleanup_exc)

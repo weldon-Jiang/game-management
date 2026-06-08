@@ -11,6 +11,11 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+/**
+ * @deprecated 请使用分阶段入口：{@code POST /api/streaming-accounts/{id}/tasks/start-streaming}
+ * 与 {@code POST /api/tasks/{taskId}/start-automation}。
+ */
+@Deprecated
 @Slf4j
 @RestController
 @RequestMapping("/api/automation")
@@ -19,6 +24,10 @@ public class StartAutomationController {
 
     private final AutomationService automationService;
 
+    /**
+     * @deprecated 一步式启动已废弃，保留兼容旧版 StreamingAccountList。
+     */
+    @Deprecated
     @PostMapping("/start")
     public ApiResponse<Map<String, Object>> startAutomation(@Valid @RequestBody StartAutomationRequest request) {
         String userId = UserContext.getUserId();

@@ -36,7 +36,7 @@ import asyncio
 import sys
 from typing import Callable, Optional, Any
 
-from ..core.logger import get_logger
+from ..core.task_logger import get_task_logger
 from ..core.account_logger import get_stream_logger
 from ..task.task_context import AgentTaskContext, Step3Result, TaskStepStatus
 
@@ -68,9 +68,9 @@ async def step3_streaming_init(
     返回：
     - Step3Result: 包含初始化结果的Step3Result
     """
-    logger = get_logger(f'step3_init_{context.task_id}')
+    task_logger = get_task_logger(context.task_id)
     stream_logger = get_stream_logger(context.streaming_account_email)
-    logger.info("=== 步骤三：开始串流环境初始化 ===")
+    task_logger.info("=== 步骤三：开始串流环境初始化 ===")
     stream_logger.info("=== 开始串流环境初始化 ===")
 
     context.update_step_status("step3", TaskStepStatus.RUNNING, "正在初始化串流环境...")
@@ -78,7 +78,7 @@ async def step3_streaming_init(
 
     try:
         if check_cancel():
-            logger.info("任务被取消，步骤三终止")
+            task_logger.info("任务被取消，步骤三终止")
             context.update_step_status("step3", TaskStepStatus.SKIPPED, "任务被取消")
             return Step3Result(success=False, error_code="CANCELLED", message="任务被取消")
 
@@ -86,10 +86,10 @@ async def step3_streaming_init(
         await report_progress(context.task_id, "STEP3", "RUNNING", "正在初始化串流窗口...")
         stream_logger.info("正在初始化串流窗口...")
 
-        window = await _init_stream_window(context, logger, stream_logger)
+        window = await _init_stream_window(context, task_logger, stream_logger)
         if not window:
             error_msg = "串流窗口初始化失败"
-            logger.error(error_msg)
+            task_logger.error(error_msg)
             stream_logger.error(error_msg)
             context.update_step_status("step3", TaskStepStatus.FAILED, error_msg)
             await report_progress(context.task_id, "STEP3", "FAILED", error_msg)
@@ -103,65 +103,65 @@ async def step3_streaming_init(
         stream_logger.info("正在初始化画面捕获器...")
 
         # frame_capture 是 Step4 场景识别和窗口显示的唯一画面来源，初始化失败必须终止准备流程。
-        capture = await _init_frame_capture(context, window, logger, stream_logger)
+        capture = await _init_frame_capture(context, window, task_logger, stream_logger)
         if not capture:
             error_msg = "画面捕获器初始化失败"
-            logger.error(error_msg)
+            task_logger.error(error_msg)
             stream_logger.error(error_msg)
             context.update_step_status("step3", TaskStepStatus.FAILED, error_msg)
             await report_progress(context.task_id, "STEP3", "FAILED", error_msg)
             return Step3Result(success=False, error_code="CAPTURE_INIT_FAILED", message=error_msg)
 
         context.frame_capture = capture
-        logger.info("画面捕获器初始化成功，已保存到上下文供步骤四使用")
+        task_logger.info("画面捕获器初始化成功，已保存到上下文供步骤四使用")
 
         if check_cancel():
             return Step3Result(success=False, error_code="CANCELLED", message="任务被取消")
 
         # 只建立 ControllerProtocol 通道，不在 Step3 发送自动化按键；Step4 才拥有自动化输入权。
-        await _ensure_controller_protocol(context, logger, stream_logger)
+        await _ensure_controller_protocol(context, task_logger, stream_logger)
 
         sdl_window = None
         if context.enable_window_display:
             context.update_step_status("step3", TaskStepStatus.RUNNING, "正在初始化SDL显示窗口...")
             stream_logger.info("正在初始化SDL显示窗口...")
-            sdl_window = await _init_sdl_window(context, logger, stream_logger)
+            sdl_window = await _init_sdl_window(context, task_logger, stream_logger)
             if sdl_window:
                 context.sdl_window = sdl_window
                 if hasattr(sdl_window, "show"):
                     sdl_window.show()
-                logger.info("SDL显示窗口初始化成功，已保存到上下文供步骤四使用")
+                task_logger.info("SDL显示窗口初始化成功，已保存到上下文供步骤四使用")
                 stream_logger.info("SDL显示窗口初始化成功")
             else:
-                logger.warning("SDL显示窗口初始化失败，步骤四将不显示画面")
+                task_logger.warning("SDL显示窗口初始化失败，步骤四将不显示画面")
                 stream_logger.warning("SDL显示窗口初始化失败")
         else:
-            logger.info("窗口显示已禁用，跳过SDL窗口初始化")
+            task_logger.info("窗口显示已禁用，跳过SDL窗口初始化")
             stream_logger.info("窗口显示已禁用")
 
         if check_cancel():
             return Step3Result(success=False, error_code="CANCELLED", message="任务被取消")
 
-        gamepad = await _init_gamepad_controller(context, logger, stream_logger)
+        gamepad = await _init_gamepad_controller(context, task_logger, stream_logger)
         gamepad_available = gamepad is not None
         gamepad_name = getattr(gamepad, 'controller_name', None) if gamepad else None
         if gamepad:
             context._gamepad_controller = gamepad
-            logger.info("手柄控制器初始化成功，已保存到上下文供步骤四使用")
+            task_logger.info("手柄控制器初始化成功，已保存到上下文供步骤四使用")
             stream_logger.info("手柄控制器初始化成功")
         else:
-            logger.warning("手柄控制器初始化失败，可能没有连接手柄")
+            task_logger.warning("手柄控制器初始化失败，可能没有连接手柄")
             stream_logger.warning("手柄控制器初始化失败")
 
-        keyboard_mapper = await _init_keyboard_mapper(context, logger, stream_logger)
+        keyboard_mapper = await _init_keyboard_mapper(context, task_logger, stream_logger)
         keyboard_available = keyboard_mapper is not None
         if keyboard_mapper:
             context._keyboard_mapper = keyboard_mapper
             _wire_sdl_close_handler(context)
-            logger.info("键盘映射器初始化成功，已保存到上下文供步骤四使用")
+            task_logger.info("键盘映射器初始化成功，已保存到上下文供步骤四使用")
             stream_logger.info("键盘映射器初始化成功")
         else:
-            logger.warning("键盘映射器初始化失败")
+            task_logger.warning("键盘映射器初始化失败")
             stream_logger.warning("键盘映射器初始化失败")
 
         if check_cancel():
@@ -171,14 +171,14 @@ async def step3_streaming_init(
         await report_progress(context.task_id, "STEP3", "RUNNING", "正在检测游戏界面...")
 
         stream_ready, ready_detail = await _validate_stream_readiness(
-            context, logger, stream_logger
+            context, task_logger, stream_logger
         )
         if context.sdl_window:
             # 就绪等待和手动接管期间仍需持续刷帧，否则 SDL 窗口会停在旧画面。
-            await _start_sdl_display_pump(context, logger)
+            await _start_sdl_display_pump(context, task_logger)
         if not stream_ready:
             error_msg = f"串流就绪检查未通过: {ready_detail}"
-            logger.error(error_msg)
+            task_logger.error(error_msg)
             stream_logger.error(error_msg)
             context.update_step_status("step3", TaskStepStatus.FAILED, error_msg)
             await report_progress(context.task_id, "STEP3", "FAILED", error_msg)
@@ -188,12 +188,12 @@ async def step3_streaming_init(
                 message=error_msg,
             )
 
-        game_ready = await _detect_game_screen(context, window, logger, stream_logger)
+        game_ready = await _detect_game_screen(context, window, task_logger, stream_logger)
         if not game_ready:
-            logger.warning("游戏界面检测未完成，但串流通道已就绪")
+            task_logger.warning("游戏界面检测未完成，但串流通道已就绪")
 
         success_msg = "串流环境初始化完成，画面捕获器和手柄控制器已准备就绪"
-        logger.info(success_msg)
+        task_logger.info(success_msg)
         stream_logger.info(success_msg)
         context.update_step_status("step3", TaskStepStatus.COMPLETED, success_msg)
         await report_progress(
@@ -210,14 +210,14 @@ async def step3_streaming_init(
         return Step3Result(success=True, message=success_msg)
 
     except asyncio.CancelledError:
-        logger.info("步骤三被取消")
+        task_logger.info("步骤三被取消")
         stream_logger.info("步骤三被取消")
         context.update_step_status("step3", TaskStepStatus.SKIPPED, "任务被取消")
         return Step3Result(success=False, error_code="CANCELLED", message="任务被取消")
 
     except asyncio.TimeoutError as e:
         error_msg = f"步骤三执行超时: {str(e)}"
-        logger.error(f"{error_msg}", exc_info=True)
+        task_logger.error(f"{error_msg}", exc_info=True)
         stream_logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step3", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP3", "FAILED", error_msg)
@@ -225,7 +225,7 @@ async def step3_streaming_init(
 
     except ConnectionError as e:
         error_msg = f"步骤三网络连接失败: {str(e)}"
-        logger.error(f"{error_msg}", exc_info=True)
+        task_logger.error(f"{error_msg}", exc_info=True)
         stream_logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step3", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP3", "FAILED", error_msg)
@@ -233,7 +233,7 @@ async def step3_streaming_init(
 
     except ValueError as e:
         error_msg = f"步骤三参数错误: {str(e)}"
-        logger.error(f"{error_msg}", exc_info=True)
+        task_logger.error(f"{error_msg}", exc_info=True)
         stream_logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step3", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP3", "FAILED", error_msg)
@@ -241,7 +241,7 @@ async def step3_streaming_init(
 
     except Exception as e:
         error_msg = f"步骤三执行异常: {str(e)}"
-        logger.error(f"{error_msg}", exc_info=True)
+        task_logger.error(f"{error_msg}", exc_info=True)
         stream_logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step3", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP3", "FAILED", error_msg)
@@ -250,7 +250,7 @@ async def step3_streaming_init(
 
 async def _init_stream_window(
     context: AgentTaskContext,
-    logger,
+    task_logger,
     stream_logger
 ) -> Optional[Any]:
     """
@@ -258,7 +258,7 @@ async def _init_stream_window(
 
     参数：
     - context: 任务上下文
-    - logger: 主日志记录器
+    - task_logger: 任务日志记录器
     - stream_logger: 流媒体账号日志记录器
 
     返回：
@@ -269,7 +269,7 @@ async def _init_stream_window(
 
         if getattr(context, "_xhome_requires_webrtc", False):
             window = StreamWindow(window_title="Bend WebRTC")
-            logger.info("xHome WebRTC 模式跳过本机 Xbox 窗口查找")
+            task_logger.info("xHome WebRTC 模式跳过本机 Xbox 窗口查找")
             stream_logger.info("xHome WebRTC 模式跳过本机 Xbox 窗口查找")
             return window
 
@@ -277,45 +277,45 @@ async def _init_stream_window(
 
         if context.window_id:
             window._hwnd = context.window_id
-            logger.info(f"使用已有窗口句柄: {context.window_id}")
+            task_logger.info(f"使用已有窗口句柄: {context.window_id}")
         else:
             await window.find_window()
             if not window._hwnd:
-                logger.warning("未找到Xbox窗口，将使用默认窗口")
+                task_logger.warning("未找到Xbox窗口，将使用默认窗口")
                 window._hwnd = context.window_id
 
         await window.activate()
-        logger.info("串流窗口初始化成功")
+        task_logger.info("串流窗口初始化成功")
         stream_logger.info("串流窗口初始化成功")
 
         return window
 
     except asyncio.TimeoutError as e:
-        logger.error(f"串流窗口初始化超时: {e}")
+        task_logger.error(f"串流窗口初始化超时: {e}")
         stream_logger.error(f"串流窗口初始化超时: {e}")
         return None
     except ConnectionError as e:
-        logger.error(f"串流窗口初始化网络错误: {e}")
+        task_logger.error(f"串流窗口初始化网络错误: {e}")
         stream_logger.error(f"串流窗口初始化网络错误: {e}")
         return None
     except ValueError as e:
-        logger.error(f"串流窗口初始化参数错误: {e}")
+        task_logger.error(f"串流窗口初始化参数错误: {e}")
         stream_logger.error(f"串流窗口初始化参数错误: {e}")
         return None
     except Exception as e:
-        logger.error(f"串流窗口初始化失败: {e}")
+        task_logger.error(f"串流窗口初始化失败: {e}")
         stream_logger.error(f"串流窗口初始化失败: {e}")
         return None
 
 
-async def _start_sdl_display_pump(context: AgentTaskContext, logger) -> None:
+async def _start_sdl_display_pump(context: AgentTaskContext, task_logger) -> None:
     """保持 SDL 窗口响应：在 step3/就绪等待期间刷新 WebRTC 帧。"""
     existing = getattr(context, "_sdl_display_task", None)
     if existing and not existing.done():
         return
 
     async def _pump():
-        logger.info("SDL 显示泵已启动（就绪阶段也会刷帧）")
+        task_logger.info("SDL 显示泵已启动（就绪阶段也会刷帧）")
         first_frame_logged = False
         while context.sdl_window and context.sdl_window.is_running:
             try:
@@ -330,7 +330,7 @@ async def _start_sdl_display_pump(context: AgentTaskContext, logger) -> None:
                     if frame is not None:
                         frame_data = getattr(frame, "data", frame)
                         if not first_frame_logged:
-                            logger.info(
+                            task_logger.info(
                                 "SDL 显示泵首帧: %sx%s",
                                 getattr(frame, "width", "?"),
                                 getattr(frame, "height", "?"),
@@ -344,9 +344,9 @@ async def _start_sdl_display_pump(context: AgentTaskContext, logger) -> None:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.debug("SDL display pump: %s", exc)
+                task_logger.debug("SDL display pump: %s", exc)
                 await asyncio.sleep(0.1)
-        logger.info("SDL 显示泵已停止")
+        task_logger.info("SDL 显示泵已停止")
 
     context._sdl_display_task = asyncio.create_task(_pump())
 
@@ -383,7 +383,7 @@ def _wire_sdl_close_handler(context: AgentTaskContext) -> None:
 
 async def step3_close_display(context: AgentTaskContext) -> None:
     """销毁 SDL 窗口并停止显示泵；自动化/串流不受影响。"""
-    logger = get_logger(f"step3_display_{context.task_id}")
+    task_logger = get_task_logger(context.task_id)
     await _stop_sdl_display_pump(context)
     sdl = getattr(context, "sdl_window", None)
     if sdl:
@@ -393,7 +393,7 @@ async def step3_close_display(context: AgentTaskContext) -> None:
             elif hasattr(sdl, "close"):
                 sdl.close()
         except Exception as exc:
-            logger.debug("close display window: %s", exc)
+            task_logger.debug("close display window: %s", exc)
         context.sdl_window = None
 
 
@@ -413,35 +413,35 @@ async def step3_ensure_display(context: AgentTaskContext) -> bool:
     - 已有活动窗口 → 显示并刷新显示泵（跳过重建）
     - 用户已关闭/销毁 → 基于现有串流上下文重建
     """
-    logger = get_logger(f"step3_display_{context.task_id}")
+    task_logger = get_task_logger(context.task_id)
     stream_logger = get_stream_logger(context.streaming_account_email)
 
     if not context.enable_window_display:
-        logger.info("窗口显示已禁用，跳过")
+        task_logger.info("窗口显示已禁用，跳过")
         return False
 
     if not context.frame_capture and not getattr(context, "_webrtc_frame_controller", None):
-        logger.warning("无法显示窗口：frame_capture / WebRTC 未就绪")
+        task_logger.warning("无法显示窗口：frame_capture / WebRTC 未就绪")
         return False
 
     sdl = context.sdl_window
     if _sdl_window_is_active(sdl):
-        logger.info("任务窗口已存在，跳过创建，仅恢复显示")
+        task_logger.info("任务窗口已存在，跳过创建，仅恢复显示")
         if hasattr(sdl, "show"):
             sdl.show()
         _wire_sdl_close_handler(context)
-        await _start_sdl_display_pump(context, logger)
+        await _start_sdl_display_pump(context, task_logger)
         return True
 
     if sdl is not None:
         context.sdl_window = None
 
-    return await step3_reopen_display(context, logger=logger, stream_logger=stream_logger)
+    return await step3_reopen_display(context, task_logger=task_logger, stream_logger=stream_logger)
 
 
 async def step3_reopen_display(
     context: AgentTaskContext,
-    logger=None,
+    task_logger=None,
     stream_logger=None,
 ) -> bool:
     """
@@ -449,25 +449,25 @@ async def step3_reopen_display(
 
     跳过认证、发现与串流协商。
     """
-    logger = logger or get_logger(f"step3_display_{context.task_id}")
+    task_logger = task_logger or get_task_logger(context.task_id)
     stream_logger = stream_logger or get_stream_logger(context.streaming_account_email)
 
     if not context.enable_window_display:
-        logger.info("窗口显示已禁用，跳过重新打开")
+        task_logger.info("窗口显示已禁用，跳过重新打开")
         return False
 
     if not context.frame_capture and not getattr(context, "_webrtc_frame_controller", None):
-        logger.warning("无法重新打开窗口：frame_capture / WebRTC 未就绪")
+        task_logger.warning("无法重新打开窗口：frame_capture / WebRTC 未就绪")
         return False
 
     if _sdl_window_is_active(context.sdl_window):
         if hasattr(context.sdl_window, "show"):
             context.sdl_window.show()
         _wire_sdl_close_handler(context)
-        await _start_sdl_display_pump(context, logger)
+        await _start_sdl_display_pump(context, task_logger)
         return True
 
-    sdl_window = await _init_sdl_window(context, logger, stream_logger)
+    sdl_window = await _init_sdl_window(context, task_logger, stream_logger)
     if not sdl_window:
         return False
 
@@ -475,13 +475,13 @@ async def step3_reopen_display(
     if hasattr(sdl_window, "show"):
         sdl_window.show()
     _wire_sdl_close_handler(context)
-    await _start_sdl_display_pump(context, logger)
+    await _start_sdl_display_pump(context, task_logger)
     return True
 
 
 async def _init_sdl_window(
     context: AgentTaskContext,
-    logger,
+    task_logger,
     stream_logger
 ) -> Optional[Any]:
     """
@@ -494,7 +494,7 @@ async def _init_sdl_window(
 
     参数：
     - context: 任务上下文
-    - logger: 日志记录器
+    - task_logger: 日志记录器
     - stream_logger: 流媒体账号日志记录器
 
     返回：
@@ -504,13 +504,13 @@ async def _init_sdl_window(
         from ..windows.sdl_window import SDLStreamWindow, SDLWindowConfig, PYGAME_AVAILABLE
 
         if not PYGAME_AVAILABLE:
-            logger.warning("pygame不可用，SDL窗口功能不可用")
+            task_logger.warning("pygame不可用，SDL窗口功能不可用")
             return None
 
         gpu_type = getattr(context, '_gpu_type', 'cpu')
         gpu_available = getattr(context, '_gpu_available', False)
 
-        logger.info(f"初始化SDL窗口，GPU类型: {gpu_type}")
+        task_logger.info(f"初始化SDL窗口，GPU类型: {gpu_type}")
 
         from ..core.config import config as app_config
         from ..gssv.network_util import fit_display_size
@@ -549,28 +549,28 @@ async def _init_sdl_window(
         success = await sdl_window.initialize(config)
 
         if not success:
-            logger.error("SDL窗口初始化失败")
+            task_logger.error("SDL窗口初始化失败")
             return None
 
-        logger.info(f"SDL自绘窗口初始化成功: {config.width}x{config.height}")
-        logger.info(f"GPU加速: {'启用' if gpu_available else '禁用'}")
+        task_logger.info(f"SDL自绘窗口初始化成功: {config.width}x{config.height}")
+        task_logger.info(f"GPU加速: {'启用' if gpu_available else '禁用'}")
 
         return sdl_window
 
     except asyncio.TimeoutError as e:
-        logger.warning(f"SDL窗口初始化超时: {e}，将使用窗口截图模式")
+        task_logger.warning(f"SDL窗口初始化超时: {e}，将使用窗口截图模式")
         stream_logger.warning(f"SDL窗口初始化超时: {e}")
         return None
     except ConnectionError as e:
-        logger.warning(f"SDL窗口初始化网络错误: {e}，将使用窗口截图模式")
+        task_logger.warning(f"SDL窗口初始化网络错误: {e}，将使用窗口截图模式")
         stream_logger.warning(f"SDL窗口初始化失败: {e}")
         return None
     except ValueError as e:
-        logger.warning(f"SDL窗口初始化参数错误: {e}，将使用窗口截图模式")
+        task_logger.warning(f"SDL窗口初始化参数错误: {e}，将使用窗口截图模式")
         stream_logger.warning(f"SDL窗口初始化失败: {e}")
         return None
     except Exception as e:
-        logger.warning(f"SDL窗口初始化异常: {e}，将使用窗口截图模式")
+        task_logger.warning(f"SDL窗口初始化异常: {e}，将使用窗口截图模式")
         stream_logger.warning(f"SDL窗口初始化失败: {e}")
         return None
 
@@ -578,7 +578,7 @@ async def _init_sdl_window(
 async def _init_frame_capture(
     context: AgentTaskContext,
     window: Any,
-    logger,
+    task_logger,
     stream_logger
 ) -> Optional[Any]:
     """
@@ -592,7 +592,7 @@ async def _init_frame_capture(
     参数：
     - context: 任务上下文
     - window: 串流窗口
-    - logger: 主日志记录器
+    - task_logger: 任务日志记录器
     - stream_logger: 流媒体账号日志记录器
 
     返回：
@@ -609,7 +609,7 @@ async def _init_frame_capture(
 
         if requires_webrtc:
             if not webrtc_frame_controller:
-                logger.error("xHome WebRTC 模式缺少 WebRTC 帧控制器，拒绝降级到窗口截图")
+                task_logger.error("xHome WebRTC 模式缺少 WebRTC 帧控制器，拒绝降级到窗口截图")
                 stream_logger.error("xHome WebRTC 模式缺少 WebRTC 帧控制器")
                 return None
             video_capture_mode = "webrtc"
@@ -627,56 +627,56 @@ async def _init_frame_capture(
         fps_info = ""
         if video_capture_mode == "webrtc" and webrtc_frame_controller:
             fps_info = " (WebRTC模式)"
-            logger.info(f"画面捕获器已配置为 WebRTC 模式{fps_info}")
+            task_logger.info(f"画面捕获器已配置为 WebRTC 模式{fps_info}")
             stream_logger.info(f"画面捕获器已配置为 WebRTC 模式{fps_info}")
         elif video_capture_mode == "rtp" and video_stream_controller:
             fps_info = f" (RTP模式)"
-            logger.info(f"画面捕获器已配置为RTP模式，支持高帧率显示{fps_info}")
+            task_logger.info(f"画面捕获器已配置为RTP模式，支持高帧率显示{fps_info}")
             stream_logger.info(f"画面捕获器已配置为RTP模式{fps_info}")
         elif video_capture_mode == "direct" and direct_capture:
             fps_info = f" (直接捕获模式)"
-            logger.info(f"画面捕获器已配置为直接捕获模式{fps_info}")
+            task_logger.info(f"画面捕获器已配置为直接捕获模式{fps_info}")
             stream_logger.info(f"画面捕获器已配置为直接捕获模式{fps_info}")
         else:
-            logger.info("画面捕获器已配置为窗口截图模式")
+            task_logger.info("画面捕获器已配置为窗口截图模式")
             stream_logger.info("画面捕获器已配置为窗口截图模式")
 
         frame = await capture.capture_frame()
         if frame:
             prefix = "WebRTC 首帧" if video_capture_mode == "webrtc" else "画面首帧"
-            logger.info(f"{prefix}捕获成功，分辨率: {frame.width}x{frame.height}{fps_info}")
+            task_logger.info(f"{prefix}捕获成功，分辨率: {frame.width}x{frame.height}{fps_info}")
             stream_logger.info(f"{prefix}捕获成功，分辨率: {frame.width}x{frame.height}{fps_info}")
         else:
-            logger.warning("画面捕获器初始化成功，但无法捕获首帧")
+            task_logger.warning("画面捕获器初始化成功，但无法捕获首帧")
             stream_logger.warning("画面捕获器初始化成功，但无法捕获首帧")
             if requires_webrtc:
-                logger.error("WebRTC 首帧 FAILED: xHome 模式拒绝使用窗口截图兜底")
+                task_logger.error("WebRTC 首帧 FAILED: xHome 模式拒绝使用窗口截图兜底")
                 stream_logger.error("WebRTC 首帧 FAILED: xHome 模式拒绝使用窗口截图兜底")
                 return None
 
         return capture
 
     except asyncio.TimeoutError as e:
-        logger.error(f"初始化画面捕获器超时: {e}")
+        task_logger.error(f"初始化画面捕获器超时: {e}")
         stream_logger.error(f"初始化画面捕获器超时: {e}")
         return None
     except ConnectionError as e:
-        logger.error(f"初始化画面捕获器网络错误: {e}")
+        task_logger.error(f"初始化画面捕获器网络错误: {e}")
         stream_logger.error(f"初始化画面捕获器网络错误: {e}")
         return None
     except ValueError as e:
-        logger.error(f"初始化画面捕获器参数错误: {e}")
+        task_logger.error(f"初始化画面捕获器参数错误: {e}")
         stream_logger.error(f"初始化画面捕获器参数错误: {e}")
         return None
     except Exception as e:
-        logger.error(f"初始化画面捕获器失败: {e}")
+        task_logger.error(f"初始化画面捕获器失败: {e}")
         stream_logger.error(f"初始化画面捕获器失败: {e}")
         return None
 
 
 async def _validate_stream_readiness(
     context: AgentTaskContext,
-    logger,
+    task_logger,
     stream_logger,
 ) -> tuple:
     """
@@ -719,23 +719,23 @@ async def _validate_stream_readiness(
     frames_ok, frames_msg = await _check_frames()
     input_ok, input_msg = await _check_input()
     if frames_ok and input_ok:
-        logger.info("STEP3 串流就绪: %s; %s", frames_msg, input_msg)
+        task_logger.info("STEP3 串流就绪: %s; %s", frames_msg, input_msg)
         stream_logger.info("STEP3 串流就绪: %s; %s", frames_msg, input_msg)
         return True, f"{frames_msg}; {input_msg}"
 
-    logger.warning(
+    task_logger.warning(
         "STEP3 串流就绪检查 FAILED (%s; %s)，尝试重连 input DataChannel",
         frames_msg,
         input_msg,
     )
     from ..xbox.stream_recovery import reconnect_input_channel, rebind_stream_bindings
 
-    if await reconnect_input_channel(context, logger):
+    if await reconnect_input_channel(context, task_logger):
         rebind_stream_bindings(context)
         frames_ok, frames_msg = await _check_frames()
         input_ok, input_msg = await _check_input()
         if frames_ok and input_ok:
-            logger.info("STEP3 重连后串流就绪: %s; %s", frames_msg, input_msg)
+            task_logger.info("STEP3 重连后串流就绪: %s; %s", frames_msg, input_msg)
             return True, f"{frames_msg}; {input_msg}"
 
     session = getattr(context, "xbox_session", None)
@@ -744,7 +744,7 @@ async def _validate_stream_readiness(
     return False, f"{frames_msg}; {input_msg}"
 
 
-def _bind_input_channel_close_handler(context: AgentTaskContext, logger) -> None:
+def _bind_input_channel_close_handler(context: AgentTaskContext, task_logger) -> None:
     """注册回调，供 step4 感知 input 通道断开。"""
     session = getattr(context, "_cloud_stream_session", None) or getattr(
         context, "xbox_session", None
@@ -754,18 +754,18 @@ def _bind_input_channel_close_handler(context: AgentTaskContext, logger) -> None
 
     def _on_close():
         context._input_channel_dirty = True
-        logger.warning("input DataChannel closed，已标记待恢复")
+        task_logger.warning("input DataChannel closed，已标记待恢复")
 
     session.on_input_channel_close(_on_close)
     if hasattr(session, "bind_input_channel_handlers"):
         session.bind_input_channel_handlers()
-    logger.info("input DataChannel close 回调已注册")
+    task_logger.info("input DataChannel close 回调已注册")
 
 
 async def _detect_game_screen(
     context: AgentTaskContext,
     window: Any,
-    logger,
+    task_logger,
     stream_logger
 ) -> bool:
     """
@@ -774,7 +774,7 @@ async def _detect_game_screen(
     参数：
     - context: 任务上下文
     - window: 串流窗口
-    - logger: 主日志记录器
+    - task_logger: 任务日志记录器
     - stream_logger: 流媒体账号日志记录器
 
     返回：
@@ -782,40 +782,40 @@ async def _detect_game_screen(
     """
     try:
         if context.frame_capture is None:
-            logger.warning("画面捕获器未初始化，跳过游戏界面检测")
+            task_logger.warning("画面捕获器未初始化，跳过游戏界面检测")
             return False
 
         frame = await context.frame_capture.capture_frame()
         if frame is None:
-            logger.warning("无法捕获游戏画面")
+            task_logger.warning("无法捕获游戏画面")
             stream_logger.warning("无法捕获游戏画面")
             return False
 
-        logger.info(f"游戏画面捕获成功: {frame.width}x{frame.height}")
+        task_logger.info(f"游戏画面捕获成功: {frame.width}x{frame.height}")
         stream_logger.info(f"游戏画面捕获成功: {frame.width}x{frame.height}")
         return True
 
     except asyncio.TimeoutError as e:
-        logger.error(f"检测游戏界面超时: {e}")
+        task_logger.error(f"检测游戏界面超时: {e}")
         stream_logger.error(f"检测游戏界面超时: {e}")
         return False
     except ConnectionError as e:
-        logger.error(f"检测游戏界面网络错误: {e}")
+        task_logger.error(f"检测游戏界面网络错误: {e}")
         stream_logger.error(f"检测游戏界面网络错误: {e}")
         return False
     except ValueError as e:
-        logger.error(f"检测游戏界面参数错误: {e}")
+        task_logger.error(f"检测游戏界面参数错误: {e}")
         stream_logger.error(f"检测游戏界面参数错误: {e}")
         return False
     except Exception as e:
-        logger.error(f"检测游戏界面失败: {e}")
+        task_logger.error(f"检测游戏界面失败: {e}")
         stream_logger.error(f"检测游戏界面失败: {e}")
         return False
 
 
 async def _ensure_controller_protocol(
     context: AgentTaskContext,
-    logger,
+    task_logger,
     stream_logger,
 ) -> None:
     """即使没有物理手柄也绑定 ControllerProtocol 到云端会话。"""
@@ -828,18 +828,18 @@ async def _ensure_controller_protocol(
     if context.xbox_session:
         protocol.set_stream_controller(context.xbox_session)
         channel = "WebRTC DataChannel" if getattr(context, "_cloud_stream_session", None) else "SmartGlass"
-        logger.info(f"控制器协议已绑定 Xbox 流会话 ({channel})")
+        task_logger.info(f"控制器协议已绑定 Xbox 流会话 ({channel})")
         stream_logger.info(f"控制器协议已绑定 Xbox 流会话 ({channel})")
     else:
-        logger.warning("Xbox 流会话未初始化，控制器协议暂无法发送信号")
+        task_logger.warning("Xbox 流会话未初始化，控制器协议暂无法发送信号")
 
     context._controller_protocol = protocol
-    _bind_input_channel_close_handler(context, logger)
+    _bind_input_channel_close_handler(context, task_logger)
 
 
 async def _init_gamepad_controller(
     context: AgentTaskContext,
-    logger,
+    task_logger,
     stream_logger
 ) -> Optional[Any]:
     """
@@ -852,7 +852,7 @@ async def _init_gamepad_controller(
 
     参数：
     - context: 任务上下文
-    - logger: 主日志记录器
+    - task_logger: 任务日志记录器
     - stream_logger: 流媒体账号日志记录器
 
     返回：
@@ -862,55 +862,55 @@ async def _init_gamepad_controller(
         from ..input.xbox_gamepad import XboxGamepadController
         from ..input.controller_protocol import ControllerProtocol, ControllerSignal
 
-        logger.info("正在初始化手柄控制器...")
+        task_logger.info("正在初始化手柄控制器...")
         stream_logger.info("正在初始化手柄控制器...")
 
         gamepad = XboxGamepadController(controller_id=0)
         initialized = await gamepad.initialize()
 
         if not initialized:
-            logger.warning("手柄控制器初始化失败，可能没有连接手柄")
+            task_logger.warning("手柄控制器初始化失败，可能没有连接手柄")
             stream_logger.warning("手柄控制器初始化失败")
             return None
 
-        logger.info(f"手柄已连接: {gamepad.controller_name}")
+        task_logger.info(f"手柄已连接: {gamepad.controller_name}")
         stream_logger.info(f"手柄已连接: {gamepad.controller_name}")
 
         protocol = context._controller_protocol
         if protocol is None:
-            await _ensure_controller_protocol(context, logger, stream_logger)
+            await _ensure_controller_protocol(context, task_logger, stream_logger)
             protocol = context._controller_protocol
 
         if protocol and context.xbox_session:
             gamepad.set_input_callback(
                 lambda sig: protocol.send_signal(ControllerSignal.from_gamepad_signal(sig))
             )
-        logger.info("手柄控制器初始化成功")
+        task_logger.info("手柄控制器初始化成功")
         stream_logger.info("手柄控制器初始化成功")
 
         return gamepad
 
     except asyncio.TimeoutError as e:
-        logger.error(f"初始化手柄控制器超时: {e}")
+        task_logger.error(f"初始化手柄控制器超时: {e}")
         stream_logger.error(f"初始化手柄控制器超时: {e}")
         return None
     except ConnectionError as e:
-        logger.error(f"初始化手柄控制器网络错误: {e}")
+        task_logger.error(f"初始化手柄控制器网络错误: {e}")
         stream_logger.error(f"初始化手柄控制器网络错误: {e}")
         return None
     except ValueError as e:
-        logger.error(f"初始化手柄控制器参数错误: {e}")
+        task_logger.error(f"初始化手柄控制器参数错误: {e}")
         stream_logger.error(f"初始化手柄控制器参数错误: {e}")
         return None
     except Exception as e:
-        logger.error(f"初始化手柄控制器失败: {e}")
+        task_logger.error(f"初始化手柄控制器失败: {e}")
         stream_logger.error(f"初始化手柄控制器失败: {e}")
         return None
 
 
 async def _init_keyboard_mapper(
     context: AgentTaskContext,
-    logger,
+    task_logger,
     stream_logger
 ) -> Optional[Any]:
     """
@@ -923,7 +923,7 @@ async def _init_keyboard_mapper(
 
     参数：
     - context: 任务上下文
-    - logger: 主日志记录器
+    - task_logger: 任务日志记录器
     - stream_logger: 流媒体账号日志记录器
 
     返回：
@@ -934,7 +934,7 @@ async def _init_keyboard_mapper(
         from ..input.controller_protocol import ControllerProtocol, ControllerSignal
         from ..input.keyboard_mapper import KeyAction
 
-        logger.info("正在初始化键盘映射器...")
+        task_logger.info("正在初始化键盘映射器...")
         stream_logger.info("正在初始化键盘映射器...")
 
         keyboard = KeyboardMapper()
@@ -966,31 +966,31 @@ async def _init_keyboard_mapper(
                             signal.set_button(button_flag, is_pressed)
 
                 except Exception as e:
-                    logger.error(f"处理键盘动作失败: {e}")
+                    task_logger.error(f"处理键盘动作失败: {e}")
 
             keyboard.register_action_callback(handle_key_action)
-            logger.info("键盘映射器已绑定到控制器协议")
+            task_logger.info("键盘映射器已绑定到控制器协议")
         else:
-            logger.warning("控制器协议未初始化，键盘映射将无法工作")
+            task_logger.warning("控制器协议未初始化，键盘映射将无法工作")
 
-        logger.info("键盘映射器初始化成功")
+        task_logger.info("键盘映射器初始化成功")
         stream_logger.info("键盘映射器初始化成功")
 
         return keyboard
 
     except asyncio.TimeoutError as e:
-        logger.error(f"初始化键盘映射器超时: {e}")
+        task_logger.error(f"初始化键盘映射器超时: {e}")
         stream_logger.error(f"初始化键盘映射器超时: {e}")
         return None
     except ConnectionError as e:
-        logger.error(f"初始化键盘映射器网络错误: {e}")
+        task_logger.error(f"初始化键盘映射器网络错误: {e}")
         stream_logger.error(f"初始化键盘映射器网络错误: {e}")
         return None
     except ValueError as e:
-        logger.error(f"初始化键盘映射器参数错误: {e}")
+        task_logger.error(f"初始化键盘映射器参数错误: {e}")
         stream_logger.error(f"初始化键盘映射器参数错误: {e}")
         return None
     except Exception as e:
-        logger.error(f"初始化键盘映射器失败: {e}")
+        task_logger.error(f"初始化键盘映射器失败: {e}")
         stream_logger.error(f"初始化键盘映射器失败: {e}")
         return None

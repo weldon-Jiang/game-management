@@ -8,7 +8,11 @@ Bend Agent 按账号分文件日志
 
 日志目录结构：
 - log/
-  - agent.log                              # 主日志文件
+  - agent.log                              # 主日志文件（Agent 生命周期、连接、全局异常）
+  - task_log/                              # 任务日志目录
+    - task_{task_id}.log                   # 每个任务完整自动化链路
+  - heartbeat_log/                         # 心跳日志目录
+    - heartbeat.log                        # HTTP / WebSocket 心跳
   - stream_log/                            # 流媒体账号日志目录
     - stream_账号名.log                    # 每个流媒体账号独立日志
   - game_log/                              # 游戏账号日志目录

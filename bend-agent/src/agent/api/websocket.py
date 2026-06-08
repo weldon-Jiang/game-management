@@ -28,6 +28,7 @@ from enum import Enum
 
 from ..core.config import config
 from ..core.logger import get_logger
+from ..core.heartbeat_logger import get_heartbeat_logger
 
 
 class WSMessageType(Enum):
@@ -112,6 +113,7 @@ class WSClient:
         self._message_handlers: Dict[str, Callable] = {}   # 消息处理器字典
         self._heartbeat_task: Optional[asyncio.Task] = None  # 心跳任务
         self.logger = get_logger('ws')                      # 日志记录器
+        self._heartbeat_logger = get_heartbeat_logger()   # 心跳专用日志
 
         # 连接管理（v2.1新增，解决竞态条件）
         self._connection_lock = asyncio.Lock()             # 连接操作锁
@@ -344,9 +346,17 @@ class WSClient:
                 'type': message_type,
                 'data': data
             }, ensure_ascii=False)
-            self.logger.info(f"Sending message to backend - Type: {message_type}, Data: {message[:500]}")
+            if message_type == 'heartbeat':
+                self._heartbeat_logger.debug(
+                    "WebSocket heartbeat sent (agentId=%s)", self.agent_id
+                )
+            else:
+                self.logger.info(
+                    f"Sending message to backend - Type: {message_type}, Data: {message[:500]}"
+                )
             await ws.send(message)
-            self.logger.info(f"Message sent successfully - Type: {message_type}")
+            if message_type != 'heartbeat':
+                self.logger.info(f"Message sent successfully - Type: {message_type}")
             return True
         except Exception as e:
             self.logger.warning(f"Failed to send message: {e}")
@@ -557,12 +567,13 @@ class WSClient:
 
                 if ws:
                     await self.send_heartbeat()
-                    self.logger.debug("WebSocket heartbeat sent")
+                    self._heartbeat_logger.debug("WebSocket heartbeat cycle ok")
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self.logger.error(f"Heartbeat error: {e}")
+                self._heartbeat_logger.error(f"WebSocket heartbeat error: {e}")
+                self.logger.error(f"WebSocket heartbeat error: {e}")
 
     async def _handle_message(self, message: str):
         """
@@ -590,7 +601,7 @@ class WSClient:
 
             # 心跳确认
             if msg_type == 'heartbeat_ack':
-                self.logger.debug("Heartbeat acknowledged")
+                self._heartbeat_logger.debug("Heartbeat acknowledged")
                 return
 
             # 连接成功
@@ -603,7 +614,7 @@ class WSClient:
                 self.logger.error(f"Server error: {msg_data}")
                 return
 
-            # 分发到注册的处理器
+            # 分发到注册的处理器（task / task_control 在 handler 内 create_task 放飞，此处 await 仅等入队）
             handler = self._message_handlers.get(msg_type)
             if handler:
                 await handler(msg_data)

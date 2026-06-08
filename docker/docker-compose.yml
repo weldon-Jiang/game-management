@@ -30,7 +30,7 @@ services:
   mysql:
     image: mysql:8.0
     container_name: bend-xbox-mysql
-    restart: ${RESTART_POLICY:-unless-stopped}
+    restart: unless-stopped
     profiles:
       - data
       - full
@@ -65,12 +65,12 @@ services:
   redis:
     image: redis:7-alpine
     container_name: bend-xbox-redis
-    restart: ${RESTART_POLICY:-unless-stopped}
+    restart: unless-stopped
     profiles:
       - data
       - core
       - full
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
     ports:
       - "${REDIS_PORT:-127.0.0.1:6379}:6379"
     volumes:
@@ -93,7 +93,7 @@ services:
       dockerfile: Dockerfile
     image: bend-xbox-backend:latest
     container_name: bend-xbox-backend
-    restart: ${RESTART_POLICY:-unless-stopped}
+    restart: unless-stopped
     profiles:
       - core
       - app
@@ -142,7 +142,7 @@ services:
       dockerfile: Dockerfile
     image: bend-xbox-gateway:latest
     container_name: bend-xbox-gateway
-    restart: ${RESTART_POLICY:-unless-stopped}
+    restart: unless-stopped
     profiles:
       - core
       - app
@@ -181,7 +181,7 @@ services:
       dockerfile: Dockerfile
     image: bend-xbox-frontend:latest
     container_name: bend-xbox-frontend
-    restart: ${RESTART_POLICY:-unless-stopped}
+    restart: unless-stopped
     profiles:
       - app
       - full

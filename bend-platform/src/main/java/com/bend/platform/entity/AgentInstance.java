@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
  *
  * Agent状态：
  * - online: 在线，运行中
+ * - reconnecting: WebSocket 断开宽限期内，任务保留
  * - offline: 离线，未运行
  * - uninstalled: 已卸载
  *
@@ -100,6 +101,12 @@ public class AgentInstance {
      * 根据系统资源自动计算
      */
     private Integer maxConcurrentTasks;
+
+    /**
+     * 当前运行中任务数（运行时填充，非数据库列）。
+     */
+    @TableField(exist = false)
+    private Integer currentTaskCount;
 
     /**
      * 最后心跳时间

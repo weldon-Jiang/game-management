@@ -29,6 +29,7 @@ Run migrations in lexicographic (filename) order on an existing database. For fr
 - `V20260607_007_fix_billing_comment_charset.sql` — repair comments for environments that ran V005/V006 before utf8mb4 client charset was enforced.
 - `V20260607_008_system_metrics_trend_index.sql` — add composite index for bounded monitoring trend queries.
 - `V20260608_001_task_game_account_status_comments.sql` — add column comments for task_game_account_status progress fields.
+- `V20260608_002_task_version_column.sql` — add optimistic-lock version column to task table.
 
 ## Legacy locations (removed)
 

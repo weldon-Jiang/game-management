@@ -622,8 +622,10 @@ const handleRetry = async (task) => {
 
 const handleCancel = async (task) => {
   try {
-    // 列表页的取消走任务语义取消；强制终止和会话控制集中在详情页操作。
-    const res = await taskApi.cancel(task.id)
+    // 运行中任务走 terminate（TaskControl 控制面）；pending 仍可用 cancel 语义。
+    const res = task.status === 'pending'
+      ? await taskApi.cancel(task.id)
+      : await taskApi.terminate(task.id)
     if (res.code === 0 || res.code === 200) {
       ElMessage.success('任务已取消')
       loadData()

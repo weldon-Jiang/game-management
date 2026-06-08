@@ -252,8 +252,8 @@ netstat -ano | findstr ":8060 :8061 :3090"
 docker volume ls | grep bend
 
 # 查看数据卷详情
-docker volume inspect bend_platform_mysql_data
-docker volume inspect bend_platform_redis_data
+docker volume inspect bend_xbox_mysql_data
+docker volume inspect bend_xbox_redis_data
 ```
 
 ### 备份数据库
@@ -277,10 +277,10 @@ docker exec -i bend-mysql mysql -u root -pD@GAMECeKfidb bend_platform < backup.s
 
 ```bash
 # 删除 MySQL 数据卷（会丢失所有数据！）
-docker volume rm bend_platform_mysql_data
+docker volume rm bend_xbox_mysql_data
 
 # 删除 Redis 数据卷
-docker volume rm bend_platform_redis_data
+docker volume rm bend_xbox_redis_data
 
 # 删除所有未使用的数据卷
 docker volume prune

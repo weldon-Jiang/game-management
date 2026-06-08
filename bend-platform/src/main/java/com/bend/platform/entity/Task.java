@@ -222,6 +222,12 @@ public class Task {
     private Boolean deleted;
 
     /**
+     * 乐观锁版本号，并发更新时由 MyBatis-Plus 自动校验。
+     */
+    @Version
+    private Integer version;
+
+    /**
      * 当前执行步骤
      */
     private String currentStep;

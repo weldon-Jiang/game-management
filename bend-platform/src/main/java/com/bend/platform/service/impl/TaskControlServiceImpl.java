@@ -54,6 +54,8 @@ public class TaskControlServiceImpl implements TaskControlService {
     private final CredentialTokenService credentialTokenService;
     private final TaskEventService taskEventService;
     private final AgentInstanceService agentInstanceService;
+    private final AutomationUsageService automationUsageService;
+    private final TaskWsDispatchService taskWsDispatchService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -107,6 +109,15 @@ public class TaskControlServiceImpl implements TaskControlService {
             selectedHost = xboxHostService.findById(request.getXboxHostId());
         }
 
+        List<XboxHost> hostsForBilling = selectedHost != null
+                ? List.of(selectedHost)
+                : xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
+        Map<String, Object> billingValidation = automationUsageService.validateAndCalculatePoints(
+                merchantId, streamingAccountId, gameAccounts, hostsForBilling);
+        if (!Boolean.TRUE.equals(billingValidation.get("canStart"))) {
+            throw new BusinessException(400, String.valueOf(billingValidation.get("message")));
+        }
+
         Map<String, Object> taskParams = buildStreamingTaskParams(
                 streamingAccount, gameAccounts, selectedHost, merchantId);
 
@@ -135,7 +146,15 @@ public class TaskControlServiceImpl implements TaskControlService {
 
         markStreamingAccountsBusy(streamingAccountId, agentId, gameAccounts);
 
-        taskExecutorService.executeTask(task);
+        if (!reused) {
+            automationUsageService.deductPointsAndRecordUsage(
+                    merchantId, userId, task.getId(),
+                    streamingAccountId, streamingAccount.getDisplayLabel(),
+                    gameAccounts.size(), hostsForBilling.size(), billingValidation);
+        }
+
+        final Task taskToDispatch = task;
+        taskWsDispatchService.dispatchAfterCommit(() -> taskExecutorService.executeTask(taskToDispatch));
 
         Map<String, Object> result = new HashMap<>();
         result.put("taskId", task.getId());
@@ -365,7 +384,6 @@ public class TaskControlServiceImpl implements TaskControlService {
     @Override
     public void terminateTask(String taskId, String merchantId) {
         Task task = requireTask(taskId, merchantId);
-        taskExecutorService.cancelTask(taskId);
         task.setStatus("cancelled");
         task.setSessionPhase("closed");
         task.setWindowVisible(false);
@@ -375,7 +393,13 @@ public class TaskControlServiceImpl implements TaskControlService {
             streamingSessionService.closeSession(session.getId(), "closed");
         }
         restoreStreamingAccountState(task);
-        sendTaskControl(task, "terminate", Map.of("closeWindow", true));
+
+        final String cancelTaskId = taskId;
+        final Task controlTask = task;
+        taskWsDispatchService.dispatchAfterCommit(() -> {
+            taskExecutorService.cancelTask(cancelTaskId);
+            doSendTaskControl(controlTask, "terminate", Map.of("closeWindow", true));
+        });
     }
 
     /**
@@ -558,6 +582,14 @@ public class TaskControlServiceImpl implements TaskControlService {
     }
 
     private void sendTaskControl(Task task, String action, Map<String, Object> extra) {
+        final Task controlTask = task;
+        final String controlAction = action;
+        final Map<String, Object> controlExtra = new HashMap<>(extra);
+        taskWsDispatchService.dispatchAfterCommit(
+                () -> doSendTaskControl(controlTask, controlAction, controlExtra));
+    }
+
+    private void doSendTaskControl(Task task, String action, Map<String, Object> extra) {
         Map<String, Object> data = new HashMap<>(extra);
         data.put("taskId", task.getId());
         data.put("action", action);

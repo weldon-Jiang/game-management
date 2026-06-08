@@ -36,7 +36,7 @@ import asyncio
 from typing import Callable, Optional, Dict, Any
 from dataclasses import dataclass, field
 
-from ..core.logger import get_logger
+from ..core.task_logger import get_task_logger
 from ..core.account_logger import get_stream_logger
 from ..task.task_context import AgentTaskContext, Step1Result, TaskStepStatus
 
@@ -79,9 +79,9 @@ async def step1_execute_login(
     返回：
     - Step1Result: 包含认证结果的Step1Result
     """
-    logger = get_logger(f'step1_login_{context.task_id}')
+    task_logger = get_task_logger(context.task_id)
     stream_logger = get_stream_logger(context.streaming_account_email)
-    logger.info("=== 步骤一：开始串流账号登录 ===")
+    task_logger.info("=== 步骤一：开始串流账号登录 ===")
     stream_logger.info("=== 开始串流账号登录 ===")
 
     context.update_step_status("step1", TaskStepStatus.RUNNING, "正在登录串流账号...")
@@ -89,14 +89,14 @@ async def step1_execute_login(
 
     try:
         if check_cancel():
-            logger.info("任务被取消，步骤一终止")
+            task_logger.info("任务被取消，步骤一终止")
             context.update_step_status("step1", TaskStepStatus.SKIPPED, "任务被取消")
             return Step1Result(success=False, error_code="CANCELLED", message="任务被取消")
 
-        validation = await _validate_account_info(context, logger, stream_logger)
+        validation = await _validate_account_info(context, task_logger, stream_logger)
         if not validation.get("is_valid", False):
             error_msg = validation.get("error_msg", "未知错误")
-            logger.error(f"账号信息验证失败: {error_msg}")
+            task_logger.error(f"账号信息验证失败: {error_msg}")
             stream_logger.error(f"账号信息验证失败: {error_msg}")
             context.update_step_status("step1", TaskStepStatus.FAILED, error_msg)
             await report_progress(context.task_id, "STEP1", "FAILED", error_msg)
@@ -108,7 +108,7 @@ async def step1_execute_login(
 
         context.update_step_status("step1", TaskStepStatus.RUNNING, "正在获取微软账号Token...")
         stream_logger.info("正在获取微软账号Token...")
-        ms_token_result = await _get_microsoft_token(context, logger, stream_logger)
+        ms_token_result = await _get_microsoft_token(context, task_logger, stream_logger)
 
         if not ms_token_result.success or not ms_token_result.microsoft_tokens:
             # Microsoft Token 获取失败
@@ -120,17 +120,17 @@ async def step1_execute_login(
             if ms_token_result.error_details and "suggestion" in ms_token_result.error_details:
                 detailed_error_msg += f"; 解决方案: {ms_token_result.error_details['suggestion']}"
             
-            logger.error(f"Microsoft Token 获取失败: {detailed_error_msg}")
+            task_logger.error(f"Microsoft Token 获取失败: {detailed_error_msg}")
             stream_logger.error(f"Microsoft Token 获取失败: {error_message}")
             
             # 记录详细信息
             if ms_token_result.error_details:
-                logger.error("\n详细信息:")
+                task_logger.error("\n详细信息:")
                 for key, value in ms_token_result.error_details.items():
                     if key != "suggestion":
-                        logger.error(f"  {key}: {value}")
+                        task_logger.error(f"  {key}: {value}")
                 if "suggestion" in ms_token_result.error_details:
-                    logger.error(f"\n解决方案: {ms_token_result.error_details['suggestion']}")
+                    task_logger.error(f"\n解决方案: {ms_token_result.error_details['suggestion']}")
             
             context.update_step_status("step1", TaskStepStatus.FAILED, detailed_error_msg)
             await report_progress(context.task_id, "STEP1", "FAILED", detailed_error_msg)
@@ -140,7 +140,7 @@ async def step1_execute_login(
 
         context.update_step_status("step1", TaskStepStatus.RUNNING, "正在获取Xbox Live令牌...")
         stream_logger.info("正在获取Xbox Live令牌...")
-        xbox_token_result = await _get_xbox_live_token(microsoft_tokens, context, logger, stream_logger)
+        xbox_token_result = await _get_xbox_live_token(microsoft_tokens, context, task_logger, stream_logger)
 
         if not xbox_token_result.success or not xbox_token_result.xbox_tokens:
             # Xbox Live Token 获取失败
@@ -152,17 +152,17 @@ async def step1_execute_login(
             if xbox_token_result.error_details and "suggestion" in xbox_token_result.error_details:
                 detailed_error_msg += f"; 解决方案: {xbox_token_result.error_details['suggestion']}"
             
-            logger.error(f"Xbox Live Token 获取失败: {detailed_error_msg}")
+            task_logger.error(f"Xbox Live Token 获取失败: {detailed_error_msg}")
             stream_logger.error(f"Xbox Live Token 获取失败: {error_message}")
             
             # 记录详细信息
             if xbox_token_result.error_details:
-                logger.error("\n详细信息:")
+                task_logger.error("\n详细信息:")
                 for key, value in xbox_token_result.error_details.items():
                     if key != "suggestion":
-                        logger.error(f"  {key}: {value}")
+                        task_logger.error(f"  {key}: {value}")
                 if "suggestion" in xbox_token_result.error_details:
-                    logger.error(f"\n解决方案: {xbox_token_result.error_details['suggestion']}")
+                    task_logger.error(f"\n解决方案: {xbox_token_result.error_details['suggestion']}")
             
             context.update_step_status("step1", TaskStepStatus.FAILED, detailed_error_msg)
             await report_progress(context.task_id, "STEP1", "FAILED", detailed_error_msg)
@@ -174,7 +174,7 @@ async def step1_execute_login(
         context.xbox_tokens = xbox_tokens
 
         success_msg = "串流账号登录成功"
-        logger.info(f"{success_msg}: {context.streaming_account_email}")
+        task_logger.info(f"{success_msg}: {context.streaming_account_email}")
         stream_logger.info(f"{success_msg}")
         context.update_step_status("step1", TaskStepStatus.COMPLETED, success_msg)
         await report_progress(context.task_id, "STEP1", "COMPLETED", success_msg)
@@ -187,14 +187,14 @@ async def step1_execute_login(
         )
 
     except asyncio.CancelledError:
-        logger.info("步骤一被取消")
+        task_logger.info("步骤一被取消")
         stream_logger.info("步骤一被取消")
         context.update_step_status("step1", TaskStepStatus.SKIPPED, "任务被取消")
         return Step1Result(success=False, error_code="CANCELLED", message="任务被取消")
 
     except asyncio.TimeoutError as e:
         error_msg = f"步骤一执行超时: {str(e)}"
-        logger.error(f"{error_msg}", exc_info=True)
+        task_logger.error(f"{error_msg}", exc_info=True)
         stream_logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step1", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP1", "FAILED", error_msg)
@@ -202,7 +202,7 @@ async def step1_execute_login(
 
     except ConnectionError as e:
         error_msg = f"步骤一网络连接失败: {str(e)}"
-        logger.error(f"{error_msg}", exc_info=True)
+        task_logger.error(f"{error_msg}", exc_info=True)
         stream_logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step1", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP1", "FAILED", error_msg)
@@ -210,7 +210,7 @@ async def step1_execute_login(
 
     except ValueError as e:
         error_msg = f"步骤一参数错误: {str(e)}"
-        logger.error(f"{error_msg}", exc_info=True)
+        task_logger.error(f"{error_msg}", exc_info=True)
         stream_logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step1", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP1", "FAILED", error_msg)
@@ -218,7 +218,7 @@ async def step1_execute_login(
 
     except Exception as e:
         error_msg = f"步骤一执行异常: {str(e)}"
-        logger.error(f"{error_msg}", exc_info=True)
+        task_logger.error(f"{error_msg}", exc_info=True)
         stream_logger.error(f"{error_msg}", exc_info=True)
         context.update_step_status("step1", TaskStepStatus.FAILED, error_msg, str(e))
         await report_progress(context.task_id, "STEP1", "FAILED", error_msg)
@@ -227,7 +227,7 @@ async def step1_execute_login(
 
 async def _validate_account_info(
     context: AgentTaskContext,
-    logger,
+    task_logger,
     stream_logger
 ) -> Dict[str, Any]:
     """
@@ -235,7 +235,7 @@ async def _validate_account_info(
 
     参数：
     - context: 任务上下文
-    - logger: 主日志记录器
+    - task_logger: 任务日志记录器
     - stream_logger: 流媒体账号专用日志记录器
 
     返回：
@@ -251,8 +251,8 @@ async def _validate_account_info(
         return {"is_valid": False, "error_msg": "串流账号邮箱格式无效"}
 
     # 只记录凭据是否存在，禁止输出明文密码。
-    logger.info(f"账号验证 - 邮箱: {context.streaming_account_email}")
-    logger.info(
+    task_logger.info(f"账号验证 - 邮箱: {context.streaming_account_email}")
+    task_logger.info(
         "账号验证 - 密码已提供: %s",
         bool(context.streaming_account_password),
     )
@@ -267,7 +267,7 @@ async def _validate_account_info(
 
 async def _get_microsoft_token(
     context: AgentTaskContext,
-    logger,
+    task_logger,
     stream_logger
 ) -> TokenResult:
     """
@@ -281,7 +281,7 @@ async def _get_microsoft_token(
     
     参数：
     - context: 任务上下文
-    - logger: 主日志记录器
+    - task_logger: 任务日志记录器
     - stream_logger: 流媒体账号专用日志记录器
     
     返回：
@@ -292,13 +292,13 @@ async def _get_microsoft_token(
 
         authenticator = MicrosoftMsalAuthenticator()
 
-        logger.info(f"开始微软账号MSAL认证: {context.streaming_account_email}")
+        task_logger.info(f"开始微软账号MSAL认证: {context.streaming_account_email}")
         stream_logger.info(f"开始微软账号MSAL认证（设备码流程）")
 
         # 检查已存储的账号
         stored_accounts = MicrosoftMsalAuthenticator.get_stored_accounts()
         if context.streaming_account_email in stored_accounts:
-            logger.info(f"发现已存储的Refresh Token，将自动刷新...")
+            task_logger.info(f"发现已存储的Refresh Token，将自动刷新...")
             stream_logger.info(f"发现已存储的Refresh Token，将自动刷新...")
 
         # 执行认证（优先使用Refresh Token，失败则回退到设备码认证）
@@ -310,7 +310,7 @@ async def _get_microsoft_token(
         )
 
         if result.success:
-            logger.info(f"微软账号MSAL认证成功")
+            task_logger.info(f"微软账号MSAL认证成功")
             stream_logger.info(f"微软账号MSAL认证成功")
             return TokenResult(
                 success=True,
@@ -321,11 +321,11 @@ async def _get_microsoft_token(
             error_code = result.error_code or "UNKNOWN"
             error_message = result.message or "Microsoft认证失败"
             
-            logger.error(f"微软账号MSAL认证失败")
-            logger.error(f"  错误码: {error_code}")
-            logger.error(f"  错误消息: {error_message}")
+            task_logger.error(f"微软账号MSAL认证失败")
+            task_logger.error(f"  错误码: {error_code}")
+            task_logger.error(f"  错误消息: {error_message}")
             if result.error_details:
-                logger.error(f"  错误详情: {result.error_details}")
+                task_logger.error(f"  错误详情: {result.error_details}")
             
             stream_logger.error(f"微软账号MSAL认证失败: {error_message}")
             
@@ -345,7 +345,7 @@ async def _get_microsoft_token(
 
     except asyncio.TimeoutError as e:
         error_msg = f"获取Microsoft Token超时: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        task_logger.error(error_msg, exc_info=True)
         stream_logger.error(error_msg)
         return TokenResult(
             success=False,
@@ -360,7 +360,7 @@ async def _get_microsoft_token(
 
     except ConnectionError as e:
         error_msg = f"获取Microsoft Token网络连接失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        task_logger.error(error_msg, exc_info=True)
         stream_logger.error(error_msg)
         return TokenResult(
             success=False,
@@ -375,7 +375,7 @@ async def _get_microsoft_token(
 
     except ValueError as e:
         error_msg = f"获取Microsoft Token参数错误: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        task_logger.error(error_msg, exc_info=True)
         stream_logger.error(error_msg)
         return TokenResult(
             success=False,
@@ -390,7 +390,7 @@ async def _get_microsoft_token(
 
     except Exception as e:
         error_msg = f"获取Microsoft Token异常: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        task_logger.error(error_msg, exc_info=True)
         stream_logger.error(error_msg)
         return TokenResult(
             success=False,
@@ -407,7 +407,7 @@ async def _get_microsoft_token(
 async def _get_xbox_live_token(
     microsoft_tokens: Any,
     context: AgentTaskContext,
-    logger,
+    task_logger,
     stream_logger
 ) -> TokenResult:
     """
@@ -416,7 +416,7 @@ async def _get_xbox_live_token(
     参数：
     - microsoft_tokens: 微软访问令牌
     - context: 任务上下文
-    - logger: 主日志记录器
+    - task_logger: 任务日志记录器
     - stream_logger: 流媒体账号专用日志记录器
     
     返回：
@@ -427,20 +427,20 @@ async def _get_xbox_live_token(
 
         xbox_client = XboxLiveClient()
 
-        logger.info("开始获取Xbox Live Token（包括GSSV Token）")
+        task_logger.info("开始获取Xbox Live Token（包括GSSV Token）")
         stream_logger.info("开始获取Xbox Live Token（包括GSSV Token）")
         
         xbox_tokens = await xbox_client.get_xbox_tokens_with_gssv(microsoft_tokens.access_token)
         
         if xbox_tokens and xbox_tokens.gs_token:
-            logger.info(f"Xbox Live Token获取成功（含GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: True")
+            task_logger.info(f"Xbox Live Token获取成功（含GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: True")
             stream_logger.info(f"Xbox Live Token获取成功（含GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: True")
             return TokenResult(
                 success=True,
                 xbox_tokens=xbox_tokens
             )
         elif xbox_tokens:
-            logger.warning(f"Xbox Live Token获取成功（无GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
+            task_logger.warning(f"Xbox Live Token获取成功（无GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
             stream_logger.warning(f"Xbox Live Token获取成功（无GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
             return TokenResult(
                 success=True,
@@ -452,12 +452,12 @@ async def _get_xbox_live_token(
             )
         else:
             # 尝试旧流程
-            logger.warning("GSSV Token获取失败，尝试旧流程...")
+            task_logger.warning("GSSV Token获取失败，尝试旧流程...")
             xbox_tokens = await xbox_client.get_xbox_tokens(microsoft_tokens.access_token)
             if xbox_tokens:
-                logger.warning("GSSV Token获取失败，使用旧的Xbox Live Token")
+                task_logger.warning("GSSV Token获取失败，使用旧的Xbox Live Token")
                 stream_logger.warning("GSSV Token获取失败，使用旧的Xbox Live Token")
-                logger.info(f"Xbox Live Token获取成功（旧流程）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
+                task_logger.info(f"Xbox Live Token获取成功（旧流程）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
                 stream_logger.info(f"Xbox Live Token获取成功（旧流程）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
                 return TokenResult(
                     success=True,
@@ -470,7 +470,7 @@ async def _get_xbox_live_token(
             else:
                 # 完全失败
                 error_msg = "Xbox Live Token获取失败（包含GSSV Token）"
-                logger.error(error_msg)
+                task_logger.error(error_msg)
                 stream_logger.error(error_msg)
                 
                 return TokenResult(
@@ -485,7 +485,7 @@ async def _get_xbox_live_token(
 
     except asyncio.TimeoutError as e:
         error_msg = f"获取Xbox Live Token超时: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        task_logger.error(error_msg, exc_info=True)
         stream_logger.error(error_msg)
         return TokenResult(
             success=False,
@@ -500,7 +500,7 @@ async def _get_xbox_live_token(
 
     except ConnectionError as e:
         error_msg = f"获取Xbox Live Token网络连接失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        task_logger.error(error_msg, exc_info=True)
         stream_logger.error(error_msg)
         return TokenResult(
             success=False,
@@ -515,7 +515,7 @@ async def _get_xbox_live_token(
 
     except ValueError as e:
         error_msg = f"获取Xbox Live Token参数错误: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        task_logger.error(error_msg, exc_info=True)
         stream_logger.error(error_msg)
         return TokenResult(
             success=False,
@@ -530,7 +530,7 @@ async def _get_xbox_live_token(
 
     except Exception as e:
         error_msg = f"获取Xbox Live Token异常: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        task_logger.error(error_msg, exc_info=True)
         stream_logger.error(error_msg)
         return TokenResult(
             success=False,

@@ -259,7 +259,9 @@ except asyncio.CancelledError:
 | GPU 解码并发     | `task.max_concurrent_gpu: 3`（超出降 CPU） | 同上                        |
 | 同邮箱重登冷却      | `MIN_LOGIN_INTERVAL = 300s`           | `automation_scheduler.py` |
 | 任意两次登录间隔     | `MIN_ACCOUNT_INTERVAL = 15s`          | 同上                        |
-| HTTP / WS 心跳 | 各 60s                                 | `agent.yaml`              |
+| HTTP 心跳 | 60s | `agent.yaml` `heartbeat_interval` |
+| WS 心跳 | 30s（服务端 idle 默认 180s） | `agent.yaml` `ws_heartbeat_interval` |
+| 进度回调节流 | 2s/步（终态立即上报） | `agent.yaml` `platform.progress_report_interval_sec` |
 
 
 ---
@@ -343,7 +345,7 @@ backend:
 
 agent:
   heartbeat_interval: 60                   # HTTP 心跳
-  ws_heartbeat_interval: 60                # WS 心跳
+  ws_heartbeat_interval: 30                # WS 心跳（建议 ≤ 服务端 idle 超时的一半）
   reconnect_delay: 5
   max_reconnect_attempts: 10
 

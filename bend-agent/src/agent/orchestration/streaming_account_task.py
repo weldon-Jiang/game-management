@@ -8,7 +8,7 @@ StreamingAccountTask — 单任务状态机（两阶段生命周期）。
 import asyncio
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from ..core.logger import get_logger
+from ..core.task_logger import get_task_logger
 from ..game.account_provisioning import AccountProvisioningModule
 from ..runtime.input_focus import InputFocusManager
 from ..runtime.input_gate import InputGate
@@ -43,7 +43,7 @@ class StreamingAccountTask:
         self.window_manager = window_manager
         self.platform_client = platform_client
         self.two_phase = two_phase
-        self.logger = get_logger(f"sat_{runtime.task_id}")
+        self.task_logger = get_task_logger(runtime.task_id)
         self._skipped: Set[str] = set()
         self._decode_mode = "auto"
         self._last_automation_fail_msg: Optional[str] = None
@@ -112,7 +112,7 @@ class StreamingAccountTask:
 
             display_ok = await self._ensure_display_after_stream()
             if not display_ok:
-                self.logger.warning(
+                self.task_logger.warning(
                     "串流成功但窗口未就绪，进入 READY 后可手动显示窗口"
                 )
 
@@ -214,7 +214,7 @@ class StreamingAccountTask:
                 # 保留串流/窗口，使用户可在同一会话内重试 Step4。
                 self.runtime.set_phase(SessionPhase.AUTOMATION_FAILED, fail_msg)
                 await self._report_session(SessionPhase.AUTOMATION_FAILED, fail_msg)
-                self.logger.warning(
+                self.task_logger.warning(
                     "Step4 failed (%s); stream kept alive for retry",
                     step4_result.error_code,
                 )
@@ -224,7 +224,7 @@ class StreamingAccountTask:
             self.runtime.set_phase(SessionPhase.CLOSED, "Cancelled")
             return AutomationResult(success=False, error_code="CANCELLED", message="Cancelled")
         except Exception as exc:
-            self.logger.error("StreamingAccountTask failed: %s", exc, exc_info=True)
+            self.task_logger.error("StreamingAccountTask failed: %s", exc, exc_info=True)
             if not self.runtime.phase_fsm.is_terminal():
                 self.runtime.set_phase(SessionPhase.FAILED, str(exc))
                 await self._report_session(SessionPhase.FAILED, str(exc))
@@ -245,7 +245,7 @@ class StreamingAccountTask:
             self.runtime.window_visible = ok
             return ok
         except Exception as exc:
-            self.logger.warning("打开显示窗口失败: %s", exc)
+            self.task_logger.warning("打开显示窗口失败: %s", exc)
             self.runtime.window_visible = False
             return False
 

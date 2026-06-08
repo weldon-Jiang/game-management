@@ -73,6 +73,20 @@ bend:
         - path: /api/agents/**
           qps: 50
           burst: 30
+        - path: /api/agent-callback/**
+          qps: 50
+          burst: 30
+        - path: /api/v1/agent-callback/**
+          qps: 50
+          burst: 30
+        - path: /ws/**
+          qps: 50
+          burst: 30
+    cors:
+      allowed-origin-patterns:
+        - "*"
+      allow-credentials: true
+      max-age: 3600
     ip-filter:
       enabled: true
       blacklist: []

@@ -27,9 +27,13 @@ backend:
 # ----------------------------------------------
 agent:
   heartbeat_interval: 60
-  ws_heartbeat_interval: 60
+  ws_heartbeat_interval: 30
   reconnect_delay: 5
   max_reconnect_attempts: 10
+
+# Agent → Platform 进度回调节流（秒）；终态 COMPLETED/FAILED/CANCELLED 不受限
+platform:
+  progress_report_interval_sec: 2
 
 # ----------------------------------------------
 # 视频捕获配置

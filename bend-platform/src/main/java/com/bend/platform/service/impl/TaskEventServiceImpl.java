@@ -8,6 +8,7 @@ import com.bend.platform.repository.TaskEventMapper;
 import com.bend.platform.service.TaskEventService;
 import com.bend.platform.service.TaskService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,6 +16,7 @@ import java.util.List;
 /**
  * 任务事件查询与写入：Agent 回调/控制面经 record 落库，详情页按 taskId/sessionId 分页拉取。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class TaskEventServiceImpl implements TaskEventService {
@@ -60,6 +62,11 @@ public class TaskEventServiceImpl implements TaskEventService {
     /** 写入单条任务事件（架构红线：回调/控制面统一入口，禁止 Mapper 直连）。 */
     @Override
     public void record(TaskEvent event) {
-        taskEventMapper.insert(event);
+        try {
+            taskEventMapper.insert(event);
+        } catch (Exception e) {
+            log.warn("TaskEvent 写入失败 - taskId: {}, scope: {}, message: {}",
+                    event.getTaskId(), event.getScope(), event.getMessage(), e);
+        }
     }
 }

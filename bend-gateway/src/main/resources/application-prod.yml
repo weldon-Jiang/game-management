@@ -24,3 +24,10 @@ management:
   endpoint:
     health:
       show-details: never
+
+# 生产 CORS 白名单（通过环境变量注入，逗号分隔多个域名）
+bend:
+  gateway:
+    cors:
+      allowed-origin-patterns: ${CORS_ALLOWED_ORIGINS:https://localhost}
+      allow-credentials: true

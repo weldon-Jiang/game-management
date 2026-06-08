@@ -38,9 +38,12 @@ export const connectStomp = () => {
     const protocol = apiBaseUrl.startsWith('https') ? 'wss:' : 'ws:'
     const host = new URL(apiBaseUrl).host
     const wsUrl = `${protocol}//${host}/ws/stomp`
+    const token = localStorage.getItem('token')
+    const connectHeaders = token ? { Authorization: `Bearer ${token}` } : {}
 
     stompClient = new Stomp.Client({
       brokerURL: wsUrl,
+      connectHeaders,
       reconnectDelay: 5000,
       heartbeatIncoming: 30000,
       heartbeatOutgoing: 30000

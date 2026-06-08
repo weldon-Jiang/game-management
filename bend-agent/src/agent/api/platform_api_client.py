@@ -103,6 +103,13 @@ class PlatformApiClient:
         self._retry_count = 3
         self._retry_delay = 1.0
         self._closed = False
+        self._progress_throttle_at: Dict[str, float] = {}
+        self._progress_interval_sec = float(
+            config.get('platform.progress_report_interval_sec', 2)
+        )
+        self._terminal_progress_statuses = frozenset({
+            'COMPLETED', 'FAILED', 'CANCELLED',
+        })
 
     def set_credentials(self, agent_id: str, agent_secret: str):
         self._agent_id = agent_id
@@ -148,6 +155,21 @@ class PlatformApiClient:
             except Exception as e:
                 self.logger.debug(f"关闭HTTP会话异常: {e}")
 
+    def _should_throttle_progress(self, task_id: str, step: str, status: str) -> bool:
+        """非终态进度按 (taskId, step) 节流，降低平台 DB 写入频率。"""
+        normalized = (status or '').upper()
+        if normalized in self._terminal_progress_statuses:
+            return False
+        if self._progress_interval_sec <= 0:
+            return False
+        key = f"{task_id}:{step}"
+        now = time.time()
+        last = self._progress_throttle_at.get(key, 0.0)
+        if now - last < self._progress_interval_sec:
+            return True
+        self._progress_throttle_at[key] = now
+        return False
+
     async def report_progress(
         self,
         task_id: str,
@@ -184,6 +206,13 @@ class PlatformApiClient:
         返回：
         - dict: 包含 received, action (CONTINUE|STOP|CANCEL) 等；失败时包含 success=False
         """
+        if self._should_throttle_progress(task_id, step, status):
+            self.logger.debug(
+                "进度上报节流跳过 - TaskID: %s, Step: %s, Status: %s",
+                task_id, step, status,
+            )
+            return {"success": True, "throttled": True}
+
         kwargs = _normalize_progress_fields(kwargs)
         game_account_id = game_account_id or kwargs.pop("game_account_id", None)
         today_completed = (

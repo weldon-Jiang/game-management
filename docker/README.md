@@ -13,6 +13,8 @@
 | `docker-compose.yml` | 服务编排定义 |
 | `.env.dev` / `.env.sit` / `.env.prod` | 各环境变量（含密钥、端口、Spring Profile）。**已被 `.gitignore` 忽略，请勿提交** |
 | `start-dev.ps1` / `start-sit.ps1` / `start-prod.ps1` | 启动 / 打包部署 |
+| `compose-up.ps1` | 启动脚本内部共用（正确组装 `docker compose up` 参数） |
+| `hot-deploy-dev.ps1` | Dev 热部署：本地编译 + `docker cp` + 重启（无需 `docker build`） |
 | `stop-dev.ps1` / `stop-sit.ps1` / `stop-prod.ps1` | 停服 / 清理 |
 
 ---
@@ -55,7 +57,22 @@ cd docker
 ./start-sit.ps1 -Services backend -NoBuild
 ```
 
-### 3.4 按 profile 控制启动范围
+### 3.4 Dev 热部署（镜像源不可用 / 快速验证代码）
+
+容器已启动时，本地编译后替换容器内产物，**不触发 `docker build`**：
+
+```powershell
+./hot-deploy-dev.ps1                         # backend + gateway + frontend
+./hot-deploy-dev.ps1 -Services backend       # 仅后端
+./hot-deploy-dev.ps1 -Services backend,gateway
+./hot-deploy-dev.ps1 -SkipBuild              # 已有 target/dist，仅复制并重启
+```
+
+前提：先 `./start-dev.ps1 -NoBuild` 确保 `bend-xbox-{backend,gateway,frontend}` 在运行。
+
+> Agent（Python）改动不在此脚本范围，需本地重启 Agent 进程。
+
+### 3.5 按 profile 控制启动范围
 
 ```powershell
 ./start-sit.ps1 -Profile app      # 前端+后端+网关

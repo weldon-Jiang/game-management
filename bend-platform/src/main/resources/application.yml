@@ -123,6 +123,15 @@ cors:
 agent:
   heartbeat_timeout: ${AGENT_HEARTBEAT_TIMEOUT:120}
   heartbeat_check_interval: ${AGENT_HEARTBEAT_CHECK_INTERVAL:30000}
+  disconnect_grace_seconds: ${AGENT_DISCONNECT_GRACE_SECONDS:180}
+  disconnect_check_interval: ${AGENT_DISCONNECT_CHECK_INTERVAL:30000}
+  ws_max_idle_timeout_ms: ${AGENT_WS_MAX_IDLE_TIMEOUT_MS:180000}
+  load_control:
+    redis_probe_interval: ${AGENT_LOAD_REDIS_PROBE_INTERVAL:60000}
+
+# STOMP WebSocket（前端任务监控）
+stomp:
+  allowed-origins: ${STOMP_ALLOWED_ORIGINS:http://localhost:3090,http://localhost:5173}
 
 # ----------------------------------------------
 # 任务超时检测配置

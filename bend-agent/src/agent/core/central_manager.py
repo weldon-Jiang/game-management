@@ -26,6 +26,7 @@ from datetime import datetime
 
 from ..core.config import config
 from ..core.logger import get_logger
+from ..core.heartbeat_logger import get_heartbeat_logger
 from ..api.client import ApiClient
 from ..api.websocket import WSClient
 from ..core.update_manager import UpdateManager, UpdateStatus
@@ -119,8 +120,11 @@ class CentralManager:
         self._update_check_task: Optional[asyncio.Task] = None  # 版本检查任务
         self._uninstall_requested = False           # 卸载请求标志
         self._clear_registry_requested = False      # 清除注册表请求标志
+        # 按 taskId 跟踪后台任务协程，避免 WS 监听循环被长任务阻塞
+        self._inflight_task_handles: Dict[str, asyncio.Task] = {}
 
         self.logger = get_logger('agent')            # 日志记录器
+        self._heartbeat_logger = get_heartbeat_logger()
 
         # 初始化API客户端和WebSocket客户端
         self.api = ApiClient(agent_id, agent_secret)  # HTTP API客户端
@@ -557,11 +561,16 @@ class CentralManager:
                     xbox_session_count=xbox_session_count
                 )
                 self._agent_info.last_heartbeat = datetime.now()
-                self.logger.debug(f"Heartbeat sent (running: {running_task_count}, xbox: {xbox_session_count})")
+                self._heartbeat_logger.debug(
+                    "HTTP heartbeat ok (running=%s, xbox_sessions=%s)",
+                    running_task_count,
+                    xbox_session_count,
+                )
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self.logger.error(f"Heartbeat error: {e}")
+                self._heartbeat_logger.error(f"HTTP heartbeat error: {e}")
+                self.logger.error(f"HTTP heartbeat error: {e}")
 
     async def _update_check_loop(self, interval: int):
         """
@@ -588,42 +597,53 @@ class CentralManager:
 
     async def _handle_task(self, task_data: Dict):
         """
-        处理后端下发的任务
+        处理后端下发的任务（非阻塞）：立即 create_task 放飞，WS 监听循环可继续收 task_control。
 
         参数说明：
-        - task_data: 任务数据，包含以下字段：
-          - taskId: 任务唯一标识符
-          - type: 任务类型
-          - params: 任务参数
-
-        处理流程：
-        1. 从任务数据中提取任务ID和类型
-        2. 将任务交给任务执行器执行
-        3. 根据执行结果通知后端任务完成或失败
+        - task_data: 任务数据，包含 taskId、type、params 等字段
 
         注意：
-        - 任务执行是异步的，不会阻塞心跳等后台任务
-        - 高并发场景下，多个任务可以同时执行
+        - 同一 taskId 若已有在途协程则忽略重复下发
+        - 执行结果在子协程内通过 HTTP 回调通知平台
         """
         task_id = task_data.get('taskId')
         task_type = task_data.get('type')
 
         self.logger.info(f"Received task: {task_type} (ID: {task_id})")
 
+        if not task_id:
+            self.logger.warning("Task dispatch rejected: missing taskId")
+            return
+
+        existing = self._inflight_task_handles.get(task_id)
+        if existing is not None and not existing.done():
+            self.logger.warning(
+                "Task %s already running, ignoring duplicate WS dispatch", task_id
+            )
+            return
+
+        handle = asyncio.create_task(
+            self._run_task_and_notify(task_data),
+            name=f"task-{task_id}",
+        )
+        self._inflight_task_handles[task_id] = handle
+
+    async def _run_task_and_notify(self, task_data: Dict):
+        """在后台协程中执行任务并 HTTP 回调结果。"""
+        task_id = task_data.get('taskId')
         try:
-            # 获取任务执行器并执行任务
             from ..task.task_executor import task_executor
             result = await task_executor.execute_task(task_data)
 
-            # 通知后端任务结果
             if result.get('success'):
                 await self._notify_task_complete(task_id, result)
             else:
                 await self._notify_task_fail(task_id, result.get('error', 'Task failed'))
-
         except Exception as e:
             self.logger.error(f"Task execution error: {e}")
             await self._notify_task_fail(task_id, str(e))
+        finally:
+            self._inflight_task_handles.pop(task_id, None)
 
     async def _notify_task_complete(self, task_id: str, result: Dict):
         """通知后端任务完成"""
@@ -895,7 +915,7 @@ class CentralManager:
         self.logger.info(f"Task stop requested: {task_id}")
 
     async def _handle_task_control(self, data: Dict):
-        """处理 task_control WebSocket 消息；taskId 必填。"""
+        """处理 task_control WebSocket 消息（非阻塞）；taskId 必填。"""
         task_id = data.get('taskId') or data.get('task_id')
         if not task_id:
             self.logger.warning("task_control rejected: missing taskId")
@@ -906,6 +926,14 @@ class CentralManager:
             data.get('action'),
             task_id,
         )
+        asyncio.create_task(
+            self._run_task_control_and_ack(data),
+            name=f"task-control-{task_id}-{data.get('action')}",
+        )
+
+    async def _run_task_control_and_ack(self, data: Dict):
+        """后台执行 task_control 并回传 ack，避免阻塞 WS 接收循环。"""
+        task_id = data.get('taskId') or data.get('task_id')
         try:
             from ..task.automation_scheduler import get_active_scheduler, TaskControlHandler
             from ..runtime.task_registry import TaskRuntimeRegistry
