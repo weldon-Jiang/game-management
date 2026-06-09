@@ -4,13 +4,15 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.XboxHostPageRequest;
+import com.bend.platform.entity.StreamingAccountHostBinding;
 import com.bend.platform.entity.XboxHost;
+import com.bend.platform.enums.HostBindingStatus;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
+import com.bend.platform.repository.StreamingAccountHostBindingMapper;
 import com.bend.platform.repository.XboxHostMapper;
 import com.bend.platform.service.CredentialTokenService;
 import com.bend.platform.service.MerchantService;
-import com.bend.platform.service.StreamingAccountHostBindingService;
 import com.bend.platform.service.StreamingAccountLoginRecordService;
 import com.bend.platform.service.XboxHostService;
 import com.bend.platform.util.DataSecurityUtil;
@@ -22,6 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -51,7 +54,7 @@ import java.util.stream.Collectors;
 public class XboxHostServiceImpl implements XboxHostService {
 
     private final XboxHostMapper xboxHostMapper;
-    private final StreamingAccountHostBindingService hostBindingService;
+    private final StreamingAccountHostBindingMapper hostBindingMapper;
     private final StreamingAccountLoginRecordService loginRecordService;
     private final MerchantService merchantService;
     private final DataSecurityUtil dataSecurityUtil;
@@ -235,7 +238,17 @@ public class XboxHostServiceImpl implements XboxHostService {
 
     @Override
     public List<XboxHost> findByBoundStreamingAccountId(String streamingAccountId) {
-        return hostBindingService.findActiveHostsByAccount(streamingAccountId);
+        LambdaQueryWrapper<StreamingAccountHostBinding> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(StreamingAccountHostBinding::getStreamingAccountId, streamingAccountId)
+                .eq(StreamingAccountHostBinding::getStatus, HostBindingStatus.ACTIVE.getCode());
+        List<XboxHost> hosts = new ArrayList<>();
+        for (StreamingAccountHostBinding binding : hostBindingMapper.selectList(wrapper)) {
+            XboxHost host = xboxHostMapper.selectById(binding.getXboxHostId());
+            if (host != null) {
+                hosts.add(host);
+            }
+        }
+        return hosts;
     }
 
     @Override

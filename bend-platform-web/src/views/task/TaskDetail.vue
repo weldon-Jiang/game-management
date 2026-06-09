@@ -170,7 +170,6 @@ import TaskControlBar from '@/components/task/TaskControlBar.vue'
 import GameAccountRunTable from '@/components/task/GameAccountRunTable.vue'
 import TaskEventTimeline from '@/components/task/TaskEventTimeline.vue'
 import StreamPipelineDiagnostic from '@/components/task/StreamPipelineDiagnostic.vue'
-import StreamPipelineDiagnostic from '@/components/task/StreamPipelineDiagnostic.vue'
 
 const route = useRoute()
 const taskId = computed(() => route.params.id)
