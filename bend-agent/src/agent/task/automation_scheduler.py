@@ -188,6 +188,7 @@ class AutomationScheduler:
         streaming_account_auto_code: str = "",
         two_phase: bool = True,
         relaunch: bool = False,
+        platform_xbox_hosts: Optional[List[Dict[str, Any]]] = None,
     ) -> bool:
         """
         启动自动化任务
@@ -240,6 +241,7 @@ class AutomationScheduler:
             account_platform=account_platform or "xbox",
             auto_match_host=auto_match_host,
         )
+        context.platform_xbox_hosts = list(platform_xbox_hosts or [])
 
         # 解密游戏账号密码
         game_accounts_with_passwords = []
@@ -265,12 +267,15 @@ class AutomationScheduler:
         context.game_accounts = game_accounts_with_passwords
 
         if assigned_xbox:
+            platform_id = assigned_xbox.get("id", "")
+            xbox_id = assigned_xbox.get("xboxId") or assigned_xbox.get("xbox_id") or ""
             context.assigned_xbox = XboxInfo(
-                id=assigned_xbox.get("id", ""),
+                id=xbox_id or platform_id,
+                platform_host_id=platform_id,
                 name=assigned_xbox.get("name", "Xbox"),
-                ip_address=assigned_xbox.get("ipAddress", ""),
-                live_id=assigned_xbox.get("liveId", ""),
-                mac_address=assigned_xbox.get("macAddress", "")
+                ip_address=assigned_xbox.get("ipAddress", "") or assigned_xbox.get("ip_address", ""),
+                live_id=assigned_xbox.get("liveId", "") or assigned_xbox.get("live_id", ""),
+                mac_address=assigned_xbox.get("macAddress", "") or assigned_xbox.get("mac_address", ""),
             )
 
         cancel_event = asyncio.Event()

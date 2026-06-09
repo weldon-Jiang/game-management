@@ -34,11 +34,45 @@
 
 import asyncio
 import sys
-from typing import Callable, Optional, Any
+from typing import Callable, Optional, Any, Dict
 
 from ..core.task_logger import get_task_logger
 from ..core.account_logger import get_stream_logger
 from ..task.task_context import AgentTaskContext, Step3Result, TaskStepStatus
+
+
+def _load_window_settings() -> Dict[str, Any]:
+    """读取 agent.yaml window.* 与 close_terminates_task 映射。"""
+    from ..core.config import config as app_config
+
+    close_terminates = bool(app_config.get("window.close_terminates_task", False))
+    title_tpl = str(app_config.get("window.title_template", "{email}"))
+    return {
+        "width": int(app_config.get("window.default_width", 1280)),
+        "height": int(app_config.get("window.default_height", 720)),
+        "display_fps_max": float(app_config.get("window.display_fps_max", 30)),
+        "fit_aspect": bool(app_config.get("window.fit_aspect", True)),
+        "hide_on_close": not close_terminates,
+        "title_template": title_tpl,
+    }
+
+
+def _format_window_title(context: AgentTaskContext, template: str) -> str:
+    email = context.streaming_account_email or "Xbox"
+    try:
+        return template.format(email=email, task_id=context.task_id[:8])
+    except Exception:
+        return email
+
+
+def _build_step3_pipeline_diagnostic(context: AgentTaskContext) -> Dict[str, Any]:
+    from .step2_xbox_streaming import _pipeline_diagnostic_from_context
+
+    diag = _pipeline_diagnostic_from_context(context)
+    diag["inputDc"] = "ok" if not getattr(context, "_input_channel_dirty", False) else "fail"
+    if context.sdl_window is not None:
+        diag["display"] = "ok"
+    return diag
 
 
 async def step3_streaming_init(
@@ -176,6 +210,7 @@ async def step3_streaming_init(
         if context.sdl_window:
             # 就绪等待和手动接管期间仍需持续刷帧，否则 SDL 窗口会停在旧画面。
             await _start_sdl_display_pump(context, task_logger)
+
         if not stream_ready:
             error_msg = f"串流就绪检查未通过: {ready_detail}"
             task_logger.error(error_msg)
@@ -192,6 +227,8 @@ async def step3_streaming_init(
         if not game_ready:
             task_logger.warning("游戏界面检测未完成，但串流通道已就绪")
 
+        await _start_input_pump_if_ready(context, task_logger)
+
         success_msg = "串流环境初始化完成，画面捕获器和手柄控制器已准备就绪"
         task_logger.info(success_msg)
         stream_logger.info(success_msg)
@@ -203,7 +240,8 @@ async def step3_streaming_init(
                 "gamepadName": gamepad_name,
                 "keyboardMapperAvailable": keyboard_available,
                 "frameCaptureMode": getattr(context, '_video_capture_mode', 'unknown'),
-                "sdlWindowEnabled": context.sdl_window is not None
+                "sdlWindowEnabled": context.sdl_window is not None,
+                "pipelineDiagnostic": _build_step3_pipeline_diagnostic(context),
             }
         )
 
@@ -267,27 +305,9 @@ async def _init_stream_window(
     try:
         from ..windows.stream_window import StreamWindow
 
-        if getattr(context, "_xhome_requires_webrtc", False):
-            window = StreamWindow(window_title="Bend WebRTC")
-            task_logger.info("xHome WebRTC 模式跳过本机 Xbox 窗口查找")
-            stream_logger.info("xHome WebRTC 模式跳过本机 Xbox 窗口查找")
-            return window
-
-        window = StreamWindow(window_title="Xbox")
-
-        if context.window_id:
-            window._hwnd = context.window_id
-            task_logger.info(f"使用已有窗口句柄: {context.window_id}")
-        else:
-            await window.find_window()
-            if not window._hwnd:
-                task_logger.warning("未找到Xbox窗口，将使用默认窗口")
-                window._hwnd = context.window_id
-
-        await window.activate()
-        task_logger.info("串流窗口初始化成功")
-        stream_logger.info("串流窗口初始化成功")
-
+        window = StreamWindow(window_title="Bend LAN Stream")
+        task_logger.info("LAN 模式跳过本机 Xbox App 窗口查找")
+        stream_logger.info("LAN 模式跳过本机 Xbox App 窗口查找")
         return window
 
     except asyncio.TimeoutError as e:
@@ -309,17 +329,25 @@ async def _init_stream_window(
 
 
 async def _start_sdl_display_pump(context: AgentTaskContext, task_logger) -> None:
-    """保持 SDL 窗口响应：在 step3/就绪等待期间刷新 WebRTC 帧。"""
+    """保持 SDL 窗口响应：game_mat 持续更新，display 按 display_fps_max 节流。"""
     existing = getattr(context, "_sdl_display_task", None)
     if existing and not existing.done():
         return
 
+    win_settings = _load_window_settings()
+    display_interval = 1.0 / max(1.0, win_settings["display_fps_max"])
+    sdl = context.sdl_window
+    if sdl is not None and hasattr(sdl, "set_display_fps_max"):
+        sdl.set_display_fps_max(win_settings["display_fps_max"])
+
     async def _pump():
-        task_logger.info("SDL 显示泵已启动（就绪阶段也会刷帧）")
+        task_logger.info(
+            "SDL 显示泵已启动（max %sfps，game_mat/capture_mat 分离）",
+            win_settings["display_fps_max"],
+        )
         first_frame_logged = False
         while context.sdl_window and context.sdl_window.is_running:
             try:
-                # 该循环只负责显示，不做场景决策；Step4 启动后会接管独立的捕获/检测循环。
                 if hasattr(context.sdl_window, "process_events"):
                     context.sdl_window.process_events()
 
@@ -336,19 +364,36 @@ async def _start_sdl_display_pump(context: AgentTaskContext, task_logger) -> Non
                                 getattr(frame, "height", "?"),
                             )
                             first_frame_logged = True
+
                 if frame_data is not None:
                     if hasattr(frame_data, "copy"):
                         frame_data = frame_data.copy()
-                    context.sdl_window.update_frame(frame_data)
-                await asyncio.sleep(0.033)
+                    if hasattr(context.sdl_window, "present_frame"):
+                        context.sdl_window.present_frame(frame_data)
+                        context.sdl_window.render_display()
+                    else:
+                        context.sdl_window.update_frame(frame_data)
+
+                await asyncio.sleep(display_interval)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 task_logger.debug("SDL display pump: %s", exc)
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(display_interval)
         task_logger.info("SDL 显示泵已停止")
 
     context._sdl_display_task = asyncio.create_task(_pump())
+
+
+async def _start_input_pump_if_ready(context: AgentTaskContext, task_logger) -> None:
+    """串流与 input 通道就绪后启动 InputPump（125Hz 焦点 / 8Hz 背景）。"""
+    protocol = getattr(context, "_controller_protocol", None)
+    if protocol is None or getattr(context, "xbox_session", None) is None:
+        return
+    from ..input.pump_scheduler import start_input_pump
+
+    await start_input_pump(context, context.task_id, protocol)
+    task_logger.info("InputPump 已绑定 task=%s", context.task_id)
 
 
 async def _stop_sdl_display_pump(context: AgentTaskContext) -> None:
@@ -384,6 +429,9 @@ def _wire_sdl_close_handler(context: AgentTaskContext) -> None:
 async def step3_close_display(context: AgentTaskContext) -> None:
     """销毁 SDL 窗口并停止显示泵；自动化/串流不受影响。"""
     task_logger = get_task_logger(context.task_id)
+    from ..input.pump_scheduler import stop_input_pump
+
+    await stop_input_pump(context)
     await _stop_sdl_display_pump(context)
     sdl = getattr(context, "sdl_window", None)
     if sdl:
@@ -420,8 +468,8 @@ async def step3_ensure_display(context: AgentTaskContext) -> bool:
         task_logger.info("窗口显示已禁用，跳过")
         return False
 
-    if not context.frame_capture and not getattr(context, "_webrtc_frame_controller", None):
-        task_logger.warning("无法显示窗口：frame_capture / WebRTC 未就绪")
+    if not context.frame_capture:
+        task_logger.warning("无法显示窗口：frame_capture 未就绪")
         return False
 
     sdl = context.sdl_window
@@ -445,7 +493,7 @@ async def step3_reopen_display(
     stream_logger=None,
 ) -> bool:
     """
-    基于现有 WebRTC/frame_capture 上下文重新打开 SDL 窗口。
+    基于现有 frame_capture 上下文重新打开 SDL 窗口。
 
     跳过认证、发现与串流协商。
     """
@@ -456,8 +504,8 @@ async def step3_reopen_display(
         task_logger.info("窗口显示已禁用，跳过重新打开")
         return False
 
-    if not context.frame_capture and not getattr(context, "_webrtc_frame_controller", None):
-        task_logger.warning("无法重新打开窗口：frame_capture / WebRTC 未就绪")
+    if not context.frame_capture:
+        task_logger.warning("无法重新打开窗口：frame_capture 未就绪")
         return False
 
     if _sdl_window_is_active(context.sdl_window):
@@ -509,43 +557,25 @@ async def _init_sdl_window(
 
         gpu_type = getattr(context, '_gpu_type', 'cpu')
         gpu_available = getattr(context, '_gpu_available', False)
+        win_settings = _load_window_settings()
 
         task_logger.info(f"初始化SDL窗口，GPU类型: {gpu_type}")
 
-        from ..core.config import config as app_config
-        from ..gssv.network_util import fit_display_size
-
-        account = context.streaming_account_email or "Xbox"
-        max_w = int(app_config.get("window.default_width", 1280))
-        max_h = int(app_config.get("window.default_height", 720))
-        screen_w, screen_h = 1920, 1080
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                user32 = ctypes.windll.user32
-                screen_w = int(user32.GetSystemMetrics(0))
-                screen_h = int(user32.GetSystemMetrics(1))
-            except Exception:
-                pass
-
-        video_w = int(getattr(context, "stream_width", 0) or max_w)
-        video_h = int(getattr(context, "stream_height", 0) or max_h)
-        win_w, win_h = fit_display_size(
-            screen_w, screen_h, video_w, video_h, max_w=max_w, max_h=max_h
-        )
+        title = _format_window_title(context, win_settings["title_template"])
 
         config = SDLWindowConfig(
-            width=win_w,
-            height=win_h,
-            title=f"Bend Agent - {account} - {context.task_id[:8]}",
+            width=win_settings["width"],
+            height=win_settings["height"],
+            title=title,
             vsync=True,
             double_buffer=True,
             resizable=False,
-            hide_on_close=False,
-            fit_aspect=True,
+            hide_on_close=win_settings["hide_on_close"],
+            fit_aspect=win_settings["fit_aspect"],
         )
 
         sdl_window = SDLStreamWindow(config)
+        sdl_window.set_display_fps_max(win_settings["display_fps_max"])
         success = await sdl_window.initialize(config)
 
         if not success:
@@ -603,38 +633,25 @@ async def _init_frame_capture(
 
         video_capture_mode = getattr(context, '_video_capture_mode', 'fallback')
         video_stream_controller = getattr(context, '_video_stream_controller', None)
-        webrtc_frame_controller = getattr(context, '_webrtc_frame_controller', None)
         direct_capture = getattr(context, '_direct_capture', None)
-        requires_webrtc = bool(getattr(context, "_xhome_requires_webrtc", False))
 
-        if requires_webrtc:
-            if not webrtc_frame_controller:
-                task_logger.error("xHome WebRTC 模式缺少 WebRTC 帧控制器，拒绝降级到窗口截图")
-                stream_logger.error("xHome WebRTC 模式缺少 WebRTC 帧控制器")
-                return None
-            video_capture_mode = "webrtc"
-        elif video_capture_mode in ('fallback', 'window') and webrtc_frame_controller:
-            video_capture_mode = 'webrtc'
+        if video_capture_mode in ("fallback", "window", "webrtc"):
+            video_capture_mode = "rtp" if video_stream_controller else "direct"
 
         capture = VideoFrameCapture(window)
         capture.set_video_controller(video_stream_controller)
-        capture.set_webrtc_controller(webrtc_frame_controller)
         capture.set_direct_capture(direct_capture)
         capture.set_capture_mode(video_capture_mode)
 
         context.frame_capture = capture
 
         fps_info = ""
-        if video_capture_mode == "webrtc" and webrtc_frame_controller:
-            fps_info = " (WebRTC模式)"
-            task_logger.info(f"画面捕获器已配置为 WebRTC 模式{fps_info}")
-            stream_logger.info(f"画面捕获器已配置为 WebRTC 模式{fps_info}")
-        elif video_capture_mode == "rtp" and video_stream_controller:
-            fps_info = f" (RTP模式)"
+        if video_capture_mode == "rtp" and video_stream_controller:
+            fps_info = " (RTP模式)"
             task_logger.info(f"画面捕获器已配置为RTP模式，支持高帧率显示{fps_info}")
             stream_logger.info(f"画面捕获器已配置为RTP模式{fps_info}")
         elif video_capture_mode == "direct" and direct_capture:
-            fps_info = f" (直接捕获模式)"
+            fps_info = " (直接捕获模式)"
             task_logger.info(f"画面捕获器已配置为直接捕获模式{fps_info}")
             stream_logger.info(f"画面捕获器已配置为直接捕获模式{fps_info}")
         else:
@@ -643,15 +660,14 @@ async def _init_frame_capture(
 
         frame = await capture.capture_frame()
         if frame:
-            prefix = "WebRTC 首帧" if video_capture_mode == "webrtc" else "画面首帧"
-            task_logger.info(f"{prefix}捕获成功，分辨率: {frame.width}x{frame.height}{fps_info}")
-            stream_logger.info(f"{prefix}捕获成功，分辨率: {frame.width}x{frame.height}{fps_info}")
+            task_logger.info(f"画面首帧捕获成功，分辨率: {frame.width}x{frame.height}{fps_info}")
+            stream_logger.info(f"画面首帧捕获成功，分辨率: {frame.width}x{frame.height}{fps_info}")
         else:
             task_logger.warning("画面捕获器初始化成功，但无法捕获首帧")
             stream_logger.warning("画面捕获器初始化成功，但无法捕获首帧")
-            if requires_webrtc:
-                task_logger.error("WebRTC 首帧 FAILED: xHome 模式拒绝使用窗口截图兜底")
-                stream_logger.error("WebRTC 首帧 FAILED: xHome 模式拒绝使用窗口截图兜底")
+            if video_capture_mode in ("fallback", "window"):
+                task_logger.error("LAN 模式首帧 FAILED: 需要 RTP 或直接捕获，拒绝窗口截图兜底")
+                stream_logger.error("LAN 模式首帧 FAILED: 需要 RTP 或直接捕获")
                 return None
 
         return capture
@@ -683,7 +699,6 @@ async def _validate_stream_readiness(
     验证画面捕获与 input 通道就绪，失败时尝试一次重连。
     """
     from ..xbox.stream_keepalive import (
-        ensure_input_channel,
         is_input_channel_open,
         send_keepalive,
     )
@@ -700,21 +715,21 @@ async def _validate_stream_readiness(
             await asyncio.sleep(1.0)
         if len(set(sizes)) > 1:
             return False, f"帧分辨率不稳定: {sizes}"
-        prefix = "WebRTC 首帧" if getattr(context, "_video_capture_mode", "") == "webrtc" else "首帧"
+        prefix = "首帧"
         return True, f"{prefix}稳定 {sizes[0][0]}x{sizes[0][1]}"
 
     async def _check_input() -> tuple:
         session = getattr(context, "xbox_session", None)
         if session is None:
-            return True, "无 WebRTC 会话，跳过 input 检查"
-        if not await ensure_input_channel(session, timeout=10.0):
-            return False, "input DataChannel 未 open"
+            return True, "无流会话，跳过 input 检查"
+        if not getattr(session, "is_connected", False):
+            return False, "SmartGlass 未连接"
         ok1 = await send_keepalive(session)
         ok2 = await send_keepalive(session)
         if not (ok1 and ok2):
-            return False, "input DataChannel keepalive 发送失败"
+            return False, "SmartGlass keepalive 发送失败"
         state = getattr(session, "input_channel_state", None) or "open"
-        return True, f"input DataChannel ready ({state})"
+        return True, f"SmartGlass input ready ({state})"
 
     frames_ok, frames_msg = await _check_frames()
     input_ok, input_msg = await _check_input()
@@ -724,10 +739,11 @@ async def _validate_stream_readiness(
         return True, f"{frames_msg}; {input_msg}"
 
     task_logger.warning(
-        "STEP3 串流就绪检查 FAILED (%s; %s)，尝试重连 input DataChannel",
+        "STEP3 串流就绪检查 FAILED (%s; %s)，尝试重连 LAN 串流",
         frames_msg,
         input_msg,
     )
+
     from ..xbox.stream_recovery import reconnect_input_channel, rebind_stream_bindings
 
     if await reconnect_input_channel(context, task_logger):
@@ -746,20 +762,18 @@ async def _validate_stream_readiness(
 
 def _bind_input_channel_close_handler(context: AgentTaskContext, task_logger) -> None:
     """注册回调，供 step4 感知 input 通道断开。"""
-    session = getattr(context, "_cloud_stream_session", None) or getattr(
-        context, "xbox_session", None
-    )
+    session = getattr(context, "xbox_session", None)
     if session is None or not hasattr(session, "on_input_channel_close"):
         return
 
     def _on_close():
         context._input_channel_dirty = True
-        task_logger.warning("input DataChannel closed，已标记待恢复")
+        task_logger.warning("SmartGlass input 通道 closed，已标记待恢复")
 
     session.on_input_channel_close(_on_close)
     if hasattr(session, "bind_input_channel_handlers"):
         session.bind_input_channel_handlers()
-    task_logger.info("input DataChannel close 回调已注册")
+    task_logger.info("input 通道 close 回调已注册")
 
 
 async def _detect_game_screen(
@@ -818,7 +832,7 @@ async def _ensure_controller_protocol(
     task_logger,
     stream_logger,
 ) -> None:
-    """即使没有物理手柄也绑定 ControllerProtocol 到云端会话。"""
+    """绑定 ControllerProtocol 到 SmartGlass 会话。"""
     if getattr(context, "_controller_protocol", None):
         return
 
@@ -827,9 +841,8 @@ async def _ensure_controller_protocol(
     protocol = ControllerProtocol()
     if context.xbox_session:
         protocol.set_stream_controller(context.xbox_session)
-        channel = "WebRTC DataChannel" if getattr(context, "_cloud_stream_session", None) else "SmartGlass"
-        task_logger.info(f"控制器协议已绑定 Xbox 流会话 ({channel})")
-        stream_logger.info(f"控制器协议已绑定 Xbox 流会话 ({channel})")
+        task_logger.info("控制器协议已绑定 SmartGlass LAN 会话")
+        stream_logger.info("控制器协议已绑定 SmartGlass LAN 会话")
     else:
         task_logger.warning("Xbox 流会话未初始化，控制器协议暂无法发送信号")
 
@@ -860,7 +873,6 @@ async def _init_gamepad_controller(
     """
     try:
         from ..input.xbox_gamepad import XboxGamepadController
-        from ..input.controller_protocol import ControllerProtocol, ControllerSignal
 
         task_logger.info("正在初始化手柄控制器...")
         stream_logger.info("正在初始化手柄控制器...")
@@ -881,11 +893,8 @@ async def _init_gamepad_controller(
             await _ensure_controller_protocol(context, task_logger, stream_logger)
             protocol = context._controller_protocol
 
-        if protocol and context.xbox_session:
-            gamepad.set_input_callback(
-                lambda sig: protocol.send_signal(ControllerSignal.from_gamepad_signal(sig))
-            )
-        task_logger.info("手柄控制器初始化成功")
+        # 物理输入由 InputPump 统一 125Hz/8Hz 发送；gamepad 仅更新本地状态。
+        task_logger.info("手柄控制器初始化成功（InputPump 负责 DC 发送）")
         stream_logger.info("手柄控制器初始化成功")
 
         return gamepad
@@ -931,7 +940,7 @@ async def _init_keyboard_mapper(
     """
     try:
         from ..input.keyboard_mapper import KeyboardMapper
-        from ..input.controller_protocol import ControllerProtocol, ControllerSignal
+        from ..input.controller_protocol import ControllerSignal, XboxButtonFlag
         from ..input.keyboard_mapper import KeyAction
 
         task_logger.info("正在初始化键盘映射器...")
@@ -942,34 +951,35 @@ async def _init_keyboard_mapper(
 
         if hasattr(context, '_controller_protocol') and context._controller_protocol:
             protocol = context._controller_protocol
+            context._keyboard_overlay_signal = ControllerSignal.zero()
+
+            action_map = {
+                KeyAction.TAP_A: XboxButtonFlag.A,
+                KeyAction.TAP_B: XboxButtonFlag.B,
+                KeyAction.TAP_X: XboxButtonFlag.X,
+                KeyAction.TAP_Y: XboxButtonFlag.Y,
+                KeyAction.TAP_START: XboxButtonFlag.START,
+                KeyAction.TAP_SELECT: XboxButtonFlag.SELECT,
+                KeyAction.TAP_L1: XboxButtonFlag.L1,
+                KeyAction.TAP_R1: XboxButtonFlag.R1,
+                KeyAction.MOVE_UP: XboxButtonFlag.DPAD_UP,
+                KeyAction.MOVE_DOWN: XboxButtonFlag.DPAD_DOWN,
+                KeyAction.MOVE_LEFT: XboxButtonFlag.DPAD_LEFT,
+                KeyAction.MOVE_RIGHT: XboxButtonFlag.DPAD_RIGHT,
+            }
 
             def handle_key_action(action: KeyAction, is_pressed: bool):
                 try:
-                    signal = ControllerSignal()
-
-                    action_map = {
-                        KeyAction.TAP_A: (signal.BUTTON_A, 0.1),
-                        KeyAction.TAP_B: (signal.BUTTON_B, 0.1),
-                        KeyAction.TAP_X: (signal.BUTTON_X, 0.1),
-                        KeyAction.TAP_Y: (signal.BUTTON_Y, 0.1),
-                        KeyAction.TAP_START: (signal.BUTTON_START, 0.1),
-                        KeyAction.TAP_SELECT: (signal.BUTTON_SELECT, 0.1),
-                        KeyAction.MOVE_UP: (signal.DPAD_UP, 0),
-                        KeyAction.MOVE_DOWN: (signal.DPAD_DOWN, 0),
-                        KeyAction.MOVE_LEFT: (signal.DPAD_LEFT, 0),
-                        KeyAction.MOVE_RIGHT: (signal.DPAD_RIGHT, 0),
-                    }
-
-                    if action in action_map:
-                        button_flag, duration = action_map[action]
-                        if is_pressed or duration > 0:
-                            signal.set_button(button_flag, is_pressed)
-
+                    flag = action_map.get(action)
+                    if flag is None:
+                        return
+                    overlay = context._keyboard_overlay_signal
+                    overlay.set_button(flag, is_pressed)
                 except Exception as e:
                     task_logger.error(f"处理键盘动作失败: {e}")
 
             keyboard.register_action_callback(handle_key_action)
-            task_logger.info("键盘映射器已绑定到控制器协议")
+            task_logger.info("键盘映射器已绑定到 InputPump overlay")
         else:
             task_logger.warning("控制器协议未初始化，键盘映射将无法工作")
 

@@ -78,9 +78,10 @@ class XboxInfo:
     Xbox主机信息
 
     属性说明：
-    - id: Xbox主机唯一标识（云端 serverId）
+    - id: GSSV serverId（LAN 串流目标标识）
+    - platform_host_id: 平台 xbox_host 表主键（占用检测/锁定）
     - name: Xbox主机名称
-    - ip_address: IP地址（可选，云端串流不依赖）
+    - ip_address: 局域网 IP（LAN 串流必需）
     - live_id: Xbox Live ID
     - mac_address: MAC地址
     - play_path: PlaySession 创建路径（如 v5/sessions/home/play）
@@ -88,6 +89,7 @@ class XboxInfo:
     - console_type: 主机型号
     """
     id: str = ""
+    platform_host_id: str = ""
     name: str = ""
     ip_address: str = ""
     live_id: str = ""
@@ -187,6 +189,7 @@ class AgentTaskContext:
     window_id: str = ""
     game_accounts: List[GameAccountInfo] = field(default_factory=list)
     assigned_xbox: Optional[XboxInfo] = None
+    platform_xbox_hosts: List[Dict[str, Any]] = field(default_factory=list)
     account_platform: str = "xbox"
     auto_match_host: bool = True
     game_action_type: str = "squad_battle"

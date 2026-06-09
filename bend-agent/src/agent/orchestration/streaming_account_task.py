@@ -260,19 +260,12 @@ class StreamingAccountTask:
         "frame_capture",
         "sdl_window",
         "assigned_xbox",
-        "_play_session_manager",
-        "_play_session_enabled",
-        "_play_session_session_id",
-        "_play_session_session_path",
-        "_sdp_enabled",
-        "_media_channel_enabled",
-        "_cloud_stream_session",
-        "_webrtc_handler",
-        "_webrtc_frame_controller",
-        "_xhome_requires_webrtc",
+        "_smartglass_enabled",
+        "_video_stream_controller",
         "_video_capture_mode",
         "_video_mode",
         "_rtp_available",
+        "_direct_capture",
         "_gpu_available",
         "_gpu_type",
         "_gpu_decoder",
@@ -283,7 +276,7 @@ class StreamingAccountTask:
     )
 
     def _sync_media_context(self, media_ctx: AgentTaskContext) -> None:
-        """复制 step2/3 串流产物，供 step4 重连 WebRTC。"""
+        """复制 step2/3 串流产物，供 step4 重连 LAN 串流。"""
         for name in self._STREAM_CONTEXT_ATTRS:
             if hasattr(media_ctx, name):
                 setattr(self.context, name, getattr(media_ctx, name))

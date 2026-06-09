@@ -97,6 +97,7 @@ class DTLSHandler:
         self._master_secret: Optional[bytes] = None
         self._client_random: Optional[bytes] = None
         self._server_random: Optional[bytes] = None
+        self._dtls_cookie: bytes = b""
         self._handshake_callbacks: list = []
 
     async def connect(self, host: str, port: int, timeout: float = 10.0) -> bool:
@@ -127,8 +128,7 @@ class DTLSHandler:
                 timeout=timeout
             )
 
-            self._state = DTLSState.VERIFIED
-            return True
+            return self._state == DTLSState.VERIFIED
 
         except asyncio.TimeoutError:
             logger.error(f"DTLS 握手超时: {host}:{port}")
@@ -151,10 +151,33 @@ class DTLSHandler:
         while self._state == DTLSState.HANDSHAKING:
             await asyncio.sleep(0.1)
 
+    def handle_hello_verify_request(self, data: bytes):
+        """处理 DTLS HelloVerifyRequest，提取 cookie 并重发 ClientHello。"""
+        try:
+            if len(data) < 3:
+                logger.error("HelloVerifyRequest 数据太短")
+                return
+            cookie_len = data[2]
+            if len(data) < 3 + cookie_len:
+                logger.error("HelloVerifyRequest cookie 长度无效")
+                return
+            self._dtls_cookie = data[3:3 + cookie_len]
+            logger.debug("收到 HelloVerifyRequest，cookie 长度=%s", cookie_len)
+            asyncio.get_event_loop().create_task(self._resend_client_hello())
+        except Exception as exc:
+            logger.error("处理 HelloVerifyRequest 失败: %s", exc)
+            self._state = DTLSState.FAILED
+
+    async def _resend_client_hello(self):
+        """携带 cookie 重发 ClientHello。"""
+        self._client_random = os.urandom(32)
+        self._client_hello = self._build_client_hello()
+        await self._send_handshake(self._client_hello)
+
     def _build_client_hello(self) -> bytes:
         """构建 ClientHello"""
         client_version = b'\xfe\xfd'
-        cookie = b''
+        cookie = self._dtls_cookie
         session_id = b''
         cipher_suites = b'\x00\x17'  # TLS_PSK_WITH_AES_128_CBC_SHA
         extensions = self._build_srtp_extension()
@@ -312,6 +335,151 @@ class DTLSHandler:
         return self._state == DTLSState.VERIFIED
 
 
+class DTLSPSKClient(DTLSHandler):
+    """
+    DTLS-PSK 客户端（RFC 4279 + SRTP 扩展 RFC 5764）。
+
+    对照 xsrp/libxsrp 的 DtlsSrtpTransport：在 UDP 上完成 PSK 握手并导出 SRTP 密钥。
+    """
+
+    def __init__(self, psk: bytes, psk_identity: str = "xbox"):
+        super().__init__()
+        self._psk = psk
+        self._psk_identity = psk_identity or "xbox"
+        self._handshake_done = asyncio.Event()
+
+    async def connect(self, host: str, port: int, timeout: float = 10.0) -> bool:
+        """PSK 握手：发送 ClientHello 后等待 ChangeCipherSpec（含 HelloVerifyRequest 重试）。"""
+        self._remote_host = host
+        self._remote_port = port
+        self._handshake_done.clear()
+        self._dtls_cookie = b""
+        try:
+            self._state = DTLSState.CONNECTING
+            loop = asyncio.get_event_loop()
+            self._protocol = DTLSProtocol(self)
+            self._transport, _ = await loop.create_datagram_endpoint(
+                lambda: self._protocol,
+                remote_addr=(host, port),
+            )
+            self._state = DTLSState.HANDSHAKING
+            self._client_random = os.urandom(32)
+            self._client_hello = self._build_client_hello()
+            await self._send_handshake(self._client_hello)
+            await asyncio.wait_for(self._handshake_done.wait(), timeout=timeout)
+            return self._state == DTLSState.VERIFIED
+        except asyncio.TimeoutError:
+            logger.error("DTLS-PSK 握手超时: %s:%s", host, port)
+            self._state = DTLSState.FAILED
+            return False
+        except Exception as exc:
+            logger.error("DTLS-PSK 连接失败: %s", exc)
+            self._state = DTLSState.FAILED
+            return False
+
+    def _build_client_hello(self) -> bytes:
+        """构建带 PSK 与 SRTP 扩展的 ClientHello。"""
+        client_version = b"\xfe\xfd"  # DTLS 1.2
+        cookie = self._dtls_cookie
+        session_id = b""
+        # TLS_PSK_WITH_AES_128_CBC_SHA + TLS_EMPTY_RENEGOTIATION_INFO_SCSV
+        cipher_suites = b"\x00\x04\x00\x2f\x00\xff"
+        extensions = self._build_psk_srtp_extensions()
+
+        client_hello_body = (
+            client_version
+            + self._client_random
+            + struct.pack("B", len(session_id))
+            + session_id
+            + struct.pack("B", len(cookie))
+            + cookie
+            + struct.pack("!H", len(cipher_suites))
+            + cipher_suites
+            + struct.pack("B", 1)
+            + b"\x00"
+            + struct.pack("!H", len(extensions))
+            + extensions
+        )
+
+        handshake_header = b"\x01" + struct.pack("!I", len(client_hello_body))[1:] + b"\x00" * 3
+        return handshake_header + client_hello_body
+
+    def _build_psk_srtp_extensions(self) -> bytes:
+        """PSK identity + use_srtp 扩展。"""
+        identity_bytes = self._psk_identity.encode("utf-8")
+        psk_identity = struct.pack("!H", len(identity_bytes)) + identity_bytes
+        psk_identity_ext = struct.pack("!HH", 45, len(psk_identity)) + psk_identity
+
+        srtp_profiles = b"\x00\x01"  # SRTP_AES128_CM_HMAC_SHA1_80
+        srtp_ext = struct.pack("!HH", 14, len(srtp_profiles)) + srtp_profiles
+
+        return psk_identity_ext + srtp_ext
+
+    def handle_server_hello(self, data: bytes):
+        try:
+            if len(data) < 34:
+                logger.error("ServerHello 数据太短")
+                return
+            self._server_random = data[2:34]
+            logger.debug("收到 ServerHello")
+        except Exception as exc:
+            logger.error("处理 ServerHello 失败: %s", exc)
+            self._state = DTLSState.FAILED
+
+    def handle_server_hello_done(self):
+        logger.debug("收到 ServerHelloDone，发送 ClientKeyExchange + ChangeCipherSpec")
+        asyncio.get_event_loop().create_task(self._finish_psk_handshake())
+
+    def handle_change_cipher_spec(self):
+        logger.debug("收到服务端 ChangeCipherSpec，导出 SRTP 密钥")
+        self._derive_srtp_keys_from_psk()
+        self._state = DTLSState.VERIFIED
+        self._handshake_done.set()
+
+    async def _finish_psk_handshake(self):
+        """PSK 握手后半段：ClientKeyExchange → ChangeCipherSpec（对齐 libxsrp DtlsSrtpTransport）。"""
+        identity = self._psk_identity.encode("utf-8")
+        body = struct.pack("!H", len(identity)) + identity
+        client_key_exchange = b"\x10" + struct.pack("!I", len(body))[1:] + b"\x00" * 3 + body
+        await self._send_handshake(client_key_exchange)
+        await self._send_change_cipher_spec()
+
+    async def _send_change_cipher_spec(self):
+        """发送 ChangeCipherSpec 记录。"""
+        if not self._transport:
+            return
+        record = (
+            bytes([0x14])
+            + b"\xfe\xfd"
+            + struct.pack("!H", 0)
+            + b"\x00" * 6
+            + struct.pack("!H", 1)
+            + b"\x01"
+        )
+        self._transport.sendto(record)
+
+    def _derive_srtp_keys_from_psk(self):
+        """PSK master secret + RFC 5764 SRTP 密钥导出。"""
+        if not self._client_random or not self._server_random:
+            self._client_random = self._client_random or os.urandom(32)
+            self._server_random = self._server_random or os.urandom(32)
+
+        seed = self._client_random + self._server_random
+        label = b"master secret"
+        a = hmac.new(self._psk, label + seed, hashlib.sha1).digest()
+        master = b""
+        while len(master) < 48:
+            master += hmac.new(self._psk, a + label + seed, hashlib.sha1).digest()
+            a = hmac.new(self._psk, a, hashlib.sha1).digest()
+        self._master_secret = master[:48]
+        self._srtp_keys = self._srtp_key_derivation(
+            self._master_secret,
+            self._client_random,
+            self._server_random,
+        )
+        logger.info("DTLS-PSK SRTP 密钥材料已导出")
+
+
 class DTLSProtocol(asyncio.DatagramProtocol):
     """DTLS 数据报协议"""
 
@@ -322,14 +490,20 @@ class DTLSProtocol(asyncio.DatagramProtocol):
     def connection_made(self, transport):
         """连接建立"""
         self._transport = transport
+        self._handler._transport = transport
         logger.debug("DTLS 协议连接已建立")
 
     def datagram_received(self, data, addr):
         """收到数据报"""
-        content_type = data[0] if data else 0
+        if len(data) < 13:
+            return
+        content_type = data[0]
 
         if content_type == 0x16:
             self._handle_handshake(data[13:])
+        elif content_type == 0x14:
+            if hasattr(self._handler, "handle_change_cipher_spec"):
+                self._handler.handle_change_cipher_spec()
         elif content_type == 0x15:
             logger.warning("收到 DTLS Alert")
         elif content_type == 0x17:
@@ -342,8 +516,17 @@ class DTLSProtocol(asyncio.DatagramProtocol):
 
         handshake_type = data[0]
 
-        if handshake_type == 0x02:
+        if handshake_type == 0x03:
+            if hasattr(self._handler, "handle_hello_verify_request"):
+                self._handler.handle_hello_verify_request(data[4:])
+        elif handshake_type == 0x02:
             self._handler.handle_server_hello(data[4:])
+        elif handshake_type == 0x0E:
+            if hasattr(self._handler, "handle_server_hello_done"):
+                self._handler.handle_server_hello_done()
+        elif handshake_type == 0x0F:
+            if hasattr(self._handler, "handle_server_hello_done"):
+                self._handler.handle_server_hello_done()
 
     def error_received(self, exc):
         """错误接收"""

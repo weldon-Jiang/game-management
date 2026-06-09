@@ -137,10 +137,17 @@ class RTPSession:
 
         while self._running:
             try:
-                packet = await asyncio.wait_for(
+                raw = await asyncio.wait_for(
                     self._queue.get(),
                     timeout=1.0
                 )
+                if isinstance(raw, tuple):
+                    data, _addr = raw
+                else:
+                    data = raw
+                packet = self.parse_packet(data)
+                if packet is None:
+                    continue
                 self._packets_received += 1
                 self._last_packet_time = asyncio.get_event_loop().time()
                 yield packet
@@ -317,8 +324,8 @@ class H264RTPPacketAssemble:
         返回：
         - NALU 列表
         """
-        if packet.payload_type != 96:
-            logger.warning(f"非 H.264 RTP 包: payload_type={packet.payload_type}")
+        if packet.header.payload_type not in (96, 99, 127):
+            logger.debug(f"非 H.264 RTP 包: payload_type={packet.header.payload_type}")
             return []
 
         return list(self._parse_payload(packet.payload, packet.header.marker))

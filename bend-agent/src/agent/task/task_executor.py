@@ -728,6 +728,7 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
         auto_match_host = auto_match_host.lower() not in ('false', '0', 'no')
 
     assigned_xbox = params.get('host') or params.get('xboxInfo')
+    platform_xbox_hosts = params.get('xboxHosts') or []
     if not assigned_xbox and not auto_match_host:
         xbox_hosts = params.get('xboxHosts') or []
         if xbox_hosts:
@@ -781,6 +782,7 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
             auto_match_host=auto_match_host,
             two_phase=two_phase,
             relaunch=relaunch,
+            platform_xbox_hosts=platform_xbox_hosts,
         )
 
         if not success:

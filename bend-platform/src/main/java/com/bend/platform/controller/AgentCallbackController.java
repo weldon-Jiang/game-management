@@ -99,6 +99,40 @@ public class AgentCallbackController {
         }
     }
 
+    /** 按 GSSV serverId（xbox_host.xbox_id）查询占用状态。 */
+    @GetMapping("/xbox/device/{xboxId}")
+    public ApiResponse<Map<String, Object>> getXboxHostStatusByXboxId(@PathVariable String xboxId) {
+        try {
+            return ApiResponse.success(agentCallbackService.getXboxHostStatusByXboxId(xboxId));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        }
+    }
+
+    /** 按 GSSV serverId 锁定主机；平台未登记时返回 locked=false。 */
+    @PostMapping("/xbox/device/{xboxId}/lock")
+    public ApiResponse<Map<String, Object>> lockXboxHostByXboxId(
+            @PathVariable String xboxId,
+            @RequestBody(required = false) Map<String, Object> payload) {
+        try {
+            return ApiResponse.success(agentCallbackService.lockXboxHostByXboxId(xboxId, payload));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        }
+    }
+
+    /** 按 GSSV serverId 释放主机锁定。 */
+    @PostMapping("/xbox/device/{xboxId}/unlock")
+    public ApiResponse<Map<String, Object>> unlockXboxHostByXboxId(
+            @PathVariable String xboxId,
+            @RequestBody(required = false) Map<String, Object> payload) {
+        try {
+            return ApiResponse.success(agentCallbackService.unlockXboxHostByXboxId(xboxId, payload));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        }
+    }
+
     /**
      * 交换加密凭据。
      *

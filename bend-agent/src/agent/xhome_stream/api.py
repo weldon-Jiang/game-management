@@ -1,7 +1,5 @@
 """
-XHomeStreamService — PlaySession / WebRTC 媒体路径。
-
-封装 step3 初始化；暴露 MediaSession 供 step4 复用。
+StreamService — Step3 窗口/解码初始化封装（LAN 串流上下文）。
 """
 
 from dataclasses import dataclass
@@ -29,8 +27,10 @@ class MediaSession:
 
 
 class XHomeStreamService:
+    """保留类名以兼容 StreamingSession；仅 LAN 路径。"""
+
     def __init__(self):
-        self.logger = get_logger("xhome_stream")
+        self.logger = get_logger("stream_service")
 
     async def open_stream(
         self,
@@ -47,7 +47,6 @@ class XHomeStreamService:
         from ..vision.decode_strategy import resolve_decode_mode
 
         if source_context is not None:
-            # 复用 step2 上下文，使 WebRTC 会话/帧控制器流入 step3。
             context = source_context
             context.task_id = task_id
         else:
@@ -60,7 +59,6 @@ class XHomeStreamService:
             )
             context.microsoft_tokens = credentials.microsoft_tokens
             context.xbox_tokens = credentials.xbox_tokens
-            context.xbox_session = getattr(credentials, "xbox_session", None)
 
         context.assigned_xbox = XboxInfo(
             id=console.id,
@@ -101,17 +99,10 @@ class XHomeStreamService:
         )
 
     async def reconnect(self, media: MediaSession) -> bool:
-        from .session_connect import reconnect_webrtc_stream
+        from ..xbox.stream_recovery import reconnect_input_channel
 
-        ctx = media.context
-        if not ctx.xbox_session:
-            return False
         try:
-            ok = await reconnect_webrtc_stream(ctx, self.logger)
-            if ok:
-                from ..xbox.stream_recovery import rebind_stream_bindings
-                rebind_stream_bindings(ctx)
-            return ok
+            return await reconnect_input_channel(media.context, self.logger)
         except Exception as exc:
             self.logger.error("Reconnect failed: %s", exc)
             return False
@@ -123,8 +114,3 @@ class XHomeStreamService:
         from .cleanup import close_media_context
 
         await close_media_context(context, self.logger)
-
-    async def reopen_display(self, media: MediaSession) -> bool:
-        from ..automation.step3_streaming_init import step3_ensure_display
-
-        return await step3_ensure_display(media.context)

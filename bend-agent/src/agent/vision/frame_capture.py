@@ -120,9 +120,8 @@ class VideoFrameCapture:
         
         # 方案C新增：高性能视频流控制器
         self._video_controller = None  # 视频流控制器（RTP模式）
-        self._webrtc_controller = None  # WebRTC帧控制器（云端串流）
         self._direct_capture = None    # 直接捕获控制器
-        self._capture_mode = 'window'  # 捕获模式: 'webrtc' | 'rtp' | 'direct' | 'gpu' | 'window'
+        self._capture_mode = 'window'  # 捕获模式: 'rtp' | 'direct' | 'gpu' | 'window'
 
         if self._use_gpu:
             self.logger.info("GPU加速已启用")
@@ -141,12 +140,6 @@ class VideoFrameCapture:
         if controller:
             self.logger.info("已设置视频流控制器")
 
-    def set_webrtc_controller(self, controller):
-        """设置 WebRTC 帧控制器（云端串流）。"""
-        self._webrtc_controller = controller
-        if controller:
-            self.logger.info("已设置 WebRTC 帧控制器")
-
     def set_direct_capture(self, capture):
         """
         设置直接捕获控制器（方案C）
@@ -163,7 +156,7 @@ class VideoFrameCapture:
         设置捕获模式（方案C）
 
         参数：
-        - mode: 捕获模式 ('webrtc' | 'rtp' | 'direct' | 'gpu' | 'window')
+        - mode: 捕获模式 ('rtp' | 'direct' | 'gpu' | 'window')
         """
         self._capture_mode = mode
         self.logger.info(f"捕获模式已设置为: {mode}")
@@ -233,11 +226,6 @@ class VideoFrameCapture:
             return await self._capture_frame_unlocked()
 
     async def _capture_frame_unlocked(self) -> Optional[Frame]:
-        # 云端 WebRTC 视频流（最高优先级）
-        if self._capture_mode == 'webrtc' and self._webrtc_controller:
-            return await self._capture_webrtc_frame()
-
-        # 方案C优化：优先使用RTP视频流
         if self._capture_mode == 'rtp' and self._video_controller:
             return await self._capture_rtp_frame()
         
@@ -250,35 +238,6 @@ class VideoFrameCapture:
             return await self._capture_gpu_frame()
 
         return await self._capture_window_frame()
-
-    async def _capture_webrtc_frame(self) -> Optional[Frame]:
-        """使用 WebRTC video track 捕获帧。"""
-        try:
-            if not self._webrtc_controller:
-                self.logger.warning("WebRTC 控制器不可用")
-                return None
-
-            frame_data = await self._webrtc_controller.get_frame(timeout=0.5)
-            if frame_data is not None and isinstance(frame_data, np.ndarray):
-                self._frame_counter += 1
-                loop = asyncio.get_event_loop()
-                frame_id = f"frame_{self._frame_counter}_{int(loop.time() * 1000)}"
-                frame = Frame(
-                    data=frame_data,
-                    frame_id=frame_id,
-                    timestamp=loop.time(),
-                    width=frame_data.shape[1] if len(frame_data.shape) > 1 else 1280,
-                    height=frame_data.shape[0] if len(frame_data.shape) > 1 else 720,
-                    fps=getattr(self._webrtc_controller, 'fps', 0.0),
-                )
-                self._last_frame = frame
-                return frame
-
-            self.logger.warning("WebRTC 帧为空")
-            return None
-        except Exception as e:
-            self.logger.error(f"WebRTC 帧捕获失败: {e}")
-            return None
 
     async def _capture_rtp_frame(self) -> Optional[Frame]:
         """使用RTP视频流捕获帧（最高性能）"""

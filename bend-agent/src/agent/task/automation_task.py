@@ -321,16 +321,6 @@ class AgentAutomationTask:
     async def _cleanup(self) -> None:
         """清理任务资源并关闭窗口"""
         try:
-            if hasattr(self.context, '_play_session_manager') and self.context._play_session_manager:
-                try:
-                    play_session = self.context._play_session_manager
-                    if play_session.is_session_active:
-                        await play_session.close_session()
-                    await play_session.close()
-                    self.logger.info("PlaySession已关闭")
-                except Exception as e:
-                    self.logger.warning(f"关闭PlaySession失败: {e}")
-
             if self.context.xbox_session:
                 try:
                     await self.context.xbox_session.disconnect()

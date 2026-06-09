@@ -38,7 +38,7 @@ from ..core.logger import get_logger
 
 # RTP 相关导入（方案3）
 try:
-    from .rtp_session import RTPSession, H264RTPPacketAssemble
+    from .rtp_session import RTPSession, H264RTPPacketAssemble, RTPPacket
     from .h264_parser import H264Parser, H264FrameAssembler, NALU
     from .srtp_handler import SRTPHandler, SRTPKeys
     from .dtls_handler import DTLSHandler, SimpleDTLSHandler
@@ -154,6 +154,28 @@ class XboxStreamController:
         - False: 未连接
         """
         return self._state in [StreamState.CONNECTED, StreamState.STREAMING]
+
+    @property
+    def input_channel_state(self) -> str:
+        """LAN SmartGlass 输入通道状态（与 WebRTC DataChannel 语义对齐）。"""
+        return "open" if self.is_connected else "closed"
+
+    def is_input_channel_healthy(self) -> bool:
+        """InputPump / keepalive 用：SmartGlass TCP 已连接即视为 input 可用。"""
+        return self.is_connected
+
+    async def send_keepalive(self) -> bool:
+        """发送中性手柄状态作为 keepalive。"""
+        neutral = {
+            "buttons": 0,
+            "left_trigger": 0,
+            "right_trigger": 0,
+            "left_thumb_x": 0,
+            "left_thumb_y": 0,
+            "right_thumb_x": 0,
+            "right_thumb_y": 0,
+        }
+        return await self.send_gamepad_state(neutral)
 
     async def connect(self, xbox_ip: str, port: int = None) -> bool:
         """
@@ -722,7 +744,8 @@ class XboxStreamController:
         port: int = 50500,
         srtp_keys: Optional[Dict[str, bytes]] = None,
         video_callback: Optional[Callable[[bytes], None]] = None,
-        frame_callback: Optional[Callable[[Any], None]] = None
+        frame_callback: Optional[Callable[[Any], None]] = None,
+        allow_fallback: bool = True,
     ) -> bool:
         """
         启动视频流接收器（方案3：混合模式）
@@ -739,6 +762,7 @@ class XboxStreamController:
         - srtp_keys: SRTP密钥（可选）
         - video_callback: 视频帧回调（原始H.264数据）
         - frame_callback: 解码后帧回调
+        - allow_fallback: RTP 失败时是否降级 win32gui（LAN 模式应设为 False）
 
         返回：
         - True: 启动成功
@@ -764,10 +788,12 @@ class XboxStreamController:
                 self._video_mode = "rtp"
                 self.logger.info(f"视频流接收模式: RTP (端口 {port})")
                 return True
-            else:
+            if allow_fallback:
                 self.logger.warning("RTP模式启动失败，降级到win32gui模式")
                 self._video_mode = "win32gui"
                 return True
+            self.logger.error("RTP模式启动失败（未启用降级）")
+            return False
 
         return False
 
@@ -835,12 +861,17 @@ class XboxStreamController:
                             packet.header.sequence_number,
                             packet.header.timestamp,
                             packet.header.ssrc,
-                            is_incoming=True
+                            is_incoming=True,
                         )
-                        if decrypted:
-                            raw_payload = decrypted
-                        else:
+                        if decrypted is None:
                             continue
+                        raw_payload = decrypted
+                        packet = RTPPacket(
+                            header=packet.header,
+                            payload=raw_payload,
+                            payload_offset=packet.payload_offset,
+                            raw_data=packet.raw_data[: packet.payload_offset] + raw_payload,
+                        )
 
                     nalu_list = self._packet_assembler.assemble(packet)
                     

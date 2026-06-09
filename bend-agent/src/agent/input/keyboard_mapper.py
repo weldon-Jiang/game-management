@@ -244,5 +244,33 @@ class KeyboardMapper:
         """获取所有按键绑定"""
         return self._bindings.copy()
 
+    def build_controller_signal(self):
+        """根据当前按住键合成 ControllerSignal（供 InputPump 轮询）。"""
+        from .controller_protocol import ControllerSignal, XboxButtonFlag
+
+        signal = ControllerSignal()
+        for key in self._pressed_keys:
+            action = self._bindings.get(key.lower())
+            if not action:
+                continue
+            mapping = {
+                KeyAction.TAP_A: XboxButtonFlag.A,
+                KeyAction.TAP_B: XboxButtonFlag.B,
+                KeyAction.TAP_X: XboxButtonFlag.X,
+                KeyAction.TAP_Y: XboxButtonFlag.Y,
+                KeyAction.TAP_START: XboxButtonFlag.START,
+                KeyAction.TAP_SELECT: XboxButtonFlag.VIEW,
+                KeyAction.TAP_L1: XboxButtonFlag.L1,
+                KeyAction.TAP_R1: XboxButtonFlag.R1,
+                KeyAction.MOVE_UP: XboxButtonFlag.DPAD_UP,
+                KeyAction.MOVE_DOWN: XboxButtonFlag.DPAD_DOWN,
+                KeyAction.MOVE_LEFT: XboxButtonFlag.DPAD_LEFT,
+                KeyAction.MOVE_RIGHT: XboxButtonFlag.DPAD_RIGHT,
+            }
+            btn = mapping.get(action)
+            if btn:
+                signal.set_button(btn, True)
+        return signal
+
 
 keyboard_mapper = KeyboardMapper()

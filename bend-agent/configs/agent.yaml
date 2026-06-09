@@ -74,6 +74,10 @@ input:
   click_delay: 0.1
   key_press_delay: 0.05
   move_duration: 0.2
+  pump_focus_hz: 125       # InputPump 焦点任务频率
+  pump_background_hz: 8    # 背景任务 keepalive 频率
+  pump_focus_hz: 125          # InputPump 焦点任务 DC 发送频率
+  pump_background_hz: 8       # 背景任务 keepalive 频率
 
 # ----------------------------------------------
 # 自动化任务配置
@@ -95,13 +99,22 @@ auth:
 discovery:
   cache_ttl_sec: 60
   ssdp_enrich_enabled: false
+  smartglass_udp_enabled: true       # OpenXbox 0xDD00 UDP 5050 发现（LAN 优先）
+  smartglass_udp_timeout_sec: 5
   wakeup_timeout_sec: 30
   smartglass_wake_fallback: true
 
-xhome_stream:
-  connection_timeout_sec: 30
-  enable_teredo_ice_rewrite: true
-  default_play_path: v5/sessions/home/play
+# LAN 媒体（SmartGlass → DTLS-PSK → SRTP → RTP；唯一串流路径）
+lan_stream:
+  rtp_port: 50500
+  dtls_port: 50500
+  handshake_timeout_sec: 15
+  first_frame_timeout_sec: 10
+  per_host_attempt_timeout_sec: 45  # 单台主机握手+首 RTP 总预算，超时换下一台
+  smartglass_udp_connect: true     # OpenXbox 0xCC00 XSTS 授权（UDP 5050）
+  smartglass_connect_timeout_sec: 8
+  # 可选：指向 streaming/xsrp 目录以加载 libxsrp（Windows）
+  xsrp_module_path: ""
 
 vision:
   decode_mode: auto
@@ -134,4 +147,7 @@ window:
   min_width: 800
   min_height: 600
   fit_aspect: true
-  close_terminates_task: true
+  default_mode: headless       # Phase A 无头；focus 时升 full
+  display_fps_max: 30           # 对齐 streaming XsrpConfig.DECODE_VIDEO_FPS
+  title_template: "{email}"     # 对齐 Worker.window_tile
+  close_terminates_task: false  # 关窗 hide，不结束任务（streaming 一致）

@@ -15,7 +15,7 @@ from .models import ConsoleTarget
 
 @dataclass
 class ResolveResult:
-    """主机目标及 step2 上下文（WebRTC 会话须流入 step3）。"""
+    """主机目标及 step2 上下文（SmartGlass 会话须流入 step3）。"""
 
     console: ConsoleTarget
     context: AgentTaskContext
@@ -54,7 +54,6 @@ class DiscoveryService:
         report_progress: Optional[Callable] = None,
     ) -> ResolveResult:
         from .console_resolver import resolve_console_target
-        from ..xhome_stream.session_connect import establish_webrtc_stream
 
         context = AgentTaskContext(
             task_id=task_id,
@@ -68,13 +67,17 @@ class DiscoveryService:
         context.xbox_tokens = credentials.xbox_tokens
 
         if assigned_xbox:
+            platform_id = assigned_xbox.get("id", "")
+            xbox_id = assigned_xbox.get("xboxId") or assigned_xbox.get("xbox_id") or ""
             context.assigned_xbox = XboxInfo(
-                id=assigned_xbox.get("id", ""),
+                id=xbox_id or platform_id,
+                platform_host_id=platform_id,
                 name=assigned_xbox.get("name", "Xbox"),
-                ip_address=assigned_xbox.get("ipAddress", ""),
-                live_id=assigned_xbox.get("liveId", ""),
-                mac_address=assigned_xbox.get("macAddress", ""),
+                ip_address=assigned_xbox.get("ipAddress", "") or assigned_xbox.get("ip_address", ""),
+                live_id=assigned_xbox.get("liveId", "") or assigned_xbox.get("live_id", ""),
+                mac_address=assigned_xbox.get("macAddress", "") or assigned_xbox.get("mac_address", ""),
             )
+            context.platform_xbox_hosts = [assigned_xbox]
 
         async def _report(*args, **kwargs):
             if report_progress:
@@ -97,20 +100,6 @@ class DiscoveryService:
             console_type=xb.console_type,
             play_path=xb.play_path,
         )
-        await self._lan.enrich([target])
-        power_result = await self._power.ensure_power_on(credentials, target)
-        if not power_result.ok:
-            raise RuntimeError(
-                power_result.message or power_result.error_code or "Power check failed"
-            )
-
-        connect_ok, connect_details = await establish_webrtc_stream(
-            context, cancel, _report
-        )
-        if not connect_ok:
-            raise RuntimeError(
-                connect_details.get("errorMessage", "WebRTC stream connect failed")
-            )
 
         return ResolveResult(console=target, context=context)
 

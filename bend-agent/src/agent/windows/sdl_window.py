@@ -83,8 +83,12 @@ class SDLStreamWindow:
         self._last_frame_time = 0
         self._frame_count = 0
         self._fps = 0.0
-        self._last_source_frame: Optional[np.ndarray] = None
+        # game_mat：WebRTC 解码原始帧；capture_mat：仅窗口显示缩放副本
+        self._game_mat: Optional[np.ndarray] = None
+        self._capture_mat: Optional[np.ndarray] = None
         self._source_size: Tuple[int, int] = (0, 0)
+        self._last_render_monotonic = 0.0
+        self._display_fps_max = 30.0
         self._close_callback: Optional[Callable[[], None]] = None
         self._close_requested = False
 
@@ -324,42 +328,79 @@ class SDLStreamWindow:
         except Exception as e:
             self.logger.debug(f"窗口居中失败: {e}")
 
-    def update_frame(self, frame: np.ndarray):
-        """
-        更新窗口显示（仅显示用）。
+    def set_display_fps_max(self, fps: float) -> None:
+        """显示刷新上限（对齐 streaming DECODE_VIDEO_FPS，默认 30）。"""
+        self._display_fps_max = max(1.0, float(fps))
 
-        原始帧存入 _last_source_frame，供降级捕获；自动化主路径使用 WebRTC 帧。
+    def present_frame(self, frame: np.ndarray) -> None:
         """
-        if not self._running or self._screen is None:
+        写入最新解码帧为 game_mat（识别/捕获源）。
+
+        窗口隐藏时仍更新 game_mat，保证模板匹配不依赖 SDL 像素。
+        """
+        if frame is None or getattr(frame, "size", 0) == 0:
             return
+        try:
+            if len(frame.shape) < 3:
+                return
+            if frame.shape[2] == 3:
+                frame_bgr = np.ascontiguousarray(frame)
+            else:
+                import cv2
+                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+            self._game_mat = frame_bgr.copy()
+            self._source_size = (frame_bgr.shape[1], frame_bgr.shape[0])
+        except Exception as e:
+            self.logger.error(f"present_frame 失败: {e}")
+
+    def _build_capture_mat(self) -> Optional[np.ndarray]:
+        """由 game_mat 生成 capture_mat（仅显示缩放，对齐 streaming resize）。"""
+        if self._game_mat is None:
+            return None
+        src_h, src_w = self._game_mat.shape[:2]
+        dst_w, dst_h = self._config.width, self._config.height
+        if src_w <= 0 or src_h <= 0:
+            return None
+        if src_w == dst_w and src_h == dst_h:
+            return self._game_mat.copy()
+        import cv2
+        return cv2.resize(
+            self._game_mat,
+            (dst_w, dst_h),
+            interpolation=cv2.INTER_LINEAR,
+        )
+
+    def render_display(self, force: bool = False) -> bool:
+        """
+        将 capture_mat 刷到 SDL 窗口；按 display_fps_max 节流。
+
+        返回 True 表示本帧已绘制。
+        """
+        if not self._running or self._screen is None or not self._visible:
+            return False
+        if self._game_mat is None:
+            return False
+
+        min_interval = 1.0 / self._display_fps_max
+        now = time.monotonic()
+        if not force and (now - self._last_render_monotonic) < min_interval:
+            return False
 
         try:
             start_time = time.time()
+            capture = self._build_capture_mat()
+            if capture is None:
+                return False
+            self._capture_mat = capture
 
-            if frame.shape[2] == 3:
-                frame_bgr = np.ascontiguousarray(frame)
-                frame_rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
-            else:
-                import cv2
-                frame_bgr = frame
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            self._last_source_frame = frame_bgr.copy()
-            self._source_size = (frame_bgr.shape[1], frame_bgr.shape[0])
-
+            frame_rgb = np.ascontiguousarray(capture[:, :, ::-1])
             frame_rgb_t = np.transpose(frame_rgb, (1, 0, 2))
             self._frame_surface = pygame.surfarray.make_surface(frame_rgb_t)
 
-            if not self._visible:
-                self._update_fps(time.time() - start_time)
-                return
-
             self._screen.fill((0, 0, 0))
-            src_w, src_h = self._source_size
+            src_w, src_h = capture.shape[1], capture.shape[0]
             dst_w, dst_h = self._config.width, self._config.height
-            if src_w <= 0 or src_h <= 0:
-                return
-            if self._config.fit_aspect:
+            if self._config.fit_aspect and (src_w != dst_w or src_h != dst_h):
                 scale = min(dst_w / src_w, dst_h / src_h)
                 draw_w = max(1, int(src_w * scale))
                 draw_h = max(1, int(src_h * scale))
@@ -369,22 +410,24 @@ class SDLStreamWindow:
                 x = (dst_w - draw_w) // 2
                 y = (dst_h - draw_h) // 2
                 self._screen.blit(scaled, (x, y))
-            elif src_w == dst_w and src_h == dst_h:
-                self._screen.blit(self._frame_surface, (0, 0))
             else:
-                scaled = pygame.transform.smoothscale(
-                    self._frame_surface, (dst_w, dst_h)
-                )
-                self._screen.blit(scaled, (0, 0))
+                self._screen.blit(self._frame_surface, (0, 0))
 
             pygame.display.flip()
+            self._last_render_monotonic = now
             self._update_fps(time.time() - start_time)
 
-            if self._frame_callback:
-                self._frame_callback(frame_bgr)
-
+            if self._frame_callback and self._game_mat is not None:
+                self._frame_callback(self._game_mat)
+            return True
         except Exception as e:
-            self.logger.error(f"更新帧失败: {e}")
+            self.logger.error(f"render_display 失败: {e}")
+            return False
+
+    def update_frame(self, frame: np.ndarray):
+        """兼容旧调用：present + render（显示泵应改用 present_frame/render_display 分离）。"""
+        self.present_frame(frame)
+        self.render_display(force=True)
 
     def _update_fps(self, frame_time: float):
         """更新FPS统计"""
@@ -394,14 +437,20 @@ class SDLStreamWindow:
         if self._frame_count % 30 == 0:
             self._fps = 1.0 / frame_time if frame_time > 0 else 0
 
+    def get_game_mat(self) -> Optional[np.ndarray]:
+        """返回 game_mat 副本（识别/捕获唯一来源）。"""
+        if self._game_mat is not None:
+            return self._game_mat.copy()
+        return None
+
     def capture_frame(self) -> Optional[np.ndarray]:
         """
-        返回最近一帧原始视频（BGR），与 streaming game_mat 一致。
+        返回 game_mat 副本（BGR），与 streaming 识别路径一致。
 
         不读取窗口像素，避免隐藏/缩放影响模板匹配。
         """
-        if self._last_source_frame is not None:
-            return self._last_source_frame.copy()
+        if self._game_mat is not None:
+            return self._game_mat.copy()
 
         if not self._running or self._screen is None or not self._visible:
             return None

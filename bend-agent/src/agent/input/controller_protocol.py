@@ -10,7 +10,7 @@ Xbox 手柄信号协议
 
 技术实现参考（streaming项目）：
 - xsrp.WriteControllerData(username, signals)
-- 云端串流：CloudStreamSession input DataChannel
+- SmartGlass LAN：XboxStreamController 输入通道
 
 作者：技术团队
 版本：2.0（新增send_gamepad_state功能）
@@ -202,7 +202,7 @@ class ControllerProtocol:
         设置流控制器
 
         参数：
-        - controller: XboxStreamController 或 CloudStreamSession 实例
+        - controller: XboxStreamController 实例
         """
         self._stream_controller = controller
         controller_name = type(controller).__name__ if controller else "None"
@@ -210,31 +210,27 @@ class ControllerProtocol:
 
     async def send_signal(self, signal: ControllerSignal) -> bool:
         """
-        发送手柄信号到Xbox（优化三）
-
-        功能说明：
-        - 使用send_gamepad_state发送完整手柄状态
-        - 参考streaming项目的xsrp.WriteControllerData
-
-        参数：
-        - signal: 手柄信号数据
-
-        返回：
-        - True: 发送成功
-        - False: 发送失败
+        发送手柄信号到Xbox（Step4 自动化路径，受 InputGate 约束）。
         """
+        if self._input_gate is not None and not self._input_gate.is_allowed():
+            return False
+        return await self._send_signal_ungated(signal)
+
+    async def send_manual_signal(self, signal: ControllerSignal) -> bool:
+        """
+        人工操控路径（READY 阶段 InputPump / 物理手柄），不受 InputGate 拦截。
+        """
+        return await self._send_signal_ungated(signal)
+
+    async def _send_signal_ungated(self, signal: ControllerSignal) -> bool:
         if not self._stream_controller:
             self.logger.warning("未设置流控制器，无法发送信号")
             return False
 
-        if self._input_gate is not None and not self._input_gate.is_allowed():
-            return False
-
         try:
-            success = await self._stream_controller.send_gamepad_state(
+            return await self._stream_controller.send_gamepad_state(
                 signal.to_dict()
             )
-            return success
         except Exception as e:
             self.logger.error(f"发送手柄信号失败: {e}")
             return False

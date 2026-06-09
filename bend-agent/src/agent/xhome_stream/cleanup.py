@@ -6,10 +6,17 @@ from ..core.logger import get_logger
 
 
 async def close_media_context(context: Any, logger=None) -> None:
-    """释放显示、截帧、WebRTC、PlaySession、input 与主机锁。"""
+    """释放显示、截帧、SmartGlass 会话、input 与主机锁。"""
     log = logger or get_logger("xhome_cleanup")
     if context is None:
         return
+
+    try:
+        from ..input.pump_scheduler import stop_input_pump
+
+        await stop_input_pump(context)
+    except Exception as exc:
+        log.debug("stop input pump: %s", exc)
 
     try:
         from ..automation.step3_streaming_init import _stop_sdl_display_pump
@@ -58,24 +65,13 @@ async def close_media_context(context: Any, logger=None) -> None:
             log.debug("close frame capture: %s", exc)
     context.frame_capture = None
 
-    cloud = getattr(context, "_cloud_stream_session", None) or getattr(
-        context, "xbox_session", None
-    )
-    if cloud and hasattr(cloud, "disconnect"):
+    session = getattr(context, "xbox_session", None)
+    if session and hasattr(session, "disconnect"):
         try:
-            await cloud.disconnect()
+            await session.disconnect()
         except Exception as exc:
-            log.debug("disconnect cloud session: %s", exc)
-    context._cloud_stream_session = None
+            log.debug("disconnect xbox session: %s", exc)
     context.xbox_session = None
-
-    play_mgr = getattr(context, "_play_session_manager", None)
-    if play_mgr and hasattr(play_mgr, "close"):
-        try:
-            await play_mgr.close()
-        except Exception as exc:
-            log.debug("close play session: %s", exc)
-    context._play_session_manager = None
 
     try:
         from ..automation.step2_xbox_streaming import _release_xbox_host

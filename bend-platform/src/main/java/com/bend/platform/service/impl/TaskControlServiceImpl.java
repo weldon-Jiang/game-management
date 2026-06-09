@@ -105,13 +105,17 @@ public class TaskControlServiceImpl implements TaskControlService {
         validateGameAccountOccupancy(merchantId, gameAccounts);
 
         XboxHost selectedHost = null;
+        List<XboxHost> boundHosts = xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
         if (request.getXboxHostId() != null && !request.getXboxHostId().isBlank()) {
             selectedHost = xboxHostService.findById(request.getXboxHostId());
+            if (selectedHost == null || !merchantId.equals(selectedHost.getMerchantId())) {
+                throw new BusinessException(404, "Xbox主机不存在");
+            }
         }
 
         List<XboxHost> hostsForBilling = selectedHost != null
                 ? List.of(selectedHost)
-                : xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
+                : boundHosts;
         Map<String, Object> billingValidation = automationUsageService.validateAndCalculatePoints(
                 merchantId, streamingAccountId, gameAccounts, hostsForBilling);
         if (!Boolean.TRUE.equals(billingValidation.get("canStart"))) {
@@ -119,7 +123,7 @@ public class TaskControlServiceImpl implements TaskControlService {
         }
 
         Map<String, Object> taskParams = buildStreamingTaskParams(
-                streamingAccount, gameAccounts, selectedHost, merchantId);
+                streamingAccount, gameAccounts, selectedHost, boundHosts, merchantId);
 
         Task reusable = taskService.findReusableTaskByStreamingAccountAndAgent(streamingAccountId, agentId);
         final Task task;
@@ -445,7 +449,31 @@ public class TaskControlServiceImpl implements TaskControlService {
         detail.put("task", task);
         detail.put("session", session);
         detail.put("gameAccountStatuses", statuses);
+        detail.put("streamPipelineDiagnostic", loadLatestPipelineDiagnostic(taskId));
         return detail;
+    }
+
+    /**
+     * 从最近任务事件中读取 Agent 上报的 pipelineDiagnostic（STEP2/3 写入 payload）。
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> loadLatestPipelineDiagnostic(String taskId) {
+        List<TaskEvent> events = taskEventService.listByTaskId(taskId, 30);
+        for (TaskEvent event : events) {
+            if (!StringUtils.hasText(event.getPayload())) {
+                continue;
+            }
+            try {
+                Map<String, Object> parsed = objectMapper.readValue(
+                        event.getPayload(), Map.class);
+                if (parsed.containsKey("auth") || parsed.containsKey("firstFrame")) {
+                    return parsed;
+                }
+            } catch (Exception e) {
+                log.debug("解析 pipelineDiagnostic 失败 taskId={}: {}", taskId, e.getMessage());
+            }
+        }
+        return null;
     }
 
     private void populateGameAccountDisplayNames(List<TaskGameAccountStatus> statuses) {
@@ -520,17 +548,23 @@ public class TaskControlServiceImpl implements TaskControlService {
             StreamingAccount account,
             List<GameAccount> gameAccounts,
             XboxHost host,
+            List<XboxHost> boundHosts,
             String merchantId) {
         Map<String, Object> params = new HashMap<>();
         params.put("phase", "streaming_only");
         params.put("merchantId", merchantId);
         params.put("platform", PlatformTypeUtil.normalizeOrDefault(account.getPlatform()));
+        // LAN 串流：Agent 侧做 GSSV ∩ LAN 交集，不走纯云端随机匹配
         params.put("autoMatchHost", host == null);
+        params.put("streamMode", "lan_direct");
         params.put("streamingAccount", buildStreamingInfo(account));
         params.put("gameAccounts", buildGameAccountsInfo(gameAccounts));
         if (host != null) {
             params.put("host", buildHostInfo(host));
             params.put("xboxInfo", buildHostInfo(host));
+            params.put("xboxHosts", List.of(buildHostInfo(host)));
+        } else if (boundHosts != null && !boundHosts.isEmpty()) {
+            params.put("xboxHosts", buildXboxHostsInfo(boundHosts));
         }
         return params;
     }
@@ -575,10 +609,20 @@ public class TaskControlServiceImpl implements TaskControlService {
     private Map<String, Object> buildHostInfo(XboxHost host) {
         Map<String, Object> info = new HashMap<>();
         info.put("id", host.getId());
+        info.put("xboxId", host.getXboxId());
         info.put("name", host.getName());
         info.put("ipAddress", host.getIpAddress());
         info.put("liveId", host.getLiveId());
+        info.put("macAddress", host.getMacAddress());
         return info;
+    }
+
+    private List<Map<String, Object>> buildXboxHostsInfo(List<XboxHost> xboxHosts) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (XboxHost xbox : xboxHosts) {
+            result.add(buildHostInfo(xbox));
+        }
+        return result;
     }
 
     private void sendTaskControl(Task task, String action, Map<String, Object> extra) {

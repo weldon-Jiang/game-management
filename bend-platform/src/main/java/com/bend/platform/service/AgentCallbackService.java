@@ -18,6 +18,13 @@ public interface AgentCallbackService {
 
     Map<String, Object> getXboxHostStatus(String xboxHostId);
 
+    /** 按 GSSV serverId（xbox_host.xbox_id）锁定/查询，供 Agent 无平台 UUID 时使用。 */
+    Map<String, Object> lockXboxHostByXboxId(String xboxId, Map<String, Object> payload);
+
+    Map<String, Object> unlockXboxHostByXboxId(String xboxId, Map<String, Object> payload);
+
+    Map<String, Object> getXboxHostStatusByXboxId(String xboxId);
+
     Map<String, Object> exchangeCredential(Map<String, Object> payload);
 
     Map<String, Object> updateProfileBinding(String gameAccountId, Map<String, Object> payload);

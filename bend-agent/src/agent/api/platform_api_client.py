@@ -594,6 +594,72 @@ class PlatformApiClient:
             self.logger.error(f"获取主机状态异常: {e}")
             return None
 
+    async def get_xbox_status_by_device_id(self, xbox_id: str) -> Optional[Dict[str, Any]]:
+        """按 GSSV serverId（xbox_host.xbox_id）查询占用状态；未登记返回 registered=false。"""
+        url = self._get_callback_url(f'xbox/device/{xbox_id}')
+        headers = await self._get_headers()
+        try:
+            session = await self._get_session()
+            async with session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get('code') == 200:
+                        return result.get('data')
+                return None
+        except Exception as e:
+            self.logger.error(f"按 xboxId 获取主机状态异常: {e}")
+            return None
+
+    async def lock_xbox_by_device_id(
+        self, xbox_id: str, task_id: Optional[str] = None
+    ) -> bool:
+        """按 GSSV serverId 锁定；平台未登记时返回 False。"""
+        url = self._get_callback_url(f'xbox/device/{xbox_id}/lock')
+        headers = await self._get_headers()
+        payload = {'taskId': task_id} if task_id else {}
+        try:
+            session = await self._get_session()
+            async with session.post(
+                url,
+                json=payload if payload else None,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get('code') == 200:
+                        return bool(result.get('data', {}).get('locked', False))
+                return False
+        except Exception as e:
+            self.logger.error(f"按 xboxId 锁定主机异常: {e}")
+            return False
+
+    async def unlock_xbox_by_device_id(
+        self, xbox_id: str, task_id: Optional[str] = None
+    ) -> bool:
+        """按 GSSV serverId 解锁。"""
+        url = self._get_callback_url(f'xbox/device/{xbox_id}/unlock')
+        headers = await self._get_headers()
+        payload = {'taskId': task_id} if task_id else {}
+        try:
+            session = await self._get_session()
+            async with session.post(
+                url,
+                json=payload if payload else None,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get('code') == 200:
+                        return bool(result.get('data', {}).get('unlocked', False))
+                return False
+        except Exception as e:
+            self.logger.error(f"按 xboxId 解锁主机异常: {e}")
+            return False
+
     async def exchange_credential_token(self, token: str) -> Optional[str]:
         """
         兑换凭证令牌获取实际密码（v2.0）

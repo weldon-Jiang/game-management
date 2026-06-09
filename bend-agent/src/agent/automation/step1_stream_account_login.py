@@ -427,61 +427,33 @@ async def _get_xbox_live_token(
 
         xbox_client = XboxLiveClient()
 
-        task_logger.info("开始获取Xbox Live Token（包括GSSV Token）")
-        stream_logger.info("开始获取Xbox Live Token（包括GSSV Token）")
-        
+        task_logger.info("开始获取 Xbox Live Token（含 GSSV gsToken，云端设备列表必需）")
+        stream_logger.info("开始获取 Xbox Live Token（含 GSSV gsToken）")
+
         xbox_tokens = await xbox_client.get_xbox_tokens_with_gssv(microsoft_tokens.access_token)
-        
+
         if xbox_tokens and xbox_tokens.gs_token:
-            task_logger.info(f"Xbox Live Token获取成功（含GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: True")
-            stream_logger.info(f"Xbox Live Token获取成功（含GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: True")
-            return TokenResult(
-                success=True,
-                xbox_tokens=xbox_tokens
+            task_logger.info(
+                "Xbox Live Token 成功 uhs=%s has_gs_token=True",
+                xbox_tokens.user_hash,
             )
-        elif xbox_tokens:
-            task_logger.warning(f"Xbox Live Token获取成功（无GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
-            stream_logger.warning(f"Xbox Live Token获取成功（无GSSV Token）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
-            return TokenResult(
-                success=True,
-                xbox_tokens=xbox_tokens,
-                error_details={
-                    "has_gs_token": False,
-                    "warning": "GSSV Token获取失败，但Xbox Live Token成功"
-                }
+            stream_logger.info(
+                f"Xbox Live Token获取成功（含GSSV Token）, uhs: {xbox_tokens.user_hash}"
             )
-        else:
-            # 尝试旧流程
-            task_logger.warning("GSSV Token获取失败，尝试旧流程...")
-            xbox_tokens = await xbox_client.get_xbox_tokens(microsoft_tokens.access_token)
-            if xbox_tokens:
-                task_logger.warning("GSSV Token获取失败，使用旧的Xbox Live Token")
-                stream_logger.warning("GSSV Token获取失败，使用旧的Xbox Live Token")
-                task_logger.info(f"Xbox Live Token获取成功（旧流程）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
-                stream_logger.info(f"Xbox Live Token获取成功（旧流程）, uhs: {xbox_tokens.user_hash}, has_gs_token: False")
-                return TokenResult(
-                    success=True,
-                    xbox_tokens=xbox_tokens,
-                    error_details={
-                        "has_gs_token": False,
-                        "fallback": "使用了旧的Xbox Live Token流程"
-                    }
-                )
-            else:
-                # 完全失败
-                error_msg = "Xbox Live Token获取失败（包含GSSV Token）"
-                task_logger.error(error_msg)
-                stream_logger.error(error_msg)
-                
-                return TokenResult(
-                    success=False,
-                    error_code="XBOX_TOKEN_FAILED",
-                    error_message=error_msg,
-                    error_details={
-                        "account": context.streaming_account_email,
-                        "suggestion": "Microsoft账号可能没有Xbox Live权限，或账号被限制"
-                    }
-                )
+            return TokenResult(success=True, xbox_tokens=xbox_tokens)
+
+        error_msg = "GSSV gsToken 获取失败，无法拉取云端 Xbox 设备列表"
+        task_logger.error(error_msg)
+        stream_logger.error(error_msg)
+        return TokenResult(
+            success=False,
+            error_code="NO_GS_TOKEN",
+            error_message=error_msg,
+            error_details={
+                "has_gs_token": False,
+                "suggestion": "确认流媒体账号已在 Xbox App 授权主机且具备 Xbox Live 权限",
+            },
+        )
 
     except asyncio.TimeoutError as e:
         error_msg = f"获取Xbox Live Token超时: {str(e)}"

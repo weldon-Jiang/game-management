@@ -28,6 +28,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * Agent 回调服务实现（平台侧的回调入口）。
@@ -44,6 +45,8 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class AgentCallbackServiceImpl implements AgentCallbackService {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final TaskService taskService;
     private final GameAccountService gameAccountService;
@@ -526,6 +529,84 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     }
 
     @Override
+    public Map<String, Object> getXboxHostStatusByXboxId(String xboxId) {
+        log.info("【v2.0】按 xboxId 查询 Xbox 主机状态 - xboxId: {}", xboxId);
+        XboxHost host = xboxHostService.findByXboxId(xboxId);
+        Map<String, Object> result = new HashMap<>();
+        result.put("registered", host != null);
+        if (host == null) {
+            result.put("xboxId", xboxId);
+            result.put("locked", false);
+            return result;
+        }
+        result.putAll(buildXboxHostStatusMap(host));
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> lockXboxHostByXboxId(String xboxId, Map<String, Object> payload) {
+        log.info("【v2.0】按 xboxId 锁定 Xbox 主机 - xboxId: {}", xboxId);
+        XboxHost host = xboxHostService.findByXboxId(xboxId);
+        Map<String, Object> result = new HashMap<>();
+        result.put("registered", host != null);
+        if (host == null) {
+            result.put("locked", false);
+            return result;
+        }
+        String taskId = payload != null ? (String) payload.get("taskId") : null;
+        if (taskId != null) {
+            requireTaskForAuthenticatedAgent(taskId);
+        }
+        boolean locked = xboxHostService.lock(host.getId(), taskId);
+        result.put("locked", locked);
+        result.put("id", host.getId());
+        result.put("xboxId", host.getXboxId());
+        if (locked) {
+            result.put("expiresAt", System.currentTimeMillis() + 3600000);
+        }
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> unlockXboxHostByXboxId(String xboxId, Map<String, Object> payload) {
+        log.info("【v2.0】按 xboxId 解锁 Xbox 主机 - xboxId: {}", xboxId);
+        XboxHost host = xboxHostService.findByXboxId(xboxId);
+        Map<String, Object> result = new HashMap<>();
+        result.put("registered", host != null);
+        if (host == null) {
+            result.put("unlocked", false);
+            return result;
+        }
+        boolean unlocked = xboxHostService.unlock(host.getId());
+        result.put("unlocked", unlocked);
+        result.put("id", host.getId());
+        result.put("xboxId", host.getXboxId());
+        return result;
+    }
+
+    private Map<String, Object> buildXboxHostStatusMap(XboxHost host) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", host.getId());
+        result.put("xboxId", host.getXboxId());
+        result.put("name", host.getName());
+        result.put("ipAddress", host.getIpAddress());
+        result.put("port", host.getPort());
+        result.put("liveId", host.getLiveId());
+        result.put("consoleType", host.getConsoleType());
+        result.put("firmwareVersion", host.getFirmwareVersion());
+        result.put("macAddress", host.getMacAddress());
+        result.put("status", host.getStatus());
+        result.put("locked", host.getLocked() != null && host.getLocked());
+        result.put("lockedByAgentId", host.getLockedByAgentId());
+        result.put("lockExpiresTime", host.getLockExpiresTime());
+        result.put("boundStreamingAccountId", host.getBoundStreamingAccountId());
+        result.put("boundGamertag", host.getBoundGamertag());
+        result.put("lastSeenTime", host.getLastSeenTime());
+        result.put("registered", true);
+        return result;
+    }
+
+    @Override
     public Map<String, Object> exchangeCredential(Map<String, Object> payload) {
         String token = (String) payload.get("token");
         if (token == null || token.isEmpty()) {
@@ -726,6 +807,14 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             event.setSessionId(payloadSessionId);
         } else if (task.getSessionId() != null) {
             event.setSessionId(task.getSessionId());
+        }
+        Object pipelineDiagnostic = data.get("pipelineDiagnostic");
+        if (pipelineDiagnostic != null) {
+            try {
+                event.setPayload(OBJECT_MAPPER.writeValueAsString(pipelineDiagnostic));
+            } catch (Exception e) {
+                log.debug("pipelineDiagnostic 序列化失败: {}", e.getMessage());
+            }
         }
         taskEventService.record(event);
     }

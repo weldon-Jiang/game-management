@@ -1,9 +1,8 @@
 """
-WebRTC 输入通道恢复
+LAN 串流输入通道恢复
 ==================
 
-在 input DataChannel 关闭后，复用既有 PlaySession 重新执行 SDP 握手，
-重建 CloudStreamSession 并回绑步骤三/四依赖的会话引用。
+SmartGlass 输入通道异常时，清理并重新执行 LAN 握手。
 """
 
 import asyncio
@@ -27,18 +26,13 @@ def _get_reconnect_lock(context: Any) -> asyncio.Lock:
 
 
 async def reconnect_input_channel(context: Any, task_logger=None) -> bool:
-    """
-    重连 WebRTC 输入通道（保留 PlaySession，重新 SDP 交换）。
-
-    返回：
-    - bool: 是否成功重建 input DataChannel
-    """
+    """重连 LAN SmartGlass 串流（重新握手 + RTP）。"""
     log = task_logger or logger
     lock = _get_reconnect_lock(context)
 
     if lock.locked():
         log.info("输入通道重连已在进行中，等待完成...")
-    # 同 task 串行重连，避免并发 SDP 交换；60s 内最多 2 次
+
     async with lock:
         try:
             now = time.time()
@@ -54,6 +48,7 @@ async def reconnect_input_channel(context: Any, task_logger=None) -> bool:
                 )
                 return False
             attempts.append(now)
+
             from ..xbox.stream_keepalive import is_input_channel_open
 
             session = getattr(context, "xbox_session", None)
@@ -61,19 +56,27 @@ async def reconnect_input_channel(context: Any, task_logger=None) -> bool:
                 log.info("input 通道已恢复 open，跳过重连")
                 return True
 
-            from ..automation.step2_xbox_streaming import reconnect_cloud_stream_session
+            from ..automation.step2_xbox_streaming import (
+                _cleanup_lan_connect_attempt,
+                _connect_to_xbox_lan,
+            )
+            from ..core.account_logger import get_stream_logger
 
-            log.info("开始重连 WebRTC 输入通道（复用 PlaySession + SDP）")
-            ok = await reconnect_cloud_stream_session(context, log, None)
+            email = getattr(context, "streaming_account_email", "") or ""
+            stream_logger = get_stream_logger(email) if email else log
+
+            log.info("开始重连 LAN SmartGlass 串流")
+            await _cleanup_lan_connect_attempt(context, log)
+            ok, details = await _connect_to_xbox_lan(context, log, stream_logger)
             if not ok:
-                log.error("WebRTC 输入通道重连失败")
+                log.error("LAN 串流重连失败: %s", details.get("errorMessage", details))
                 return False
 
             rebind_stream_bindings(context)
-            log.info("WebRTC 输入通道重连成功，会话引用已回绑")
+            log.info("LAN 串流重连成功，会话引用已回绑")
             return True
         except Exception as exc:
-            log.error(f"WebRTC 输入通道重连异常: {exc}")
+            log.error("LAN 串流重连异常: %s", exc)
             return False
 
 
@@ -83,18 +86,18 @@ def rebind_stream_bindings(
     switcher: Any = None,
     engine: Any = None,
 ) -> None:
-    """重连成功后将会话引用同步到截帧、手柄、切换器与 Step4 引擎（避免仍指向旧 session）。"""
+    """重连成功后将会话引用同步到截帧、手柄、切换器与 Step4 引擎。"""
     session = getattr(context, "xbox_session", None)
     if session is None:
         return
 
-    webrtc_controller = getattr(context, "_webrtc_frame_controller", None)
-    if webrtc_controller is not None and hasattr(webrtc_controller, "update_session"):
-        webrtc_controller.update_session(session)
+    video_controller = getattr(context, "_video_stream_controller", None)
+    if video_controller is not None and hasattr(video_controller, "update_session"):
+        video_controller.update_session(session)
 
     frame_capture = getattr(context, "frame_capture", None)
-    if frame_capture is not None and hasattr(frame_capture, "set_webrtc_controller"):
-        frame_capture.set_webrtc_controller(webrtc_controller)
+    if frame_capture is not None and hasattr(frame_capture, "set_stream_controller"):
+        frame_capture.set_stream_controller(session)
 
     protocol = getattr(context, "_controller_protocol", None)
     if protocol is not None and hasattr(protocol, "set_stream_controller"):

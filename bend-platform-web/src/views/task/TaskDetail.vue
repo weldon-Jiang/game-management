@@ -121,7 +121,14 @@
           class="window-hint"
         />
 
+        <StreamPipelineDiagnostic
+          :events="events"
+          :task="task"
+          :session-phase="displaySessionPhase"
+        />
+
         <section class="account-section">
+          <StreamPipelineDiagnostic :diagnostic="streamPipelineDiagnostic" />
           <h3>游戏账号</h3>
           <GameAccountRunTable
             :rows="gameAccountStatuses"
@@ -162,6 +169,8 @@ import SessionPhaseStepper from '@/components/task/SessionPhaseStepper.vue'
 import TaskControlBar from '@/components/task/TaskControlBar.vue'
 import GameAccountRunTable from '@/components/task/GameAccountRunTable.vue'
 import TaskEventTimeline from '@/components/task/TaskEventTimeline.vue'
+import StreamPipelineDiagnostic from '@/components/task/StreamPipelineDiagnostic.vue'
+import StreamPipelineDiagnostic from '@/components/task/StreamPipelineDiagnostic.vue'
 
 const route = useRoute()
 const taskId = computed(() => route.params.id)
@@ -174,6 +183,10 @@ const task = computed(() => detail.value?.task)
 const session = computed(() => detail.value?.session)
 const gameAccountStatuses = computed(() => detail.value?.gameAccountStatuses || [])
 const lastProgressMessage = computed(() => detail.value?.lastProgressMessage)
+
+const streamPipelineDiagnostic = computed(
+  () => detail.value?.streamPipelineDiagnostic || null
+)
 
 const currentSessionId = computed(() => task.value?.sessionId || session.value?.id || '')
 
