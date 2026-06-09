@@ -19,10 +19,7 @@ import sys
 import json
 from logging.handlers import RotatingFileHandler
 
-from .encoding_bootstrap import ensure_utf8_stdio
 from .paths import get_logs_dir_fallback
-
-ensure_utf8_stdio()
 
 
 class CustomJsonFormatter(logging.Formatter):
