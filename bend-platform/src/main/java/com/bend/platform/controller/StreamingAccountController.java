@@ -11,11 +11,13 @@ import com.bend.platform.dto.StreamingAccountPageRequest;
 import com.bend.platform.dto.StreamingAccountRequest;
 import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.StreamingAccount;
+import com.bend.platform.entity.XboxHost;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.MerchantService;
+import com.bend.platform.service.StreamingAccountHostBindingService;
 import com.bend.platform.service.StreamingAccountLoginRecordService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.util.AesUtil;
@@ -54,6 +56,7 @@ import java.util.stream.Collectors;
 public class StreamingAccountController {
 
     private final StreamingAccountService streamingAccountService;
+    private final StreamingAccountHostBindingService hostBindingService;
     private final StreamingAccountLoginRecordService loginRecordService;
     private final MerchantService merchantService;
     private final GameAccountService gameAccountService;
@@ -281,6 +284,23 @@ public class StreamingAccountController {
 
         streamingAccountService.delete(id);
         return ApiResponse.success("删除成功", null);
+    }
+
+    /**
+     * 获取串流账号已绑定的主机列表（M:N 绑定表，active 状态）。
+     */
+    @GetMapping("/{id}/bound-hosts")
+    public ApiResponse<List<XboxHost>> getBoundHosts(@PathVariable String id) {
+        StreamingAccount account = streamingAccountService.findById(id);
+        if (account == null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+        }
+
+        if (!UserContext.isPlatformAdmin() && !account.getMerchantId().equals(UserContext.getMerchantId())) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+
+        return ApiResponse.success(hostBindingService.findActiveHostsByAccount(id));
     }
 
     /**

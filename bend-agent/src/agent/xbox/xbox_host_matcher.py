@@ -17,8 +17,9 @@ import aiohttp
 from ..core.config import config
 from ..core.logger import get_logger
 from ..gssv.base_uri import normalize_gssv_base_uri
+from ..task.task_context import AgentTaskContext
 from ..gssv.device_info import build_x_ms_device_info
-from ..gssv.network_util import (
+from ..lan.network_util import (
     is_blocked_scan_ip,
     is_private_lan_ip,
     pick_local_lan_ip,
@@ -463,6 +464,118 @@ class XboxHostMatcher:
             if merged.ip_address:
                 intersections.append(merged)
         return intersections
+
+    @staticmethod
+    def normalize_server_id(server_id: str) -> str:
+        """统一 GSSV serverId 格式（XBOX- 前缀 + 大写）。"""
+        normalized = (server_id or "").strip().upper()
+        if not normalized:
+            return ""
+        if not normalized.startswith("XBOX-"):
+            normalized = f"XBOX-{normalized}"
+        return normalized
+
+    def build_candidates(self, context: AgentTaskContext) -> List[XboxInfo]:
+        """
+        在交集基础上按平台下发的主机约束过滤候选。
+
+        - assigned_xbox：按 serverId / IP 精确匹配
+        - platform_xbox_hosts：自动匹配时限定商户绑定列表
+        - auto_match_host=False 且无指定：返回空
+        """
+        intersections = self.build_intersection()
+        if not intersections:
+            return []
+
+        assigned = context.assigned_xbox
+        if assigned and (assigned.id or assigned.ip_address):
+            matched = self._filter_assigned(intersections, assigned)
+            if matched:
+                return self._attach_platform_host_ids(matched, context.platform_xbox_hosts)
+            self.logger.warning(
+                "指定 Xbox 主机未在 GSSV∩LAN 交集: id=%s ip=%s",
+                assigned.id,
+                assigned.ip_address,
+            )
+            return []
+
+        bound_hosts = context.platform_xbox_hosts or []
+        if bound_hosts:
+            filtered = self._filter_bound_hosts(intersections, bound_hosts)
+            if filtered:
+                return self._attach_platform_host_ids(filtered, bound_hosts)
+            self.logger.warning("绑定主机列表与 GSSV∩LAN 交集无匹配")
+            return []
+
+        if not context.auto_match_host:
+            return []
+
+        return intersections
+
+    def _filter_assigned(
+        self,
+        consoles: List[XboxInfo],
+        assigned,
+    ) -> List[XboxInfo]:
+        target_id = self.normalize_server_id(assigned.id or "")
+        target_ip = (assigned.ip_address or "").strip()
+        result: List[XboxInfo] = []
+        for console in consoles:
+            console_id = self.normalize_server_id(console.device_id or console.id or "")
+            if target_id and console_id == target_id:
+                result.append(console)
+            elif target_ip and console.ip_address == target_ip:
+                result.append(console)
+        return result
+
+    def _filter_bound_hosts(
+        self,
+        consoles: List[XboxInfo],
+        bound_hosts: List[Dict[str, Any]],
+    ) -> List[XboxInfo]:
+        allowed_ids: set = set()
+        allowed_ips: set = set()
+        for entry in bound_hosts:
+            xbox_id = entry.get("xboxId") or entry.get("xbox_id") or entry.get("id") or ""
+            normalized = self.normalize_server_id(str(xbox_id))
+            if normalized:
+                allowed_ids.add(normalized)
+            ip = (entry.get("ipAddress") or entry.get("ip_address") or "").strip()
+            if ip:
+                allowed_ips.add(ip)
+
+        result: List[XboxInfo] = []
+        for console in consoles:
+            console_id = self.normalize_server_id(console.device_id or console.id or "")
+            if console_id in allowed_ids:
+                result.append(console)
+            elif console.ip_address in allowed_ips:
+                result.append(console)
+        return result
+
+    @staticmethod
+    def _attach_platform_host_ids(
+        consoles: List[XboxInfo],
+        bound_hosts: List[Dict[str, Any]],
+    ) -> List[XboxInfo]:
+        """将平台 xbox_host 表主键写入 platform_host_id，供租约/锁定使用。"""
+        if not bound_hosts:
+            return consoles
+
+        id_by_server: Dict[str, str] = {}
+        for entry in bound_hosts:
+            platform_id = str(entry.get("id") or "").strip()
+            server_key = XboxHostMatcher.normalize_server_id(
+                str(entry.get("xboxId") or entry.get("xbox_id") or entry.get("id") or "")
+            )
+            if platform_id and server_key:
+                id_by_server[server_key] = platform_id
+
+        for console in consoles:
+            server_key = XboxHostMatcher.normalize_server_id(console.device_id or console.id or "")
+            if server_key in id_by_server:
+                console.platform_host_id = id_by_server[server_key]
+        return consoles
 
     async def _ensure_powered_on(
         self,

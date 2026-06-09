@@ -57,28 +57,32 @@ class AuthService:
         password: str,
         auto_code: str = "",
         streaming_account_id: str = "",
+        task_id: str = "",
         check_cancel: Optional[Callable[[], bool]] = None,
         report_progress: Optional[Callable] = None,
     ) -> StreamingCredentials:
         from ..automation.step1_stream_account_login import step1_execute_login
         from ..task.task_context import AgentTaskContext, TaskStepStatus
 
+        effective_task_id = task_id or f"auth_{streaming_account_id or email}"
         context = AgentTaskContext(
-            task_id=f"auth_{streaming_account_id or email}",
+            task_id=effective_task_id,
             streaming_account_id=streaming_account_id,
             streaming_account_email=email,
             streaming_account_password=password,
             streaming_account_auto_code=auto_code,
         )
 
-        async def _noop_report(*_args, **_kwargs):
-            """内部认证无平台任务上下文，不上报 auth_* 进度。"""
-            return None
+        async def _report(*args, **kwargs):
+            if report_progress:
+                result = report_progress(*args, **kwargs)
+                if hasattr(result, "__await__"):
+                    await result
 
         result = await step1_execute_login(
             context,
             check_cancel or (lambda: False),
-            _noop_report,
+            _report,
         )
         if not result.success:
             raise RuntimeError(result.message or "Authentication failed")

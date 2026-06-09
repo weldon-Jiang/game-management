@@ -210,6 +210,23 @@ public class AgentCallbackController {
     }
 
     /**
+     * Step2 串流成功后自动确保账号与主机绑定（source=stream_success）。
+     */
+    @PostMapping("/streaming-accounts/{streamingAccountId}/hosts/ensure-binding")
+    public ApiResponse<Map<String, Object>> ensureHostBinding(
+            @PathVariable String streamingAccountId,
+            @RequestBody Map<String, Object> payload) {
+        try {
+            return ApiResponse.success(agentCallbackService.ensureHostBinding(streamingAccountId, payload));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        } catch (Exception e) {
+            log.error("确保主机绑定失败", e);
+            return ApiResponse.error(500, "处理失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 旧版任务状态回调。
      *
      * <p>保留给旧 Agent 版本兼容，新任务流应使用 /progress 和 task_control 协议。

@@ -74,8 +74,8 @@ async def close_media_context(context: Any, logger=None) -> None:
     context.xbox_session = None
 
     try:
-        from ..automation.step2_xbox_streaming import _release_xbox_host
+        from ..xbox.console_lease import release_xbox_host
 
-        await _release_xbox_host(context)
+        await release_xbox_host(context)
     except Exception as exc:
         log.debug("release xbox host: %s", exc)

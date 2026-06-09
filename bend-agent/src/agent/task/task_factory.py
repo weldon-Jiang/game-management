@@ -1,8 +1,8 @@
 """
 任务工厂 - 可选扩展点
 
-生产环境任务由 HighConcurrencyTaskExecutor.handle_stream_control 直接调度
-AgentAutomationTask，不经过本工厂。保留注册表供未来自定义任务类型扩展。
+生产环境任务由 task_executor.handle_stream_control → AutomationScheduler
+→ StreamingAccountTask 调度，不经过本工厂。
 """
 from typing import Dict, Any, Optional, Callable
 

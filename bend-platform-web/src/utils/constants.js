@@ -338,6 +338,24 @@ export const getPlatformTypeTag = (platform) => {
   return PLATFORM_TYPE_TAG_MAP[platform] || 'info'
 }
 
+/** 启动串流时主机选择提示：平台无法校验账号与主机远程授权关系 */
+export const STREAMING_HOST_REMOTE_HINT = {
+  xbox:
+    '请确认所选 Xbox 已在该微软账号的 Xbox App 中完成远程游玩授权，且与当前串流账号对应。平台无法自动识别，选错主机将导致串流失败。',
+  playstation:
+    '请确认所选 PlayStation 已使用该账号启用 Remote Play 并完成主机注册。平台无法自动识别，需您自行确认主机与账号的对应关系。'
+}
+
+export const getStreamingHostRemoteHint = (platform) => {
+  const code = platform || 'xbox'
+  return STREAMING_HOST_REMOTE_HINT[code] || STREAMING_HOST_REMOTE_HINT.xbox
+}
+
+export const normalizePlatformType = (platform) => platform || 'xbox'
+
+export const isSamePlatformType = (left, right) =>
+  normalizePlatformType(left) === normalizePlatformType(right)
+
 export const isPlatformAutomationSupported = (platform) => {
   const normalized = platform || 'xbox'
   const item = PLATFORM_TYPES.find(p => p.code === normalized)

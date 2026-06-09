@@ -503,6 +503,64 @@ class PlatformApiClient:
             self.logger.error(f"锁定Xbox主机异常: {e}")
             return False
 
+    async def ensure_host_binding(
+        self,
+        streaming_account_id: str,
+        task_id: str,
+        *,
+        host_id: Optional[str] = None,
+        server_id: Optional[str] = None,
+        platform: str = "xbox",
+        name: Optional[str] = None,
+        ip_address: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Step2 串流成功后确保账号与主机绑定（source=stream_success）。
+
+        失败仅记录日志，不阻断串流流程。
+        """
+        url = self._get_callback_url(
+            f"streaming-accounts/{streaming_account_id}/hosts/ensure-binding"
+        )
+        headers = await self._get_headers()
+        payload: Dict[str, Any] = {"taskId": task_id, "platform": platform}
+        if host_id:
+            payload["hostId"] = host_id
+        if server_id:
+            payload["serverId"] = server_id
+        if name:
+            payload["name"] = name
+        if ip_address:
+            payload["ipAddress"] = ip_address
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    if result.get("code") == 200:
+                        data = result.get("data") or {}
+                        self.logger.info(
+                            "确保主机绑定成功 account=%s hostId=%s",
+                            streaming_account_id,
+                            data.get("hostId"),
+                        )
+                        return data
+                    self.logger.warning(
+                        "确保主机绑定失败: %s", result.get("message")
+                    )
+                    return None
+                self.logger.warning("确保主机绑定 HTTP 错误: %s", response.status)
+                return None
+        except Exception as e:
+            self.logger.warning("确保主机绑定异常（非致命）: %s", e)
+            return None
+
     async def unlock_xbox_host(self, xbox_host_id: str, task_id: Optional[str] = None) -> bool:
         """
         解锁Xbox主机（v2.0）

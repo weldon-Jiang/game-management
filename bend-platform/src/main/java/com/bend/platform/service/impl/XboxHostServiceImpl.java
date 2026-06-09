@@ -10,6 +10,7 @@ import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.XboxHostMapper;
 import com.bend.platform.service.CredentialTokenService;
 import com.bend.platform.service.MerchantService;
+import com.bend.platform.service.StreamingAccountHostBindingService;
 import com.bend.platform.service.StreamingAccountLoginRecordService;
 import com.bend.platform.service.XboxHostService;
 import com.bend.platform.util.DataSecurityUtil;
@@ -50,6 +51,7 @@ import java.util.stream.Collectors;
 public class XboxHostServiceImpl implements XboxHostService {
 
     private final XboxHostMapper xboxHostMapper;
+    private final StreamingAccountHostBindingService hostBindingService;
     private final StreamingAccountLoginRecordService loginRecordService;
     private final MerchantService merchantService;
     private final DataSecurityUtil dataSecurityUtil;
@@ -233,10 +235,7 @@ public class XboxHostServiceImpl implements XboxHostService {
 
     @Override
     public List<XboxHost> findByBoundStreamingAccountId(String streamingAccountId) {
-        LambdaQueryWrapper<XboxHost> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(XboxHost::getBoundStreamingAccountId, streamingAccountId);
-        wrapper.eq(XboxHost::getStatus, "online");
-        return xboxHostMapper.selectList(wrapper);
+        return hostBindingService.findActiveHostsByAccount(streamingAccountId);
     }
 
     @Override

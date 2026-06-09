@@ -3,7 +3,7 @@ StreamingSession — 编排 auth → discovery → xhome_stream 就绪链。
 """
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..auth.api import AuthService, StreamingCredentials
 from ..core.task_logger import get_task_logger
@@ -56,6 +56,7 @@ class StreamingSession:
         streaming_account_id: str = "",
         auto_code: str = "",
         assigned_xbox: Optional[Dict[str, Any]] = None,
+        platform_xbox_hosts: Optional[List[Dict[str, Any]]] = None,
         auto_match_host: bool = True,
         window_manager: Any = None,
         decode_mode: str = "auto",
@@ -79,6 +80,7 @@ class StreamingSession:
                     password=password,
                     auto_code=auto_code,
                     streaming_account_id=streaming_account_id,
+                    task_id=self.task_id,
                     check_cancel=check_cancel,
                     report_progress=report_progress,
                 )
@@ -94,6 +96,7 @@ class StreamingSession:
                     self.credentials,
                     self.task_id,
                     assigned_xbox=assigned_xbox,
+                    platform_xbox_hosts=platform_xbox_hosts,
                     auto_match_host=auto_match_host,
                     check_cancel=check_cancel,
                     report_progress=report_progress,

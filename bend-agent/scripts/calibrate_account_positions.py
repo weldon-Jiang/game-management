@@ -62,7 +62,7 @@ async def _run(streaming_id: str, slots: int, max_step: int) -> int:
     context.update_step_status("step3", TaskStepStatus.COMPLETED, "calibration")
 
     from agent.automation.step3_streaming_init import step3_streaming_init
-    from agent.automation.step2_xbox_streaming import step2_execute_streaming
+    from agent.automation.step2_router import step2_execute_streaming
     from agent.automation.step1_stream_account_login import step1_execute_login
 
     async def noop_progress(*_a, **_k):

@@ -51,6 +51,7 @@ public class TaskControlServiceImpl implements TaskControlService {
     private final AgentLoadControlService loadControlService;
     private final GameAccountService gameAccountService;
     private final XboxHostService xboxHostService;
+    private final StreamingAccountHostBindingService hostBindingService;
     private final CredentialTokenService credentialTokenService;
     private final TaskEventService taskEventService;
     private final AgentInstanceService agentInstanceService;
@@ -105,17 +106,24 @@ public class TaskControlServiceImpl implements TaskControlService {
         validateGameAccountOccupancy(merchantId, gameAccounts);
 
         XboxHost selectedHost = null;
-        List<XboxHost> boundHosts = xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
         if (request.getXboxHostId() != null && !request.getXboxHostId().isBlank()) {
             selectedHost = xboxHostService.findById(request.getXboxHostId());
             if (selectedHost == null || !merchantId.equals(selectedHost.getMerchantId())) {
-                throw new BusinessException(404, "Xbox主机不存在");
+                throw new BusinessException(404, "主机不存在");
+            }
+            PlatformTypeUtil.requireSamePlatform(
+                    selectedHost.getPlatform(),
+                    streamingAccount.getPlatform(),
+                    "所选主机平台与串流账号不一致，请重新选择");
+            if (!hostBindingService.hasActiveBinding(streamingAccountId, selectedHost.getId())) {
+                throw new BusinessException(400, "所选主机未绑定到该串流账号，请先在主机管理中绑定或留空由 Agent 自动发现");
+            }
+            if (Boolean.TRUE.equals(selectedHost.getLocked())) {
+                throw new BusinessException(400, "所选主机已被其他任务占用");
             }
         }
 
-        List<XboxHost> hostsForBilling = selectedHost != null
-                ? List.of(selectedHost)
-                : boundHosts;
+        List<XboxHost> hostsForBilling = selectedHost != null ? List.of(selectedHost) : List.of();
         Map<String, Object> billingValidation = automationUsageService.validateAndCalculatePoints(
                 merchantId, streamingAccountId, gameAccounts, hostsForBilling);
         if (!Boolean.TRUE.equals(billingValidation.get("canStart"))) {
@@ -123,7 +131,7 @@ public class TaskControlServiceImpl implements TaskControlService {
         }
 
         Map<String, Object> taskParams = buildStreamingTaskParams(
-                streamingAccount, gameAccounts, selectedHost, boundHosts, merchantId);
+                streamingAccount, gameAccounts, selectedHost, merchantId);
 
         Task reusable = taskService.findReusableTaskByStreamingAccountAndAgent(streamingAccountId, agentId);
         final Task task;
@@ -548,13 +556,12 @@ public class TaskControlServiceImpl implements TaskControlService {
             StreamingAccount account,
             List<GameAccount> gameAccounts,
             XboxHost host,
-            List<XboxHost> boundHosts,
             String merchantId) {
         Map<String, Object> params = new HashMap<>();
         params.put("phase", "streaming_only");
         params.put("merchantId", merchantId);
         params.put("platform", PlatformTypeUtil.normalizeOrDefault(account.getPlatform()));
-        // LAN 串流：Agent 侧做 GSSV ∩ LAN 交集，不走纯云端随机匹配
+        // LAN 串流：Agent 侧做 GSSV ∩ LAN 交集；未指定主机时不下发绑定列表，由 Agent 全量发现
         params.put("autoMatchHost", host == null);
         params.put("streamMode", "lan_direct");
         params.put("streamingAccount", buildStreamingInfo(account));
@@ -563,8 +570,6 @@ public class TaskControlServiceImpl implements TaskControlService {
             params.put("host", buildHostInfo(host));
             params.put("xboxInfo", buildHostInfo(host));
             params.put("xboxHosts", List.of(buildHostInfo(host)));
-        } else if (boundHosts != null && !boundHosts.isEmpty()) {
-            params.put("xboxHosts", buildXboxHostsInfo(boundHosts));
         }
         return params;
     }
@@ -614,6 +619,7 @@ public class TaskControlServiceImpl implements TaskControlService {
         info.put("ipAddress", host.getIpAddress());
         info.put("liveId", host.getLiveId());
         info.put("macAddress", host.getMacAddress());
+        info.put("platform", PlatformTypeUtil.normalizeOrDefault(host.getPlatform()));
         return info;
     }
 

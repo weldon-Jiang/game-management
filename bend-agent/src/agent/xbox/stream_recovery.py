@@ -56,18 +56,15 @@ async def reconnect_input_channel(context: Any, task_logger=None) -> bool:
                 log.info("input 通道已恢复 open，跳过重连")
                 return True
 
-            from ..automation.step2_xbox_streaming import (
-                _cleanup_lan_connect_attempt,
-                _connect_to_xbox_lan,
-            )
+            from ..xbox.lan_connect import cleanup_lan_connect_attempt, connect_to_xbox_lan
             from ..core.account_logger import get_stream_logger
 
             email = getattr(context, "streaming_account_email", "") or ""
             stream_logger = get_stream_logger(email) if email else log
 
             log.info("开始重连 LAN SmartGlass 串流")
-            await _cleanup_lan_connect_attempt(context, log)
-            ok, details = await _connect_to_xbox_lan(context, log, stream_logger)
+            await cleanup_lan_connect_attempt(context, log)
+            ok, details = await connect_to_xbox_lan(context, log, stream_logger)
             if not ok:
                 log.error("LAN 串流重连失败: %s", details.get("errorMessage", details))
                 return False

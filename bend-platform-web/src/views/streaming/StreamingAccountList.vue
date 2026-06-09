@@ -452,7 +452,7 @@ import StartWizard from '@/components/automation/StartWizard.vue'
 import { Plus, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi, xboxApi } from '@/api'
-import { getAgentDisplayName, getStreamingAccountStatusText, getStreamingAccountStatusType, getAccountTaskStatusText, getAccountTaskStatusType, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag, isPlatformAutomationSupported, getVisibleGameActionTypes } from '@/utils/constants'
+import { getAgentDisplayName, getStreamingAccountStatusText, getStreamingAccountStatusType, getAccountTaskStatusText, getAccountTaskStatusType, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag, isPlatformAutomationSupported, getVisibleGameActionTypes, isSamePlatformType } from '@/utils/constants'
 
 // ==================== 状态定义 ====================
 
@@ -888,11 +888,15 @@ const onWizardStarted = (data) => {
   }
 }
 
-const loadBoundHosts = async (streamingAccountId) => {
+const loadBoundHosts = async (streamingAccountId, accountPlatform = 'xbox') => {
   try {
     const res = await xboxApi.listPage({ pageNum: 1, pageSize: 500 })
     const records = res.data?.records || []
-    boundHosts.value = records.filter(h => h.boundStreamingAccountId === streamingAccountId)
+    boundHosts.value = records.filter(
+      (h) =>
+        h.boundStreamingAccountId === streamingAccountId &&
+        isSamePlatformType(h.platform, accountPlatform)
+    )
   } catch (error) {
     console.error('Failed to load bound hosts:', error)
     boundHosts.value = []

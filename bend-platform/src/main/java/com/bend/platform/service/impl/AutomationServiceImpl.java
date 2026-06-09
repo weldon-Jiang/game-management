@@ -40,6 +40,7 @@ public class AutomationServiceImpl implements AutomationService {
     private final AgentInstanceService agentInstanceService;
     private final CredentialTokenService credentialTokenService;
     private final XboxHostService xboxHostService;
+    private final StreamingAccountHostBindingService hostBindingService;
     private final AutomationUsageService automationUsageService;
     private final TaskExecutorService taskExecutorService;
     private final AgentLoadControlService loadControlService;
@@ -110,7 +111,6 @@ public class AutomationServiceImpl implements AutomationService {
             }
 
             List<GameAccount> gameAccounts = gameAccountService.findByStreamingIdWithCredentials(streamingAccountId);
-            List<XboxHost> boundHosts = xboxHostService.findByBoundStreamingAccountId(streamingAccountId);
 
             XboxHost selectedHost = null;
             boolean autoMatchHost = true;
@@ -125,7 +125,7 @@ public class AutomationServiceImpl implements AutomationService {
                     results.add(errorResult);
                     continue;
                 }
-                if (!streamingAccountId.equals(selectedHost.getBoundStreamingAccountId())) {
+                if (!hostBindingService.hasActiveBinding(streamingAccountId, selectedHost.getId())) {
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("streamingAccountId", streamingAccountId);
                     errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
@@ -156,7 +156,7 @@ public class AutomationServiceImpl implements AutomationService {
             }
 
             List<XboxHost> xboxHostsForBilling = selectedHost != null
-                    ? List.of(selectedHost) : boundHosts;
+                    ? List.of(selectedHost) : List.of();
 
             // 校验游戏账号状态（是否有忙碌中的账号）
             List<String> busyGameAccountNames = new ArrayList<>();
@@ -220,8 +220,6 @@ public class AutomationServiceImpl implements AutomationService {
             if (selectedHost != null) {
                 taskParams.put("xboxHosts", buildXboxHostsInfo(List.of(selectedHost)));
                 taskParams.put("xboxInfo", buildHostInfo(selectedHost));
-            } else {
-                taskParams.put("xboxHosts", buildXboxHostsInfo(boundHosts));
             }
             taskParams.put("gameActionType", request.getGameActionType());
             taskParams.put("merchantId", merchantId);

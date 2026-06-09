@@ -49,6 +49,7 @@ class DiscoveryService:
         credentials: StreamingCredentials,
         task_id: str,
         assigned_xbox: Optional[Dict[str, Any]] = None,
+        platform_xbox_hosts: Optional[List[Dict[str, Any]]] = None,
         auto_match_host: bool = True,
         check_cancel: Optional[Callable[[], bool]] = None,
         report_progress: Optional[Callable] = None,
@@ -65,6 +66,7 @@ class DiscoveryService:
         )
         context.microsoft_tokens = credentials.microsoft_tokens
         context.xbox_tokens = credentials.xbox_tokens
+        context.platform_xbox_hosts = list(platform_xbox_hosts or [])
 
         if assigned_xbox:
             platform_id = assigned_xbox.get("id", "")
@@ -77,7 +79,8 @@ class DiscoveryService:
                 live_id=assigned_xbox.get("liveId", "") or assigned_xbox.get("live_id", ""),
                 mac_address=assigned_xbox.get("macAddress", "") or assigned_xbox.get("mac_address", ""),
             )
-            context.platform_xbox_hosts = [assigned_xbox]
+            if not context.platform_xbox_hosts:
+                context.platform_xbox_hosts = [assigned_xbox]
 
         async def _report(*args, **kwargs):
             if report_progress:

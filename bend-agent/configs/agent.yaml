@@ -102,6 +102,8 @@ discovery:
   ssdp_enrich_enabled: false
   smartglass_udp_enabled: true       # OpenXbox 0xDD00 UDP 5050 发现（LAN 优先）
   smartglass_udp_timeout_sec: 5
+  ps_udp_enabled: true               # Chiaki SRCH UDP 987/9302 发现（PlayStation）
+  ps_udp_timeout_sec: 5
   wakeup_timeout_sec: 30
   smartglass_wake_fallback: true
 

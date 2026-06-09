@@ -10,8 +10,7 @@ Bend Agent 任务模块
 模块结构：
 - task_context: 任务上下文管理
 - task_executor: 任务执行器
-- automation_task: 自动化任务类
-- automation_scheduler: 任务调度器
+- automation_scheduler: 任务调度器（StreamingAccountTask）
 
 作者：技术团队
 版本：1.0

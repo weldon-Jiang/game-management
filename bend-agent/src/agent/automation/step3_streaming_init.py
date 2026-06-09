@@ -66,9 +66,14 @@ def _format_window_title(context: AgentTaskContext, template: str) -> str:
 
 
 def _build_step3_pipeline_diagnostic(context: AgentTaskContext) -> Dict[str, Any]:
-    from .step2_xbox_streaming import _pipeline_diagnostic_from_context
+    from ..automation.platform_util import account_platform
 
-    diag = _pipeline_diagnostic_from_context(context)
+    if account_platform(context) == "playstation":
+        from ..playstation.pipeline_diagnostic import pipeline_diagnostic_from_context
+    else:
+        from ..xbox.pipeline_diagnostic import pipeline_diagnostic_from_context
+
+    diag = pipeline_diagnostic_from_context(context)
     diag["inputDc"] = "ok" if not getattr(context, "_input_channel_dirty", False) else "fail"
     if context.sdl_window is not None:
         diag["display"] = "ok"

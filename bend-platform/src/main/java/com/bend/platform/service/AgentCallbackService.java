@@ -37,6 +37,11 @@ public interface AgentCallbackService {
 
     Map<String, Object> reportBillingEvent(Map<String, Object> payload);
 
+    /**
+     * Step2 串流成功后确保账号与主机绑定（source=stream_success）。
+     */
+    Map<String, Object> ensureHostBinding(String streamingAccountId, Map<String, Object> payload);
+
     void reportTaskStatusLegacy(String taskId, Map<String, String> payload);
 
     void updateGameAccountStatusLegacy(String taskId, String gameAccountId, Map<String, Object> payload);

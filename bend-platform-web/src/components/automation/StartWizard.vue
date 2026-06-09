@@ -8,7 +8,11 @@
     </el-steps>
 
     <div v-if="step === 0" class="step-body">
-      <p class="mb-8">串流账号: <strong>{{ account?.email }}</strong></p>
+      <p class="mb-8">
+        串流账号:
+        <strong>{{ account?.email }}</strong>
+        <el-tag size="small" :type="platformTag" class="platform-tag">{{ platformLabel }}</el-tag>
+      </p>
       <p class="label">选择游戏账号（可多选）</p>
       <el-checkbox-group v-model="form.gameAccountIds" class="ga-list">
         <el-checkbox
@@ -35,6 +39,34 @@
         <el-option v-for="a in agents" :key="a.agentId" :label="getAgentDisplayName(a)" :value="a.agentId" />
       </el-select>
       <p v-if="!agents.length" class="text-muted">当前没有在线 Agent，请先启动 Agent 服务</p>
+
+      <p class="label host-label">选择主机（可选）</p>
+      <el-select
+        v-model="form.hostId"
+        placeholder="不指定，由 Agent 自动匹配"
+        style="width: 100%"
+        clearable
+        filterable
+        :loading="hostsLoading"
+      >
+        <el-option
+          v-for="host in selectableHosts"
+          :key="host.id"
+          :label="formatHostLabel(host)"
+          :value="host.id"
+        />
+      </el-select>
+      <p v-if="!hostsLoading && !selectableHosts.length" class="text-muted">
+        暂无已绑定主机，可不指定由 Agent 自动发现；串流成功后将自动建立绑定
+      </p>
+
+      <el-alert
+        class="host-hint"
+        type="warning"
+        :closable="false"
+        show-icon
+        :title="hostRemoteHint"
+      />
     </div>
 
     <div v-else-if="step === 2" class="step-body">
@@ -80,19 +112,24 @@
 
 <script setup>
 /**
- * 启动自动化向导：选 Agent/游戏账号 → startStreaming（Step1–3）→ 轮询 sessionPhase 至 ready。
- * gameActionType 在 ready 后由详情页 TaskControlBar 触发 startAutomation。
+ * 启动自动化向导：选游戏账号 → Agent/主机 → startStreaming（Step1–3）→ 轮询 sessionPhase 至 ready。
+ * 主机下拉仅展示该账号已绑定主机；不选则 Agent 自动发现，成功后自动绑定。
  */
 import { ref, reactive, watch, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { automationApi } from '@/api/automation'
 import { taskApi } from '@/api/task'
+import { streamingApi } from '@/api/streaming'
 import SessionPhaseStepper from '@/components/task/SessionPhaseStepper.vue'
 import {
   getAgentDisplayName,
   getSessionPhaseHint,
-  getTaskEventMessageText
+  getTaskEventMessageText,
+  getPlatformTypeText,
+  getPlatformTypeTag,
+  getStreamingHostRemoteHint,
+  normalizePlatformType
 } from '@/utils/constants'
 
 const props = defineProps({
@@ -110,15 +147,29 @@ const submitting = ref(false)
 const taskId = ref('')
 const sessionPhase = ref('opening')
 const statusMessage = ref('等待启动...')
+const hostsLoading = ref(false)
+const boundHosts = ref([])
 let pollTimer = null
 
 const form = reactive({
   agentId: '',
+  hostId: '',
   gameActionType: 'squad_battle',
   gameAccountIds: []
 })
 
-// Step1-3 是串流准备阶段，进度只反映会话 phase，不代表 Step4 自动化进度。
+const accountPlatform = computed(() => normalizePlatformType(props.account?.platform))
+const platformLabel = computed(() => getPlatformTypeText(accountPlatform.value))
+const platformTag = computed(() => getPlatformTypeTag(accountPlatform.value))
+const hostRemoteHint = computed(() => getStreamingHostRemoteHint(accountPlatform.value))
+
+/** 已绑定当前串流账号的主机列表 */
+const selectableHosts = computed(() => {
+  return [...boundHosts.value].sort((a, b) =>
+    (a.name || a.xboxId || '').localeCompare(b.name || b.xboxId || '')
+  )
+})
+
 const phaseProgress = {
   opening: 10,
   authenticating: 25,
@@ -135,15 +186,39 @@ const isReady = computed(() => sessionPhase.value === 'ready')
 watch(() => props.modelValue, (v) => {
   visible.value = v
   if (v) {
-    // 默认选中当前未被其他任务占用的游戏账号，避免用户误启动冲突账号。
     form.gameAccountIds = props.gameAccounts
       .filter((ga) => !isGameAccountOccupied(ga))
       .map((ga) => ga.id)
     const boundAgent = props.agents.find((a) => a.agentId === props.account?.agentId)
     form.agentId = boundAgent?.agentId || (props.agents.length === 1 ? props.agents[0].agentId : '')
+    form.hostId = ''
+    loadBoundHosts()
   }
 })
 watch(visible, (v) => emit('update:modelValue', v))
+
+const loadBoundHosts = async () => {
+  if (!props.account?.id) {
+    boundHosts.value = []
+    return
+  }
+  hostsLoading.value = true
+  try {
+    const res = await streamingApi.getBoundHosts(props.account.id)
+    boundHosts.value = res.data || []
+  } catch (error) {
+    console.error('Failed to load bound hosts:', error)
+    boundHosts.value = []
+  } finally {
+    hostsLoading.value = false
+  }
+}
+
+const formatHostLabel = (host) => {
+  const name = host.name || host.xboxId || host.id
+  const ip = host.ipAddress ? ` · ${host.ipAddress}` : ''
+  return `${name}${ip}`
+}
 
 const stopPoll = () => {
   if (pollTimer) {
@@ -155,7 +230,6 @@ const stopPoll = () => {
 const pollTaskDetail = async () => {
   if (!taskId.value) return
   try {
-    // 启动串流阶段使用轮询兜底，直到后端会话进入 ready 后再让用户选择自动化。
     const res = await taskApi.getDetail(taskId.value)
     const task = res.data?.task
     const session = res.data?.session
@@ -184,7 +258,9 @@ const reset = () => {
   sessionPhase.value = 'opening'
   statusMessage.value = '等待启动...'
   form.agentId = ''
+  form.hostId = ''
   form.gameAccountIds = []
+  merchantHosts.value = []
 }
 
 onUnmounted(stopPoll)
@@ -207,11 +283,14 @@ const startStreaming = async () => {
   }
   submitting.value = true
   try {
-    // 第一阶段只建立长寿命串流任务；Step4 自动化类型在 ready 后单独下发。
-    const res = await automationApi.startStreaming(props.account.id, {
+    const payload = {
       agentId: form.agentId,
       gameAccountIds: form.gameAccountIds
-    })
+    }
+    if (form.hostId) {
+      payload.xboxHostId = form.hostId
+    }
+    const res = await automationApi.startStreaming(props.account.id, payload)
     taskId.value = res.data?.taskId
     step.value = 2
     sessionPhase.value = 'opening'
@@ -222,14 +301,12 @@ const startStreaming = async () => {
   } catch (error) {
     const conflict = error?.data
     if (conflict?.conflicts?.length) {
-      // 多账号任一被占用都不能启动，后端返回冲突列表供前端精确提示。
       const names = conflict.conflicts
         .map((item) => item.gameAccountName || item.gameAccountId)
         .join('、')
       ElMessage.error(`以下游戏账号已被其他任务占用：${names}`)
     } else if (conflict?.taskId) {
       try {
-        // 同一串流账号已有长寿命任务时，引导用户进入现有任务而不是重复启动。
         await ElMessageBox.confirm(
           error.message || '该串流账号正在运行任务',
           '无法启动串流',
@@ -260,7 +337,6 @@ const goDetail = () => {
 const startAutomation = async () => {
   submitting.value = true
   try {
-    // 第二阶段只下发 gameActionType，Agent 在 Step4 确认账号登录后才真正应用该模式。
     await taskApi.startAutomation(taskId.value, { gameActionType: form.gameActionType })
     goDetail()
   } finally {
@@ -274,9 +350,12 @@ const startAutomation = async () => {
 .step-body { min-height: 100px; padding: 8px 0; }
 .text-muted { color: var(--el-text-color-secondary); font-size: 13px; }
 .label { font-size: 13px; margin-bottom: 8px; color: var(--el-text-color-regular); }
+.host-label { margin-top: 16px; }
+.host-hint { margin-top: 12px; }
 .ga-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
 .meta { color: var(--el-text-color-secondary); font-size: 12px; margin-left: 6px; }
 .meta.warning { color: var(--el-color-warning); }
+.platform-tag { margin-left: 8px; vertical-align: middle; }
 .phase-stepper { margin: 12px 0; }
 .status-line { font-size: 13px; color: var(--el-text-color-secondary); margin-bottom: 8px; }
 .mb-8 { margin-bottom: 8px; }

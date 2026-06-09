@@ -1,21 +1,19 @@
 """
-PlayStation LAN 发现（占位）。
-
-按 platform=playstation 走平台 Redis 缓存；UDP 发现协议待 Chiaki 集成后实现。
-选错账号类型时按正常流程在 Step2 报错（LAN 无主机 / 串流未开放）。
+PlayStation LAN 发现编排：平台 Redis 缓存 → Chiaki UDP → 上报平台。
 """
 
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ..core.config import config
 from ..core.logger import get_logger
-from ..gssv.network_util import (
+from ..lan.network_util import (
     is_blocked_scan_ip,
     is_private_lan_ip,
     is_same_lan_segment,
     pick_local_lan_ip,
 )
+from .chiaki_discovery import discover_chiaki_consoles
+from .models import PlayStationConsole
 
 if TYPE_CHECKING:
     from ..api.platform_api_client import PlatformApiClient
@@ -25,22 +23,11 @@ logger = get_logger("ps_lan_discovery")
 LAN_PLATFORM = "playstation"
 
 
-@dataclass
-class PlayStationConsole:
-    """局域网 PlayStation 主机摘要。"""
-
-    device_id: str
-    name: str
-    ip_address: str
-    port: int = 9295
-    console_type: str = "PS5"
-
-
 async def discover_playstation_lan(
     platform_client: Optional["PlatformApiClient"] = None,
 ) -> Dict[str, PlayStationConsole]:
     """
-    PS LAN 发现：优先平台缓存，未命中则 UDP（尚未实现）。
+    PS LAN 发现：优先平台缓存，未命中则 Chiaki UDP 广播。
 
     返回 device_id → PlayStationConsole 映射。
     """
@@ -61,8 +48,35 @@ async def discover_playstation_lan(
         if cached:
             return cached
 
-    # TODO: Chiaki / PS Remote Play UDP 注册发现
-    logger.info("PlayStation UDP LAN 发现尚未实现，未发现主机")
+    if not config.get("discovery.ps_udp_enabled", True):
+        logger.info("PlayStation UDP 发现已禁用（discovery.ps_udp_enabled=false）")
+        return result
+
+    timeout = float(config.get("discovery.ps_udp_timeout_sec", 5))
+    hosts = await discover_chiaki_consoles(timeout_sec=timeout, local_ip=local_ip)
+    for host in hosts:
+        if local_ip and not is_same_lan_segment(local_ip, host.ip_address):
+            logger.debug("跳过非同网段 PS 主机 %s", host.ip_address)
+            continue
+        console = PlayStationConsole(
+            device_id=host.host_id,
+            name=host.host_name or f"PlayStation ({host.ip_address})",
+            ip_address=host.ip_address,
+            port=host.host_request_port,
+            console_type=host.console_type,
+            power_state="Ready" if host.state == "ready" else "Standby",
+            system_version=host.system_version,
+        )
+        result[console.device_id] = console
+
+    if result and platform_client and local_ip:
+        await report_playstation_lan_to_platform(platform_client, local_ip, result)
+
+    if not result:
+        logger.info("PlayStation UDP LAN 发现未发现主机")
+    else:
+        logger.info("PlayStation UDP LAN 发现 %s 台", len(result))
+
     return result
 
 
@@ -71,7 +85,7 @@ async def report_playstation_lan_to_platform(
     local_ip: str,
     consoles: Dict[str, PlayStationConsole],
 ) -> None:
-    """将 PS LAN 发现结果上报平台（Redis + upsert xbox_host）。"""
+    """将 PS LAN 发现结果上报平台（Redis + upsert xbox_host，platform=playstation）。"""
     if not platform_client or not local_ip or not consoles:
         return
     if not config.get("discovery.platform_lan_cache_enabled", True):

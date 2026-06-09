@@ -5,6 +5,7 @@ import com.bend.platform.entity.Task;
 import com.bend.platform.entity.TaskEvent;
 import com.bend.platform.entity.TaskGameAccountStatus;
 import com.bend.platform.entity.XboxHost;
+import com.bend.platform.enums.HostBindingSource;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.TaskMapper;
@@ -15,6 +16,7 @@ import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.LanDiscoveryCacheService;
 import com.bend.platform.service.StreamLeaseService;
+import com.bend.platform.service.StreamingAccountHostBindingService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.service.StreamingSessionService;
 import com.bend.platform.service.TaskEventService;
@@ -59,6 +61,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     private final AgentLoadControlService loadControlService;
     private final StreamingAccountService streamingAccountService;
     private final XboxHostService xboxHostService;
+    private final StreamingAccountHostBindingService hostBindingService;
     private final StreamLeaseService streamLeaseService;
     private final LanDiscoveryCacheService lanDiscoveryCacheService;
     private final AgentInstanceService agentInstanceService;
@@ -563,6 +566,63 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
                 agentId, normalizedPlatform, localIp, consoles != null ? consoles.size() : 0);
         return lanDiscoveryCacheService.report(
                 merchantId, agentId, normalizedPlatform, localIp, consoles, ttlSec);
+    }
+
+    @Override
+    public Map<String, Object> ensureHostBinding(String streamingAccountId, Map<String, Object> payload) {
+        if (payload == null) {
+            throw new BusinessException(400, "请求体不能为空");
+        }
+        String taskId = (String) payload.get("taskId");
+        if (!StringUtils.hasText(taskId)) {
+            throw new BusinessException(400, "taskId 不能为空");
+        }
+        Task task = requireTaskForAuthenticatedAgent(taskId);
+        if (!streamingAccountId.equals(task.getStreamingAccountId())) {
+            throw new BusinessException(403, "串流账号与任务不匹配");
+        }
+
+        String merchantId = task.getMerchantId();
+        if (!StringUtils.hasText(merchantId)) {
+            var account = streamingAccountService.findById(streamingAccountId);
+            if (account == null) {
+                throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+            }
+            merchantId = account.getMerchantId();
+        }
+
+        String hostId = firstNonBlank(payload, "hostId", "xboxHostId");
+        String serverId = firstNonBlank(payload, "serverId", "xboxId");
+        String platform = (String) payload.get("platform");
+        String name = (String) payload.get("name");
+        String ipAddress = firstNonBlank(payload, "ipAddress", "ip");
+
+        XboxHost host = hostBindingService.ensureBinding(
+                merchantId,
+                streamingAccountId,
+                hostId,
+                serverId,
+                platform,
+                HostBindingSource.STREAM_SUCCESS.getCode(),
+                name,
+                ipAddress,
+                null);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("hostId", host.getId());
+        result.put("xboxId", host.getXboxId());
+        result.put("streamingAccountId", streamingAccountId);
+        return result;
+    }
+
+    private static String firstNonBlank(Map<String, Object> payload, String... keys) {
+        for (String key : keys) {
+            Object value = payload.get(key);
+            if (value instanceof String s && StringUtils.hasText(s)) {
+                return s.trim();
+            }
+        }
+        return null;
     }
 
     private String requireMerchantIdForAgent(String agentId) {

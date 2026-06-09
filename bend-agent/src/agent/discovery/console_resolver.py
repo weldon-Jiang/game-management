@@ -1,10 +1,9 @@
-"""主机发现与 LAN 串流握手（GSSV ∩ SmartGlass UDP）。"""
+"""主机发现路由：按 platform 委托 Xbox / PlayStation 独立 resolver。"""
 
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from ..core.account_logger import get_stream_logger
-from ..core.task_logger import get_task_logger
+from ..automation.platform_util import account_platform
 from ..task.task_context import AgentTaskContext, XboxInfo
 
 
@@ -21,31 +20,24 @@ async def resolve_console_target(
     check_cancel: Callable[[], bool],
     report_progress: Optional[Callable] = None,
 ) -> ConsoleResolveResult:
-    """云端∩LAN 交集发现 + 逐台 LAN 握手（与 step2 主流程一致）。"""
-    from ..automation.step2_xbox_streaming import discover_intersection_and_connect_lan
+    """按 account_platform 路由，不含任何平台协议细节。"""
+    if account_platform(context) == "playstation":
+        from .ps_console_resolver import resolve_ps_console_target
 
-    task_logger = get_task_logger(context.task_id)
-    stream_logger = get_stream_logger(context.streaming_account_email)
-
-    if check_cancel():
-        return ConsoleResolveResult(success=False, error_code="CANCELLED", message="Cancelled")
-
-    async def _report(*args, **kwargs):
-        if report_progress:
-            await report_progress(*args, **kwargs)
-
-    result = await discover_intersection_and_connect_lan(
-        context,
-        task_logger,
-        stream_logger,
-        check_cancel,
-        _report,
-    )
-    if not result.success:
+        resolved = await resolve_ps_console_target(context, check_cancel, report_progress)
         return ConsoleResolveResult(
-            success=False,
-            message=result.message,
-            error_code=result.error_code or "XBOX_MATCH_FAILED",
+            success=resolved.success,
+            xbox_info=resolved.console_info,
+            message=resolved.message,
+            error_code=resolved.error_code,
         )
 
-    return ConsoleResolveResult(success=True, xbox_info=context.current_xbox)
+    from .xbox_console_resolver import resolve_xbox_console_target
+
+    resolved = await resolve_xbox_console_target(context, check_cancel, report_progress)
+    return ConsoleResolveResult(
+        success=resolved.success,
+        xbox_info=resolved.xbox_info,
+        message=resolved.message,
+        error_code=resolved.error_code,
+    )
