@@ -16,6 +16,11 @@ public interface GameAccountService {
 
     GameAccount findById(String id);
 
+    /**
+     * 按主键加载游戏账号并校验商户归属（Agent 回调，不依赖 JWT UserContext）。
+     */
+    GameAccount requireForMerchant(String gameAccountId, String merchantId);
+
     GameAccount findByGamertag(String gamertag);
 
     IPage<GameAccount> findByMerchantId(String merchantId, GameAccountPageRequest request);

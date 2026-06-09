@@ -30,6 +30,11 @@ public interface StreamingAccountHostBindingService {
     void unbindAllForHost(String hostId);
 
     /**
+     * 解绑指定账号与主机的 active 绑定（账号视角）。
+     */
+    void unbind(String hostId, String streamingAccountId);
+
+    /**
      * 获取主机首个 active 绑定的流媒体账号 ID（兼容旧 UI 单字段展示）。
      */
     String getPrimaryBoundStreamingAccountId(String hostId);

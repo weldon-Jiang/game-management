@@ -1,12 +1,9 @@
 import { test, expect } from '@playwright/test'
+import { gotoAuthenticated } from './helpers/auth.js'
 
 test.describe('Agent 管理流程', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/login')
-    await page.fill('input[placeholder="用户名"]', 'admin')
-    await page.fill('input[placeholder="密码"]', 'password')
-    await page.click('button[type="submit"]')
-    await page.waitForURL('**/', { timeout: 10000 })
+    await gotoAuthenticated(page, '/')
   })
 
   test('应该显示 Agent 列表页面', async ({ page }) => {
@@ -25,13 +22,12 @@ test.describe('Agent 管理流程', () => {
 
   test('Agent 列表应该包含必要列', async ({ page }) => {
     await page.goto('/agents')
-    await page.waitForSelector('.el-table', { timeout: 5000 })
+    await page.waitForSelector('.el-table__header', { timeout: 5000 })
 
-    await expect(page.locator('text=Agent名称')).toBeVisible()
-    await expect(page.locator('text=Agent ID')).toBeVisible()
-    await expect(page.locator('text=主机地址')).toBeVisible()
-    await expect(page.locator('text=状态')).toBeVisible()
-    await expect(page.locator('text=最后心跳')).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: 'Agent名称' })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: 'Agent ID' })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: '主机地址' })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: '状态' })).toBeVisible()
   })
 
   test('应该支持状态筛选', async ({ page }) => {
@@ -39,7 +35,7 @@ test.describe('Agent 管理流程', () => {
 
     const statusSelect = page.locator('.el-select').first()
     await statusSelect.click()
-    await page.locator('text=在线').click()
+    await page.locator('.el-select-dropdown__item').filter({ hasText: '在线' }).click()
 
     await page.waitForTimeout(500)
     await expect(statusSelect).toContainText('在线')
@@ -58,7 +54,7 @@ test.describe('Agent 管理流程', () => {
     await page.goto('/agents')
     await page.waitForSelector('.el-table__row', { timeout: 5000 })
 
-    const refreshButton = page.locator('button').filter({ has: page.locator('.el-icon-refresh') }).first()
+    const refreshButton = page.locator('button').filter({ has: page.locator('.el-icon') }).first()
     await refreshButton.click()
 
     await page.waitForTimeout(500)

@@ -27,6 +27,22 @@
           </template>
         </el-input>
         <el-select
+          v-if="authStore.isPlatformAdmin"
+          v-model="searchMerchantId"
+          placeholder="商户筛选"
+          style="width: 180px"
+          clearable
+          filterable
+          @change="loadCodes"
+        >
+          <el-option
+            v-for="merchant in merchantList"
+            :key="merchant.id"
+            :label="merchant.name"
+            :value="merchant.id"
+          />
+        </el-select>
+        <el-select
           v-model="searchStatus"
           placeholder="状态"
           style="width: 120px"
@@ -54,7 +70,7 @@
             <span class="code-text">{{ row.code }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="merchantName" label="商户" min-width="120" align="center">
+        <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="商户" min-width="120" align="center">
           <template #default="{ row }">
             <span v-if="row.merchantName">{{ row.merchantName }}</span>
             <span v-else class="text-muted">-</span>
@@ -365,6 +381,7 @@ const submitLoading = ref(false)
 const tableData = ref([])
 const searchKeyword = ref('')
 const searchStatus = ref('')
+const searchMerchantId = ref('')
 const pagination = reactive({
   pageNum: 1,
   pageSize: 20,
@@ -445,6 +462,9 @@ const loadCodes = async () => {
     }
     if (searchStatus.value) {
       params.status = searchStatus.value
+    }
+    if (authStore.isPlatformAdmin && searchMerchantId.value) {
+      params.merchantId = searchMerchantId.value
     }
     const res = await activationApi.listCodes(params)
     tableData.value = res.data?.records || []
@@ -669,6 +689,7 @@ const getTypeName = (type) => {
 }
 
 onMounted(() => {
+  loadMerchants()
   loadCodes()
 })
 </script>

@@ -103,6 +103,33 @@ public class StreamingAccountHostBindingServiceImpl implements StreamingAccountH
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void unbind(String hostId, String streamingAccountId) {
+        XboxHost host = requireHost(hostId);
+        StreamingAccount account = requireStreamingAccount(streamingAccountId);
+        validateSameMerchant(host, account);
+        merchantService.validateMerchantActive(host.getMerchantId());
+
+        LambdaQueryWrapper<StreamingAccountHostBinding> wrapper = activeBindingWrapper()
+                .eq(StreamingAccountHostBinding::getXboxHostId, hostId)
+                .eq(StreamingAccountHostBinding::getStreamingAccountId, streamingAccountId);
+        StreamingAccountHostBinding binding = bindingMapper.selectOne(wrapper);
+        if (binding == null) {
+            throw new BusinessException(400, "该主机未绑定到此串流账号");
+        }
+        binding.setStatus(HostBindingStatus.INACTIVE.getCode());
+        bindingMapper.updateById(binding);
+
+        String primaryId = getPrimaryBoundStreamingAccountId(hostId);
+        host.setBoundStreamingAccountId(primaryId);
+        if (primaryId == null) {
+            host.setBoundGamertag(null);
+        }
+        xboxHostMapper.updateById(host);
+        log.info("解绑账号与主机 - hostId={}, streamingAccountId={}", hostId, streamingAccountId);
+    }
+
+    @Override
     public String getPrimaryBoundStreamingAccountId(String hostId) {
         LambdaQueryWrapper<StreamingAccountHostBinding> wrapper = activeBindingWrapper()
                 .eq(StreamingAccountHostBinding::getXboxHostId, hostId)
@@ -175,7 +202,7 @@ public class StreamingAccountHostBindingServiceImpl implements StreamingAccountH
         if (!StringUtils.hasText(serverId)) {
             throw new BusinessException(400, "hostId 与 serverId 至少提供一个");
         }
-        XboxHost host = xboxHostService.findByXboxId(serverId);
+        XboxHost host = xboxHostService.findByMerchantIdAndXboxId(merchantId, serverId);
         if (host == null) {
             host = xboxHostService.createOrUpdate(
                     merchantId,

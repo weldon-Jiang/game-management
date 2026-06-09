@@ -3,6 +3,8 @@ package com.bend.platform.service;
 import com.bend.platform.dto.StartStreamingRequest;
 import com.bend.platform.dto.StartTaskAutomationRequest;
 import com.bend.platform.dto.TaskPauseRequest;
+import com.bend.platform.entity.StreamingSession;
+import com.bend.platform.entity.TaskEvent;
 
 import java.util.List;
 import java.util.Map;
@@ -54,11 +56,11 @@ public interface TaskControlService {
     Map<String, Object> getTaskDetail(String taskId, String merchantId);
 
     /** 查询任务事件流，可按会话过滤；limit 控制返回条数。 */
-    java.util.List<com.bend.platform.entity.TaskEvent> getTaskEvents(
+    List<TaskEvent> getTaskEvents(
             String taskId, String merchantId, int limit, String sessionId);
 
     /** 列出任务的全部历史串流会话（最近一次在前），供前端切换查看不同轮次。 */
-    java.util.List<com.bend.platform.entity.StreamingSession> getTaskSessions(
+    List<StreamingSession> getTaskSessions(
             String taskId, String merchantId);
 
     /** 查询指定 Agent 的活跃任务列表。 */

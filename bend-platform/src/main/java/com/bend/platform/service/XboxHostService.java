@@ -32,12 +32,14 @@ public interface XboxHostService {
     XboxHost findById(String id);
 
     /**
-     * 根据XboxID查询主机
-     *
-     * @param xboxId Xbox主机ID
-     * @return 主机实体，不存在返回null
+     * 按主键加载主机并校验商户归属（Agent 回调 / 内部调用，不依赖 JWT UserContext）。
      */
-    XboxHost findByXboxId(String xboxId);
+    XboxHost requireForMerchant(String hostId, String merchantId);
+
+    /**
+     * 按商户 + GSSV serverId 查询主机（商户隔离）。
+     */
+    XboxHost findByMerchantIdAndXboxId(String merchantId, String xboxId);
 
     /**
      * 分页查询商户下的Xbox主机
@@ -76,12 +78,12 @@ public interface XboxHostService {
     /**
      * CAS 锁定主机（agentId + taskId）；返回是否成功。
      */
-    boolean tryLock(String xboxHostId, String agentId, String taskId, int leaseSeconds);
+    boolean tryLock(String merchantId, String xboxHostId, String agentId, String taskId, int leaseSeconds);
 
     /**
      * 解锁主机（仅持有 agentId+taskId 可释放）。
      */
-    boolean unlock(String xboxHostId, String agentId, String taskId);
+    boolean unlock(String merchantId, String xboxHostId, String agentId, String taskId);
 
     /**
      * 删除主机
@@ -113,6 +115,11 @@ public interface XboxHostService {
      * @return 主机实体，不存在返回null
      */
     XboxHost findByIpAddress(String ipAddress);
+
+    /**
+     * 按商户 + IP 查询主机（商户隔离）。
+     */
+    XboxHost findByMerchantIdAndIpAddress(String merchantId, String ipAddress);
 
     /**
      * 创建或更新Xbox主机（用于发现功能）

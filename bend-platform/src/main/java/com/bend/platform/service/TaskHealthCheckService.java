@@ -1,6 +1,7 @@
 package com.bend.platform.service;
 
 import com.bend.platform.entity.AgentInstance;
+import com.bend.platform.entity.Task;
 import com.bend.platform.repository.AgentInstanceMapper;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import lombok.RequiredArgsConstructor;
@@ -43,9 +44,9 @@ public class TaskHealthCheckService {
 
     @Scheduled(fixedRate = 300000)
     public void checkStuckTasks() {
-        List<com.bend.platform.entity.Task> stuckTasks = taskService.findStuckRunningTasks(TASK_STUCK_TIMEOUT_MINUTES);
+        List<Task> stuckTasks = taskService.findStuckRunningTasks(TASK_STUCK_TIMEOUT_MINUTES);
 
-        for (com.bend.platform.entity.Task task : stuckTasks) {
+        for (Task task : stuckTasks) {
             log.warn("检测到卡住的任务 - taskId: {}, 运行时间: {}分钟", task.getId(), TASK_STUCK_TIMEOUT_MINUTES);
 
             String agentId = task.getTargetAgentId();

@@ -304,6 +304,41 @@ public class StreamingAccountController {
     }
 
     /**
+     * 手动绑定串流主机（source=manual）。
+     */
+    @PutMapping("/{id}/bound-hosts/{hostId}")
+    public ApiResponse<Void> bindHost(
+            @PathVariable String id,
+            @PathVariable String hostId,
+            @RequestParam(required = false) String gamertag) {
+        StreamingAccount account = streamingAccountService.findById(id);
+        if (account == null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+        }
+        if (!UserContext.isPlatformAdmin() && !account.getMerchantId().equals(UserContext.getMerchantId())) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+        hostBindingService.bindManual(hostId, id, gamertag);
+        return ApiResponse.success("绑定成功", null);
+    }
+
+    /**
+     * 解绑串流账号与指定主机（仅移除该账号与此主机的绑定）。
+     */
+    @DeleteMapping("/{id}/bound-hosts/{hostId}")
+    public ApiResponse<Void> unbindHost(@PathVariable String id, @PathVariable String hostId) {
+        StreamingAccount account = streamingAccountService.findById(id);
+        if (account == null) {
+            throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
+        }
+        if (!UserContext.isPlatformAdmin() && !account.getMerchantId().equals(UserContext.getMerchantId())) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+        hostBindingService.unbind(hostId, id);
+        return ApiResponse.success("解绑成功", null);
+    }
+
+    /**
      * 获取账号已登录的Xbox主机ID列表
      *
      * @param id 流媒体账号ID

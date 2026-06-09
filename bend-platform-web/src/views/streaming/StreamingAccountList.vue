@@ -23,7 +23,28 @@
     </div>
 
     <!-- 账号列表表格 -->
-    <div class="content-card table-container">
+    <div class="content-card">
+      <div v-if="authStore.isPlatformAdmin" class="toolbar">
+        <el-select
+          v-model="filterMerchantId"
+          placeholder="商户筛选"
+          style="width: 180px"
+          clearable
+          filterable
+          @change="handleMerchantFilter"
+        >
+          <el-option
+            v-for="merchant in merchantList"
+            :key="merchant.id"
+            :label="merchant.name"
+            :value="merchant.id"
+          />
+        </el-select>
+        <el-button @click="handleMerchantFilter">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
+      </div>
+      <div class="table-container">
       <el-table
         :data="tableData"
         v-loading="loading"
@@ -69,7 +90,7 @@
           </template>
         </el-table-column>
         <!-- 操作列 -->
-        <el-table-column label="操作" width="280" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
+        <el-table-column label="操作" width="360" fixed="right" align="center" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <!-- 启动自动化按钮（非busy状态显示） -->
             <el-button
@@ -102,6 +123,9 @@
             >
               停止
             </el-button>
+            <el-button type="info" link size="small" @click="showHostDialog(row)">
+              串流主机
+            </el-button>
             <!-- 编辑按钮 -->
             <el-button type="primary" link size="small" @click="showEditDialog(row)">
               编辑
@@ -129,6 +153,7 @@
           @size-change="loadData"
           @current-change="loadData"
         />
+      </div>
       </div>
     </div>
 
@@ -426,6 +451,11 @@
         </div>
       </div>
     </el-dialog>
+
+    <StreamingAccountHostDialog
+      v-model="hostDialogVisible"
+      :account="hostDialogAccount"
+    />
   </div>
 </template>
 
@@ -449,6 +479,7 @@ import { ref, reactive, onMounted, nextTick, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StartWizard from '@/components/automation/StartWizard.vue'
+import StreamingAccountHostDialog from '@/components/streaming/StreamingAccountHostDialog.vue'
 import { Plus, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi, xboxApi } from '@/api'
@@ -476,6 +507,8 @@ const goTaskMonitor = (row) => {
 
 const wizardVisible = ref(false)
 const wizardGameAccounts = ref([])
+const hostDialogVisible = ref(false)
+const hostDialogAccount = ref(null)
 
 /**
  * 加载状态标识
@@ -504,6 +537,9 @@ const tableData = ref([])
  * 用于新增/编辑时的商户选择
  */
 const merchantList = ref([])
+
+/** 平台管理员列表商户筛选 */
+const filterMerchantId = ref('')
 
 /**
  * 在线Agent列表
@@ -621,6 +657,9 @@ const actualPassword = ref('')      // 真实密码（点击输入框后加载�
  * 表单验证规则
  */
 const formRules = {
+  merchantId: [
+    { required: true, message: '请选择商户', trigger: 'change' }
+  ],
   email: [
     { required: true, message: '请输入邮箱', trigger: 'blur' },
     { type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' }
@@ -680,10 +719,14 @@ const loadData = async () => {
   loading.value = true
   tableData.value = [] // 立即清空旧数据，避免显示过期内容
   try {
-    const res = await streamingApi.list({
+    const params = {
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize
-    })
+    }
+    if (authStore.isPlatformAdmin && filterMerchantId.value) {
+      params.merchantId = filterMerchantId.value
+    }
+    const res = await streamingApi.list(params)
     tableData.value = res.data?.records || []
     pagination.total = res.data?.total || 0
   } catch (error) {
@@ -1126,6 +1169,14 @@ const handleImport = async () => {
 }
 
 /**
+ * 显示串流主机绑定对话框
+ */
+const showHostDialog = (row) => {
+  hostDialogAccount.value = row
+  hostDialogVisible.value = true
+}
+
+/**
  * 显示关联游戏账号对话框
  */
 const showBindGameAccountsDialog = async (row) => {
@@ -1274,6 +1325,11 @@ const formatDate = (dateStr) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+const handleMerchantFilter = () => {
+  pagination.pageNum = 1
+  loadData()
 }
 
 // ==================== 生命周期 ====================

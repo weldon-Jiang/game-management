@@ -6,7 +6,7 @@ import java.util.Optional;
 /**
  * 跨 Agent 的 Xbox 串流租约（Redis SET NX + TTL）。
  *
- * <p>以 GSSV serverId（xbox_host.xbox_id）为键，在 SmartGlass 握手前互斥占用物理主机。
+ * <p>以 {@code merchantId + serverId} 为键，同一商户内互斥占用物理主机。
  */
 public interface StreamLeaseService {
 
@@ -21,15 +21,15 @@ public interface StreamLeaseService {
      *
      * @return true 表示当前调用方持有租约
      */
-    boolean tryAcquire(String serverId, String agentId, String taskId, int ttlSeconds);
+    boolean tryAcquire(String merchantId, String serverId, String agentId, String taskId, int ttlSeconds);
 
     /**
      * 释放租约；仅持有者可释放。
      */
-    boolean release(String serverId, String agentId, String taskId);
+    boolean release(String merchantId, String serverId, String agentId, String taskId);
 
     /** 读取当前租约快照（供占用查询）。 */
-    Optional<Map<String, Object>> getLease(String serverId);
+    Optional<Map<String, Object>> getLease(String merchantId, String serverId);
 
     /** Redis 是否可用（不可用时会降级进程内 Map，仅单 JVM 有效）。 */
     boolean isClusterSafe();

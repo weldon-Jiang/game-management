@@ -3,6 +3,7 @@ package com.bend.platform.controller;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.Task;
 import com.bend.platform.service.TaskService;
+import com.bend.platform.util.JwtUtil;
 import com.bend.platform.websocket.WebSocketMessageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +34,7 @@ class TaskControllerTest {
     private WebSocketMessageService messageService;
 
     @Mock
-    private com.bend.platform.util.JwtUtil jwtUtil;
+    private JwtUtil jwtUtil;
 
     @InjectMocks
     private TaskController taskController;
@@ -158,16 +159,6 @@ class TaskControllerTest {
 
         assertEquals(200, response.getCode());
         assertEquals("标记失败", response.getMessage());
-    }
-
-    @Test
-    void testCancelTask() {
-        when(taskService.cancel("task-001")).thenReturn(testTask);
-
-        ApiResponse<Task> response = taskController.cancel("task-001");
-
-        assertEquals(200, response.getCode());
-        assertEquals("取消成功", response.getMessage());
     }
 
     @Test

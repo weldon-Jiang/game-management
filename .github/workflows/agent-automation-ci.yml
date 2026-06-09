@@ -55,6 +55,7 @@ jobs:
     name: Agent - Integration Tests
     runs-on: ubuntu-latest
     needs: agent-unit-tests
+    if: false  # 待补 test_integration.py / test_with_mock_server.py 后启用
     defaults:
       run:
         working-directory: ./bend-agent
@@ -89,7 +90,8 @@ jobs:
   agent-performance-tests:
     name: Agent - Performance Tests
     runs-on: ubuntu-latest
-    needs: agent-integration-tests
+    needs: agent-unit-tests
+    if: false  # 待补 test_performance.py 后启用
     defaults:
       run:
         working-directory: ./bend-agent

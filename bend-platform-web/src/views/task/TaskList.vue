@@ -85,6 +85,11 @@
           class="data-table"
           scrollbar-always-on
         >
+        <el-table-column v-if="authStore.isPlatformAdmin" prop="merchantName" label="所属商户" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.merchantName || '-' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="streamingAccountName" label="串流账号" width="108" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.streamingAccountName || row.streamingAccountId || '-' }}

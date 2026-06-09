@@ -19,7 +19,28 @@
       </div>
     </div>
 
-    <div class="content-card table-container">
+    <div class="content-card">
+      <div v-if="authStore.isPlatformAdmin" class="toolbar">
+        <el-select
+          v-model="filterMerchantId"
+          placeholder="商户筛选"
+          style="width: 180px"
+          clearable
+          filterable
+          @change="handleMerchantFilter"
+        >
+          <el-option
+            v-for="merchant in merchantList"
+            :key="merchant.id"
+            :label="merchant.name"
+            :value="merchant.id"
+          />
+        </el-select>
+        <el-button @click="handleMerchantFilter">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
+      </div>
+      <div class="table-container">
       <el-table
         :data="tableData"
         v-loading="loading"
@@ -115,6 +136,7 @@
           @size-change="loadData"
           @current-change="loadData"
         />
+      </div>
       </div>
     </div>
 
@@ -357,6 +379,7 @@ const selectedFile = ref(null)
 const importLoading = ref(false)
 const importResult = ref(null)
 const merchantList = ref([])
+const filterMerchantId = ref('')
 const importMerchantId = ref('')
 const passwordVisible = ref(false)  // 是否显示真实密码
 const passwordLoaded = ref(false)   // 密码是否已加载
@@ -421,10 +444,14 @@ const loadData = async () => {
   loading.value = true
   tableData.value = []
   try {
-    const res = await gameAccountApi.list({
+    const params = {
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize
-    })
+    }
+    if (authStore.isPlatformAdmin && filterMerchantId.value) {
+      params.merchantId = filterMerchantId.value
+    }
+    const res = await gameAccountApi.list(params)
     tableData.value = res.data?.records || []
     pagination.total = res.data?.total || 0
   } catch (error) {
@@ -754,7 +781,13 @@ const formatDate = (dateStr) => {
 
 // ==================== 生命周期 ====================
 
+const handleMerchantFilter = () => {
+  pagination.pageNum = 1
+  loadData()
+}
+
 onMounted(() => {
+  loadMerchants()
   loadData()
 })
 </script>

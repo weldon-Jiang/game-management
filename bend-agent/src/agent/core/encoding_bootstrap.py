@@ -24,13 +24,28 @@ def _configure_windows_console() -> None:
         pass
 
 
+def _is_pytest_runtime() -> bool:
+    """pytest 会劫持 stdout/stderr；测试期间再 wrap 会导致 capture teardown 失败。"""
+    if "pytest" in sys.modules:
+        return True
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is not None and type(stream).__module__.startswith("_pytest"):
+            return True
+    return False
+
+
 def ensure_utf8_stdio(*, force: bool = False) -> None:
     """
     强制 stdout/stderr 使用 UTF-8，并同步 Windows 控制台代码页。
 
     可多次调用；除非 force=True，后续调用为 no-op。
+    pytest 运行期间默认跳过，避免破坏输出捕获。
     """
     if getattr(ensure_utf8_stdio, "_done", False) and not force:
+        return
+
+    if not force and _is_pytest_runtime():
         return
 
     os.environ.setdefault("PYTHONUTF8", "1")

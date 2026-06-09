@@ -281,6 +281,15 @@ public class XboxHostController {
             }
             actualAgentId = instance.getAgentId();
             log.info("查询到Agent实例 - actualAgentId: {}", actualAgentId);
+        } else {
+            instance = agentInstanceService.findByAgentId(actualAgentId);
+        }
+
+        if (!UserContext.isPlatformAdmin()) {
+            if (instance == null) {
+                throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
+            }
+            agentInstanceService.requireAgentOwnedByMerchant(actualAgentId, UserContext.getMerchantId());
         }
         
         log.info("检查Agent WebSocket连接状态 - actualAgentId: {}", actualAgentId);

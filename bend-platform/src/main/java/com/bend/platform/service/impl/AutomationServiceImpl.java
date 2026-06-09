@@ -66,6 +66,7 @@ public class AutomationServiceImpl implements AutomationService {
         if (!credentialTokenService.isRedisEnabled()) {
             throw new BusinessException(503, "Redis未启用，无法启动自动化。请联系管理员启用Redis服务。");
         }
+        agentInstanceService.requireAgentOwnedByMerchant(agentId, merchantId);
 
         List<String> streamingAccountIds = request.getStreamingAccountIds();
         List<Map<String, Object>> results = new ArrayList<>();
@@ -115,13 +116,14 @@ public class AutomationServiceImpl implements AutomationService {
             XboxHost selectedHost = null;
             boolean autoMatchHost = true;
             if (StringUtils.hasText(request.getHostId())) {
-                selectedHost = xboxHostService.findById(request.getHostId());
-                if (selectedHost == null) {
+                try {
+                    selectedHost = xboxHostService.requireForMerchant(request.getHostId(), merchantId);
+                } catch (BusinessException ex) {
                     Map<String, Object> errorResult = new HashMap<>();
                     errorResult.put("streamingAccountId", streamingAccountId);
                     errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
                     errorResult.put("success", false);
-                    errorResult.put("message", "指定的主机不存在");
+                    errorResult.put("message", "指定的主机不存在或无权访问");
                     results.add(errorResult);
                     continue;
                 }

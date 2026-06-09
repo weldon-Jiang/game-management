@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.TaskPageRequest;
+import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.Task;
 import com.bend.platform.entity.TaskGameAccountStatus;
 import com.bend.platform.enums.AccountStatusEnum;
@@ -12,11 +13,14 @@ import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.repository.TaskGameAccountStatusMapper;
+import com.bend.platform.service.AgentInstanceService;
+import com.bend.platform.service.GameAccountService;
+import com.bend.platform.service.MerchantService;
+import com.bend.platform.service.StreamingAccountService;
+import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.service.TaskService;
 import com.bend.platform.service.TaskStateMachine;
 import com.bend.platform.service.XboxHostService;
-import com.bend.platform.service.StreamingAccountService;
-import com.bend.platform.service.GameAccountService;
 import com.bend.platform.util.DataSecurityUtil;
 import com.bend.platform.util.UserContext;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
@@ -68,7 +72,7 @@ public class TaskServiceImpl implements TaskService {
     private final TaskGameAccountStatusMapper taskGameAccountStatusMapper;
 
     @Autowired
-    private com.bend.platform.service.TaskGameAccountStatusService taskGameAccountStatusService;
+    private TaskGameAccountStatusService taskGameAccountStatusService;
 
     @Autowired
     private StreamingAccountService streamingAccountService;
@@ -77,7 +81,10 @@ public class TaskServiceImpl implements TaskService {
     private GameAccountService gameAccountService;
 
     @Autowired
-    private com.bend.platform.service.AgentInstanceService agentInstanceService;
+    private AgentInstanceService agentInstanceService;
+
+    @Autowired
+    private MerchantService merchantService;
 
     /**
      * 创建任务
@@ -288,12 +295,27 @@ public class TaskServiceImpl implements TaskService {
             }
         }
 
+        List<String> merchantIds = tasks.stream()
+                .map(Task::getMerchantId)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<String, String> merchantNames = new HashMap<>();
+        if (!merchantIds.isEmpty()) {
+            merchantService.findAllSimple().stream()
+                    .filter(m -> merchantIds.contains(m.getId()))
+                    .forEach(m -> merchantNames.put(m.getId(), m.getName()));
+        }
+
         for (Task task : tasks) {
             if (StringUtils.hasText(task.getTargetAgentId())) {
                 task.setTargetAgentName(agentNames.get(task.getTargetAgentId()));
             }
             if (StringUtils.hasText(task.getStreamingAccountId())) {
                 task.setStreamingAccountName(streamingNames.get(task.getStreamingAccountId()));
+            }
+            if (StringUtils.hasText(task.getMerchantId())) {
+                task.setMerchantName(merchantNames.get(task.getMerchantId()));
             }
         }
     }
@@ -407,8 +429,8 @@ public class TaskServiceImpl implements TaskService {
             streamingAccountService.updateAgentId(streamingAccountId, null);
             
             // 重置游戏账号状态为空闲
-            java.util.List<com.bend.platform.entity.GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-            for (com.bend.platform.entity.GameAccount ga : gameAccounts) {
+            List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+            for (GameAccount ga : gameAccounts) {
                 gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
                 gameAccountService.updateAgentId(ga.getId(), null);
             }
@@ -481,8 +503,8 @@ public class TaskServiceImpl implements TaskService {
                 streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
                 streamingAccountService.updateAgentId(streamingAccountId, null);
                 
-                java.util.List<com.bend.platform.entity.GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-                for (com.bend.platform.entity.GameAccount ga : gameAccounts) {
+                List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+                for (GameAccount ga : gameAccounts) {
                     gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
                     gameAccountService.updateAgentId(ga.getId(), null);
                 }
@@ -555,8 +577,8 @@ public class TaskServiceImpl implements TaskService {
                 streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
                 streamingAccountService.updateAgentId(streamingAccountId, null);
                 
-                java.util.List<com.bend.platform.entity.GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-                for (com.bend.platform.entity.GameAccount ga : gameAccounts) {
+                List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+                for (GameAccount ga : gameAccounts) {
                     gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
                     gameAccountService.updateAgentId(ga.getId(), null);
                 }
@@ -580,8 +602,8 @@ public class TaskServiceImpl implements TaskService {
                 streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
                 streamingAccountService.updateAgentId(streamingAccountId, null);
                 
-                java.util.List<com.bend.platform.entity.GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-                for (com.bend.platform.entity.GameAccount ga : gameAccounts) {
+                List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+                for (GameAccount ga : gameAccounts) {
                     gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
                     gameAccountService.updateAgentId(ga.getId(), null);
                 }
@@ -731,8 +753,8 @@ public class TaskServiceImpl implements TaskService {
             streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
             streamingAccountService.updateAgentId(streamingAccountId, null);
 
-            java.util.List<com.bend.platform.entity.GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-            for (com.bend.platform.entity.GameAccount ga : gameAccounts) {
+            List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+            for (GameAccount ga : gameAccounts) {
                 gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
                 gameAccountService.updateAgentId(ga.getId(), null);
             }
@@ -904,8 +926,8 @@ public class TaskServiceImpl implements TaskService {
                 streamingAccountService.updateAgentId(streamingAccountId, null);
                 
                 // 重置游戏账号状态
-                List<com.bend.platform.entity.GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-                for (com.bend.platform.entity.GameAccount ga : gameAccounts) {
+                List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+                for (GameAccount ga : gameAccounts) {
                     gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
                     gameAccountService.updateAgentId(ga.getId(), null);
                 }
@@ -968,8 +990,8 @@ public class TaskServiceImpl implements TaskService {
                 streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
                 streamingAccountService.updateAgentId(streamingAccountId, null);
 
-                List<com.bend.platform.entity.GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-                for (com.bend.platform.entity.GameAccount ga : gameAccounts) {
+                List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+                for (GameAccount ga : gameAccounts) {
                     gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
                     gameAccountService.updateAgentId(ga.getId(), null);
                 }

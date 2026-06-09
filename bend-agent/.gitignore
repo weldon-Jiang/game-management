@@ -52,5 +52,6 @@ obfuscated/
 *.spec
 pytest.ini
 test_*.py
+!src/agent/automation/tests/test_*.py
 *.pyc
 templates/

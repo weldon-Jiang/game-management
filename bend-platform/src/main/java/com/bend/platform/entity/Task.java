@@ -104,6 +104,12 @@ public class Task {
     @TableField(exist = false)
     private String streamingAccountName;
 
+    /**
+     * 所属商户名称（非数据库字段，列表展示用）
+     */
+    @TableField(exist = false)
+    private String merchantName;
+
     private String sessionId;
     private String sessionPhase;
     private Boolean gameActionPending;

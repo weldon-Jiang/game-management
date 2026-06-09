@@ -21,6 +21,11 @@ public interface AgentInstanceService {
 
     AgentInstance findByAgentIdIncludeDeleted(String agentId);
 
+    /**
+     * 校验 Agent 必须归属指定商户（Web 任务下发 / 内部调用）。
+     */
+    void requireAgentOwnedByMerchant(String agentId, String merchantId);
+
     AgentInstance findByRegistrationCode(String registrationCode);
 
     List<AgentInstance> findAll();

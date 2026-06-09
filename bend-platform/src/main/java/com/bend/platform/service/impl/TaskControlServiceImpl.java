@@ -77,6 +77,7 @@ public class TaskControlServiceImpl implements TaskControlService {
         if (!loadControlService.canAcceptTask(agentId)) {
             throw new BusinessException(400, "Agent已达到最大并发任务数");
         }
+        agentInstanceService.requireAgentOwnedByMerchant(agentId, merchantId);
 
         StreamingAccount streamingAccount = streamingAccountService.findById(streamingAccountId);
         if (streamingAccount == null || !merchantId.equals(streamingAccount.getMerchantId())) {
@@ -107,10 +108,7 @@ public class TaskControlServiceImpl implements TaskControlService {
 
         XboxHost selectedHost = null;
         if (request.getXboxHostId() != null && !request.getXboxHostId().isBlank()) {
-            selectedHost = xboxHostService.findById(request.getXboxHostId());
-            if (selectedHost == null || !merchantId.equals(selectedHost.getMerchantId())) {
-                throw new BusinessException(404, "主机不存在");
-            }
+            selectedHost = xboxHostService.requireForMerchant(request.getXboxHostId(), merchantId);
             PlatformTypeUtil.requireSamePlatform(
                     selectedHost.getPlatform(),
                     streamingAccount.getPlatform(),

@@ -70,7 +70,7 @@ public class XboxHostServiceImpl implements XboxHostService {
             throw new BusinessException(ResultCode.System.PARAM_INVALID, "merchantId和xboxId不能为空");
         }
 
-        if (findByXboxId(xboxId) != null) {
+        if (findByMerchantIdAndXboxId(merchantId, xboxId) != null) {
             throw new BusinessException(ResultCode.XboxHost.XBOX_ID_DUPLICATE);
         }
 
@@ -97,8 +97,27 @@ public class XboxHostServiceImpl implements XboxHostService {
     }
 
     @Override
-    public XboxHost findByXboxId(String xboxId) {
+    public XboxHost requireForMerchant(String hostId, String merchantId) {
+        if (!StringUtils.isNotBlank(hostId) || !StringUtils.isNotBlank(merchantId)) {
+            throw new BusinessException(ResultCode.System.PARAM_INVALID);
+        }
+        XboxHost host = xboxHostMapper.selectById(hostId);
+        if (host == null) {
+            throw new BusinessException(ResultCode.XboxHost.NOT_FOUND);
+        }
+        if (!merchantId.equals(host.getMerchantId())) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+        return host;
+    }
+
+    @Override
+    public XboxHost findByMerchantIdAndXboxId(String merchantId, String xboxId) {
+        if (!StringUtils.isNotBlank(merchantId) || !StringUtils.isNotBlank(xboxId)) {
+            return null;
+        }
         LambdaQueryWrapper<XboxHost> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(XboxHost::getMerchantId, merchantId);
         wrapper.eq(XboxHost::getXboxId, xboxId);
         return xboxHostMapper.selectOne(wrapper);
     }
@@ -166,12 +185,12 @@ public class XboxHostServiceImpl implements XboxHostService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean tryLock(String xboxHostId, String agentId, String taskId, int leaseSeconds) {
-        if (xboxHostId == null || agentId == null || taskId == null) {
+    public boolean tryLock(String merchantId, String xboxHostId, String agentId, String taskId, int leaseSeconds) {
+        if (!StringUtils.isNotBlank(merchantId) || xboxHostId == null || agentId == null || taskId == null) {
             return false;
         }
         LocalDateTime expireTime = LocalDateTime.now().plusSeconds(Math.max(30, leaseSeconds));
-        int updated = xboxHostMapper.casLock(xboxHostId, agentId, taskId, expireTime);
+        int updated = xboxHostMapper.casLock(merchantId, xboxHostId, agentId, taskId, expireTime);
         if (updated > 0) {
             log.info("CAS 锁定 Xbox 成功 - id={}, agentId={}, taskId={}, expire={}",
                     xboxHostId, agentId, taskId, expireTime);
@@ -183,24 +202,14 @@ public class XboxHostServiceImpl implements XboxHostService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean unlock(String xboxHostId, String agentId, String taskId) {
+    public boolean unlock(String merchantId, String xboxHostId, String agentId, String taskId) {
         if (xboxHostId == null) {
             return false;
         }
-        if (agentId == null || taskId == null) {
-            XboxHost host = xboxHostMapper.selectById(xboxHostId);
-            if (host == null) {
-                return false;
-            }
-            host.setLockedByAgentId(null);
-            host.setLockedByTaskId(null);
-            host.setLockExpiresTime(null);
-            host.setLockedTime(null);
-            host.setLocked(false);
-            xboxHostMapper.updateById(host);
-            return true;
+        if (!StringUtils.isNotBlank(merchantId) || agentId == null || taskId == null) {
+            return false;
         }
-        int updated = xboxHostMapper.casUnlock(xboxHostId, agentId, taskId);
+        int updated = xboxHostMapper.casUnlock(merchantId, xboxHostId, agentId, taskId);
         if (updated > 0) {
             log.info("CAS 解锁 Xbox 成功 - id={}, agentId={}, taskId={}", xboxHostId, agentId, taskId);
             return true;
@@ -252,6 +261,18 @@ public class XboxHostServiceImpl implements XboxHostService {
     }
 
     @Override
+    public XboxHost findByMerchantIdAndIpAddress(String merchantId, String ipAddress) {
+        if (!StringUtils.isNotBlank(merchantId) || ipAddress == null || ipAddress.isEmpty()) {
+            return null;
+        }
+        LambdaQueryWrapper<XboxHost> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(XboxHost::getMerchantId, merchantId);
+        wrapper.eq(XboxHost::getIpAddress, ipAddress);
+        return xboxHostMapper.selectOne(wrapper);
+    }
+
+    @Override
+    @Deprecated
     public XboxHost findByIpAddress(String ipAddress) {
         if (ipAddress == null || ipAddress.isEmpty()) {
             return null;
@@ -269,7 +290,7 @@ public class XboxHostServiceImpl implements XboxHostService {
         merchantService.validateMerchantActive(merchantId);
         String normalizedPlatform = PlatformTypeUtil.requireValid(platform);
 
-        XboxHost host = findByXboxId(xboxId);
+        XboxHost host = findByMerchantIdAndXboxId(merchantId, xboxId);
         
         if (host != null) {
             host.setPlatform(normalizedPlatform);

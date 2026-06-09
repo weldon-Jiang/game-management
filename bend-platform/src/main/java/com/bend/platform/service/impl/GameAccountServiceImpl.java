@@ -204,6 +204,21 @@ public class GameAccountServiceImpl implements GameAccountService {
     }
 
     @Override
+    public GameAccount requireForMerchant(String gameAccountId, String merchantId) {
+        if (gameAccountId == null || gameAccountId.isBlank() || merchantId == null || merchantId.isBlank()) {
+            throw new BusinessException(ResultCode.System.PARAM_INVALID);
+        }
+        GameAccount account = gameAccountMapper.selectById(gameAccountId);
+        if (account == null) {
+            throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
+        }
+        if (!merchantId.equals(account.getMerchantId())) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+        return account;
+    }
+
+    @Override
     public GameAccount findByGamertag(String gamertag) {
         LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(GameAccount::getGameName, gamertag);
