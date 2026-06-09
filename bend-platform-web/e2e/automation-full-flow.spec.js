@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test('automation full flow smoke test', async ({ page }) => {
+  test.skip(!!process.env.CI, 'requires live backend; run locally against gateway')
   const apiEvents = []
 
   page.on('response', async (response) => {

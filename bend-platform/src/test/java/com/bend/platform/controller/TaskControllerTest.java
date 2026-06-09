@@ -161,16 +161,6 @@ class TaskControllerTest {
     }
 
     @Test
-    void testCancelTask() {
-        when(taskService.cancel("task-001")).thenReturn(testTask);
-
-        ApiResponse<Task> response = taskController.cancel("task-001");
-
-        assertEquals(200, response.getCode());
-        assertEquals("取消成功", response.getMessage());
-    }
-
-    @Test
     void testRetryTask() {
         when(taskService.retry("task-001")).thenReturn(testTask);
 

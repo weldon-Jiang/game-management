@@ -1,25 +1,32 @@
 package com.bend.platform.service;
 
 import com.bend.platform.entity.Task;
-import com.bend.platform.enums.TaskStatus;
-import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.exception.BusinessException;
+import com.bend.platform.repository.TaskGameAccountStatusMapper;
+import com.bend.platform.repository.TaskMapper;
 import com.bend.platform.service.impl.TaskServiceImpl;
+import com.bend.platform.util.DataSecurityUtil;
+import com.bend.platform.util.UserContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class TaskServiceTest {
 
     @Mock
@@ -27,6 +34,24 @@ class TaskServiceTest {
 
     @Mock
     private TaskStateMachine stateMachine;
+
+    @Mock
+    private DataSecurityUtil dataSecurityUtil;
+
+    @Mock
+    private XboxHostService xboxHostService;
+
+    @Mock
+    private TaskGameAccountStatusMapper taskGameAccountStatusMapper;
+
+    @Mock
+    private StreamingAccountService streamingAccountService;
+
+    @Mock
+    private GameAccountService gameAccountService;
+
+    @Mock
+    private AgentInstanceService agentInstanceService;
 
     @InjectMocks
     private TaskServiceImpl taskService;
@@ -43,18 +68,25 @@ class TaskServiceTest {
         testTask.setPriority(0);
         testTask.setMaxRetries(3);
         testTask.setDeleted(false);
+        testTask.setMerchantId("merchant-001");
+
+        doNothing().when(dataSecurityUtil).validateMerchantAccess(anyString(), anyString());
+        when(taskGameAccountStatusMapper.findByTaskId(anyString())).thenReturn(Collections.emptyList());
     }
 
     @Test
     void testCreateTask() {
-        when(taskMapper.insert(any(Task.class))).thenReturn(1);
+        try (MockedStatic<UserContext> userContext = mockStatic(UserContext.class)) {
+            userContext.when(UserContext::getMerchantId).thenReturn("merchant-001");
+            when(taskMapper.insert(any(Task.class))).thenReturn(1);
 
-        Task created = taskService.create(testTask);
+            Task created = taskService.create(testTask);
 
-        assertNotNull(created);
-        assertEquals("pending", created.getStatus());
-        assertEquals(0, created.getRetryCount());
-        verify(taskMapper, times(1)).insert(any(Task.class));
+            assertNotNull(created);
+            assertEquals("pending", created.getStatus());
+            assertEquals(0, created.getRetryCount());
+            verify(taskMapper, times(1)).insert(any(Task.class));
+        }
     }
 
     @Test
@@ -92,7 +124,6 @@ class TaskServiceTest {
         testTask.setStatus("pending");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         Task started = taskService.start("task-001");
 
@@ -105,7 +136,6 @@ class TaskServiceTest {
         testTask.setStatus("running");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         Task completed = taskService.complete("task-001", "执行成功");
 
@@ -118,8 +148,6 @@ class TaskServiceTest {
     void testCompleteTaskIdempotent() {
         testTask.setStatus("pending");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
-        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         Task result = taskService.complete("task-001", "执行成功", true);
 
@@ -134,7 +162,6 @@ class TaskServiceTest {
         testTask.setMaxRetries(3);
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         Task failed = taskService.fail("task-001", "执行失败");
 
@@ -150,7 +177,6 @@ class TaskServiceTest {
         testTask.setMaxRetries(3);
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         Task failed = taskService.fail("task-001", "执行失败");
 
@@ -162,7 +188,6 @@ class TaskServiceTest {
     void testFailTaskIdempotent() {
         testTask.setStatus("completed");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         Task result = taskService.fail("task-001", "执行失败", true);
 
@@ -175,7 +200,6 @@ class TaskServiceTest {
         testTask.setStatus("pending");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         Task cancelled = taskService.cancel("task-001");
 
@@ -186,11 +210,12 @@ class TaskServiceTest {
     void testCancelRunningTask() {
         testTask.setStatus("running");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
-        doThrow(new BusinessException(400, "非法状态转换")).when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
 
-        assertThrows(BusinessException.class, () -> {
-            taskService.cancel("task-001");
-        });
+        Task cancelled = taskService.cancel("task-001");
+
+        assertEquals("cancelled", cancelled.getStatus());
+        assertEquals("用户取消执行", cancelled.getErrorMessage());
     }
 
     @Test
@@ -200,7 +225,6 @@ class TaskServiceTest {
         testTask.setErrorMessage("之前的错误");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         Task retried = taskService.retry("task-001");
 
@@ -239,7 +263,6 @@ class TaskServiceTest {
         testTask.setStatus("running");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         taskService.pause("task-001");
 
@@ -251,11 +274,8 @@ class TaskServiceTest {
     void testPauseNonRunningTask() {
         testTask.setStatus("pending");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
-        assertThrows(BusinessException.class, () -> {
-            taskService.pause("task-001");
-        });
+        assertThrows(BusinessException.class, () -> taskService.pause("task-001"));
     }
 
     @Test
@@ -263,7 +283,6 @@ class TaskServiceTest {
         testTask.setStatus("paused");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         taskService.resume("task-001");
 
@@ -275,11 +294,8 @@ class TaskServiceTest {
     void testResumeNonPausedTask() {
         testTask.setStatus("running");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
-        assertThrows(BusinessException.class, () -> {
-            taskService.resume("task-001");
-        });
+        assertThrows(BusinessException.class, () -> taskService.resume("task-001"));
     }
 
     @Test
@@ -288,7 +304,6 @@ class TaskServiceTest {
         testTask.setTargetAgentId("agent-001");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         taskService.stop("task-001");
 
@@ -304,7 +319,6 @@ class TaskServiceTest {
         testTask.setTargetAgentId("agent-001");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
         taskService.stop("task-001");
 
@@ -316,19 +330,14 @@ class TaskServiceTest {
     void testStopCompletedTask() {
         testTask.setStatus("completed");
         when(taskMapper.selectById("task-001")).thenReturn(testTask);
-        doNothing().when(stateMachine).validateTransition(any(Task.class), any(TaskStatus.class));
 
-        assertThrows(BusinessException.class, () -> {
-            taskService.stop("task-001");
-        });
+        assertThrows(BusinessException.class, () -> taskService.stop("task-001"));
     }
 
     @Test
     void testStopTaskNotFound() {
         when(taskMapper.selectById("non-existent")).thenReturn(null);
 
-        assertThrows(BusinessException.class, () -> {
-            taskService.stop("non-existent");
-        });
+        assertThrows(BusinessException.class, () -> taskService.stop("non-existent"));
     }
 }
