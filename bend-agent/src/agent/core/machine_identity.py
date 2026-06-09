@@ -3,13 +3,19 @@ Bend Agent 机器标识模块。
 基于硬件特征生成并持久化唯一机器 ID。
 """
 import hashlib
-import uuid
 import platform
-import os
-import winreg
+import sys
+import uuid
+from pathlib import Path
 from typing import Optional
 
 from .logger import get_logger
+from .paths import get_logs_dir_fallback
+
+if sys.platform == "win32":
+    import winreg
+else:
+    winreg = None  # type: ignore[assignment]
 
 
 class MachineIdentity:
@@ -20,34 +26,72 @@ class MachineIdentity:
 
     REGISTRY_PATH = r"SOFTWARE\BendPlatform\Agent"
     MACHINE_ID_KEY = "MachineId"
-    FILE_PATH = None  # 在 get_machine_id() 中设为 exe 目录
+    FILE_NAME = "machine_id"
 
     def __init__(self):
         self.logger = get_logger('machine_identity')
         self._machine_id: Optional[str] = None
 
+    def _identity_file_path(self) -> Path:
+        """非 Windows 平台将机器 ID 持久化到 logs 目录旁的文件。"""
+        return Path(get_logs_dir_fallback()).parent / self.FILE_NAME
+
     def get_machine_id(self) -> str:
         """
         获取或生成唯一机器 ID。
-        ID 持久化在 Windows 注册表，换路径重装 Agent 后仍保持不变。
+        Windows 使用注册表；其他平台使用本地文件持久化。
         """
         if self._machine_id:
             return self._machine_id
 
-        stored_id = self._load_from_registry()
+        stored_id = self._load_persisted_id()
         if stored_id:
             self._machine_id = stored_id
-            self.logger.info(f"Loaded machine ID from registry: {stored_id[:8]}...")
+            self.logger.info(f"Loaded machine ID from storage: {stored_id[:8]}...")
             return stored_id
 
         new_id = self._generate_machine_id()
-        self._save_to_registry(new_id)
+        self._save_persisted_id(new_id)
         self._machine_id = new_id
         self.logger.info(f"Generated new machine ID: {new_id[:8]}...")
         return new_id
 
+    def _load_persisted_id(self) -> Optional[str]:
+        if sys.platform == "win32":
+            return self._load_from_registry()
+        return self._load_from_file()
+
+    def _save_persisted_id(self, machine_id: str) -> bool:
+        if sys.platform == "win32":
+            return self._save_to_registry(machine_id)
+        return self._save_to_file(machine_id)
+
+    def _load_from_file(self) -> Optional[str]:
+        path = self._identity_file_path()
+        try:
+            if not path.is_file():
+                return None
+            value = path.read_text(encoding="utf-8").strip()
+            return value or None
+        except OSError as exc:
+            self.logger.warning(f"Failed to load machine ID from file: {exc}")
+            return None
+
+    def _save_to_file(self, machine_id: str) -> bool:
+        path = self._identity_file_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(machine_id, encoding="utf-8")
+            self.logger.info(f"Saved machine ID to file: {machine_id[:8]}...")
+            return True
+        except OSError as exc:
+            self.logger.error(f"Failed to save machine ID to file: {exc}")
+            return False
+
     def _load_from_registry(self) -> Optional[str]:
         """从 Windows 注册表加载机器 ID（当前用户，无需管理员）"""
+        if winreg is None:
+            return None
         try:
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
@@ -67,6 +111,8 @@ class MachineIdentity:
 
     def _save_to_registry(self, machine_id: str) -> bool:
         """将机器 ID 保存到 Windows 注册表（当前用户，无需管理员）"""
+        if winreg is None:
+            return False
         try:
             key = winreg.CreateKey(
                 winreg.HKEY_CURRENT_USER,
@@ -118,6 +164,15 @@ class MachineIdentity:
 
     def _get_mac_address(self) -> Optional[str]:
         """获取第一个非虚拟 MAC 地址"""
+        if sys.platform != "win32":
+            node = uuid.getnode()
+            if (node >> 40) % 2:
+                return None
+            mac = ":".join(f"{(node >> shift) & 0xFF:02x}" for shift in range(40, -1, -8))
+            if mac and not mac.startswith("00:00:00"):
+                return mac
+            return None
+
         import subprocess
         try:
             result = subprocess.run(
@@ -147,24 +202,36 @@ class MachineIdentity:
         重置机器 ID（测试或排障用）。
         警告：平台将把该 Agent 视为全新安装。
         """
-        try:
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                self.REGISTRY_PATH,
-                0,
-                winreg.KEY_WRITE
-            )
+        if sys.platform == "win32":
+            if winreg is None:
+                return False
             try:
-                winreg.DeleteValue(key, self.MACHINE_ID_KEY)
-            except FileNotFoundError:
-                pass
-            winreg.CloseKey(key)
-            self._machine_id = None
-            self.logger.warning("Machine ID has been reset")
-            return True
-        except WindowsError as e:
-            self.logger.error(f"Failed to reset machine ID: {e}")
-            return False
+                key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    self.REGISTRY_PATH,
+                    0,
+                    winreg.KEY_WRITE
+                )
+                try:
+                    winreg.DeleteValue(key, self.MACHINE_ID_KEY)
+                except FileNotFoundError:
+                    pass
+                winreg.CloseKey(key)
+            except WindowsError as e:
+                self.logger.error(f"Failed to reset machine ID: {e}")
+                return False
+        else:
+            path = self._identity_file_path()
+            try:
+                if path.is_file():
+                    path.unlink()
+            except OSError as e:
+                self.logger.error(f"Failed to reset machine ID file: {e}")
+                return False
+
+        self._machine_id = None
+        self.logger.warning("Machine ID has been reset")
+        return True
 
 
 machine_identity = MachineIdentity()
