@@ -13,6 +13,12 @@ export const streamingApi = {
   delete: (id) => request.delete(`/api/streaming-accounts/${id}`),
   getXboxHosts: (id) => request.get(`/api/streaming-accounts/${id}/xbox-hosts`),
   getBoundHosts: (id) => request.get(`/api/streaming-accounts/${id}/bound-hosts`),
+  bindHost: (accountId, hostId, gamertag) =>
+    request.put(`/api/streaming-accounts/${accountId}/bound-hosts/${hostId}`, null, {
+      params: gamertag ? { gamertag } : {}
+    }),
+  unbindHost: (accountId, hostId) =>
+    request.delete(`/api/streaming-accounts/${accountId}/bound-hosts/${hostId}`),
   downloadTemplate: () => request.get('/api/streaming-accounts/template'),
   batchImport: (data) => request.post('/api/streaming-accounts/batch', data)
 }

@@ -3,6 +3,7 @@ package com.bend.platform.controller;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.Task;
 import com.bend.platform.service.TaskService;
+import com.bend.platform.util.JwtUtil;
 import com.bend.platform.websocket.WebSocketMessageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +34,7 @@ class TaskControllerTest {
     private WebSocketMessageService messageService;
 
     @Mock
-    private com.bend.platform.util.JwtUtil jwtUtil;
+    private JwtUtil jwtUtil;
 
     @InjectMocks
     private TaskController taskController;

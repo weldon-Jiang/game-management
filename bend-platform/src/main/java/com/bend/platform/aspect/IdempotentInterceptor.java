@@ -27,7 +27,7 @@ public class IdempotentInterceptor {
 
     private static final String IDEMPOTENT_PREFIX = "idempotent:";
 
-    @Around("@annotation(com.bend.platform.annotation.Idempotent)")
+    @Around("@annotation(Idempotent)")
     public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
         if (redisTemplate == null) {
             return joinPoint.proceed();

@@ -75,13 +75,18 @@ public class ActivationCodeController {
     public ApiResponse<IPage<ActivationCodeDto>> listCodes(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
-            @RequestParam(required = false) String status) {
-        String merchantId = UserContext.getMerchantId();
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String merchantId) {
+        String currentMerchantId = UserContext.getMerchantId();
         IPage<ActivationCode> pageResult;
         if (UserContext.isPlatformAdmin()) {
-            pageResult = activationCodeService.pageAll(pageNum, pageSize, status);
+            if (org.springframework.util.StringUtils.hasText(merchantId)) {
+                pageResult = activationCodeService.pageByMerchant(merchantId, pageNum, pageSize, status);
+            } else {
+                pageResult = activationCodeService.pageAll(pageNum, pageSize, status);
+            }
         } else {
-            pageResult = activationCodeService.pageByMerchant(merchantId, pageNum, pageSize, status);
+            pageResult = activationCodeService.pageByMerchant(currentMerchantId, pageNum, pageSize, status);
         }
         IPage<ActivationCodeDto> dtoPage = convertToDtoPage(pageResult);
         return ApiResponse.success(dtoPage);

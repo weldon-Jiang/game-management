@@ -51,12 +51,6 @@ const routes = [
         meta: { title: '游戏账号', icon: 'Trophy' }
       },
       {
-        path: 'xbox-hosts',
-        name: 'XboxHosts',
-        component: () => import('@/views/xbox/XboxHostList.vue'),
-        meta: { title: 'Xbox主机', icon: 'GameConsole' }
-      },
-      {
         path: 'activation-codes',
         name: 'ActivationCodes',
         component: () => import('@/views/activation/ActivationCodeList.vue'),

@@ -377,7 +377,7 @@ CREATE TABLE IF NOT EXISTS `xbox_host` (
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_xbox_id` (`xbox_id`),
+    UNIQUE KEY `uk_merchant_xbox` (`merchant_id`, `xbox_id`),
     KEY `idx_merchant_id` (`merchant_id`),
     KEY `idx_bound_streaming_account_id` (`bound_streaming_account_id`),
     KEY `idx_locked_by_agent_id` (`locked_by_agent_id`),

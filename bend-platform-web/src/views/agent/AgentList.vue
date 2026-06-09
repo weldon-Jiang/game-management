@@ -10,6 +10,22 @@
     <div class="content-card">
       <div class="toolbar">
         <el-select
+          v-if="authStore.isPlatformAdmin"
+          v-model="filterMerchantId"
+          placeholder="商户筛选"
+          style="width: 180px"
+          clearable
+          filterable
+          @change="handleMerchantFilter"
+        >
+          <el-option
+            v-for="merchant in merchantList"
+            :key="merchant.id"
+            :label="merchant.name"
+            :value="merchant.id"
+          />
+        </el-select>
+        <el-select
           v-model="filterStatus"
           placeholder="状态筛选"
           style="width: 120px"
@@ -148,7 +164,7 @@
 import { ref, reactive, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { Refresh } from '@element-plus/icons-vue'
-import { agentApi } from '@/api'
+import { agentApi, merchantApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { getAgentDisplayName, getAgentStatusText, getAgentStatusType } from '@/utils/constants'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -158,6 +174,8 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const filterStatus = ref('')
+const filterMerchantId = ref('')
+const merchantList = ref([])
 
 const loading = ref(false)
 const tableData = ref([])
@@ -219,6 +237,21 @@ const handleSearch = () => {
   loadData()
 }
 
+const handleMerchantFilter = () => {
+  pagination.pageNum = 1
+  loadData()
+}
+
+const loadMerchants = async () => {
+  if (!authStore.isPlatformAdmin) return
+  try {
+    const res = await merchantApi.listAll()
+    merchantList.value = res.data || []
+  } catch (error) {
+    console.error('Failed to load merchants:', error)
+  }
+}
+
 const handleSelectionChange = (selection) => {
   selectedAgents.value = selection
 }
@@ -232,6 +265,9 @@ const loadData = async () => {
     }
     if (filterStatus.value) {
       params.status = filterStatus.value
+    }
+    if (authStore.isPlatformAdmin && filterMerchantId.value) {
+      params.merchantId = filterMerchantId.value
     }
     const res = await agentApi.list(params)
     if (res.code === 0 || res.code === 200) {
@@ -384,6 +420,7 @@ const formatDate = (dateStr) => {
 }
 
 onMounted(() => {
+  loadMerchants()
   loadData()
 })
 </script>

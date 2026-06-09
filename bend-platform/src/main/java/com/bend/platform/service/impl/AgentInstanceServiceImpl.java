@@ -142,6 +142,17 @@ public class AgentInstanceServiceImpl implements AgentInstanceService {
     }
 
     @Override
+    public void requireAgentOwnedByMerchant(String agentId, String merchantId) {
+        AgentInstance instance = findByAgentId(agentId);
+        if (instance == null) {
+            throw new BusinessException(ResultCode.AgentInstance.NOT_FOUND);
+        }
+        if (merchantId == null || !merchantId.equals(instance.getMerchantId())) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+    }
+
+    @Override
     public AgentInstance findByRegistrationCode(String registrationCode) {
         LambdaQueryWrapper<AgentInstance> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AgentInstance::getRegistrationCode, registrationCode);

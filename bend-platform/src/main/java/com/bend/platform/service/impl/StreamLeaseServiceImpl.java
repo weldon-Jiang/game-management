@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -15,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Xbox 串流租约：Redis 为主，Redis 不可用时降级 JVM 内 Map（不跨 Agent）。
+ * 租约键按 merchantId + serverId 隔离，避免跨商户互相占用。
  */
 @Service
 public class StreamLeaseServiceImpl implements StreamLeaseService {
@@ -25,12 +27,13 @@ public class StreamLeaseServiceImpl implements StreamLeaseService {
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;
 
-    /** serverId -> agentId|taskId|expiresAtMs */
+    /** leaseKey -> agentId|taskId|expiresAtMs */
     private final Map<String, String> localLeases = new ConcurrentHashMap<>();
 
     @Override
-    public boolean tryAcquire(String serverId, String agentId, String taskId, int ttlSeconds) {
-        if (serverId == null || serverId.isBlank() || agentId == null || taskId == null) {
+    public boolean tryAcquire(String merchantId, String serverId, String agentId, String taskId, int ttlSeconds) {
+        String leaseKey = buildLeaseKey(merchantId, serverId);
+        if (leaseKey == null || agentId == null || taskId == null) {
             return false;
         }
         String value = encode(agentId, taskId);
@@ -38,7 +41,7 @@ public class StreamLeaseServiceImpl implements StreamLeaseService {
 
         if (useRedis()) {
             try {
-                String key = KEY_PREFIX + serverId;
+                String key = KEY_PREFIX + leaseKey;
                 String existing = redisTemplate.opsForValue().get(key);
                 if (value.equals(existing)) {
                     redisTemplate.expire(key, Duration.ofSeconds(ttl));
@@ -46,11 +49,11 @@ public class StreamLeaseServiceImpl implements StreamLeaseService {
                 }
                 Boolean ok = redisTemplate.opsForValue().setIfAbsent(key, value, Duration.ofSeconds(ttl));
                 if (Boolean.TRUE.equals(ok)) {
-                    log.info("Stream lease acquired (Redis) serverId={} agentId={} taskId={} ttl={}s",
-                            serverId, agentId, taskId, ttl);
+                    log.info("Stream lease acquired (Redis) merchantId={} serverId={} agentId={} taskId={} ttl={}s",
+                            merchantId, serverId, agentId, taskId, ttl);
                     return true;
                 }
-                log.debug("Stream lease denied (Redis) serverId={} holder={}", serverId, existing);
+                log.debug("Stream lease denied (Redis) merchantId={} serverId={} holder={}", merchantId, serverId, existing);
                 return false;
             } catch (Exception e) {
                 log.warn("Redis stream lease acquire failed, fallback local: {}", e.getMessage());
@@ -59,44 +62,47 @@ public class StreamLeaseServiceImpl implements StreamLeaseService {
 
         long expiresAt = System.currentTimeMillis() + ttl * 1000L;
         String localValue = value + "|" + expiresAt;
-        String existing = localLeases.get(serverId);
+        String existing = localLeases.get(leaseKey);
         if (existing != null) {
             if (isExpired(existing)) {
-                localLeases.remove(serverId);
+                localLeases.remove(leaseKey);
             } else if (existing.startsWith(value + "|")) {
-                localLeases.put(serverId, localValue);
+                localLeases.put(leaseKey, localValue);
                 return true;
             } else {
                 return false;
             }
         }
-        String prior = localLeases.putIfAbsent(serverId, localValue);
+        String prior = localLeases.putIfAbsent(leaseKey, localValue);
         if (prior == null || prior.startsWith(value + "|")) {
-            localLeases.put(serverId, localValue);
-            log.info("Stream lease acquired (local) serverId={} agentId={} taskId={}", serverId, agentId, taskId);
+            localLeases.put(leaseKey, localValue);
+            log.info("Stream lease acquired (local) merchantId={} serverId={} agentId={} taskId={}",
+                    merchantId, serverId, agentId, taskId);
             return true;
         }
         if (isExpired(prior)) {
-            localLeases.put(serverId, localValue);
+            localLeases.put(leaseKey, localValue);
             return true;
         }
         return false;
     }
 
     @Override
-    public boolean release(String serverId, String agentId, String taskId) {
-        if (serverId == null || serverId.isBlank()) {
+    public boolean release(String merchantId, String serverId, String agentId, String taskId) {
+        String leaseKey = buildLeaseKey(merchantId, serverId);
+        if (leaseKey == null) {
             return false;
         }
         String value = encode(agentId, taskId);
 
         if (useRedis()) {
             try {
-                String key = KEY_PREFIX + serverId;
+                String key = KEY_PREFIX + leaseKey;
                 String existing = redisTemplate.opsForValue().get(key);
                 if (value.equals(existing)) {
                     redisTemplate.delete(key);
-                    log.info("Stream lease released (Redis) serverId={} taskId={}", serverId, taskId);
+                    log.info("Stream lease released (Redis) merchantId={} serverId={} taskId={}",
+                            merchantId, serverId, taskId);
                     return true;
                 }
                 return false;
@@ -105,23 +111,24 @@ public class StreamLeaseServiceImpl implements StreamLeaseService {
             }
         }
 
-        String existing = localLeases.get(serverId);
+        String existing = localLeases.get(leaseKey);
         if (existing != null && existing.startsWith(value + "|")) {
-            localLeases.remove(serverId);
+            localLeases.remove(leaseKey);
             return true;
         }
         return false;
     }
 
     @Override
-    public Optional<Map<String, Object>> getLease(String serverId) {
-        if (serverId == null || serverId.isBlank()) {
+    public Optional<Map<String, Object>> getLease(String merchantId, String serverId) {
+        String leaseKey = buildLeaseKey(merchantId, serverId);
+        if (leaseKey == null) {
             return Optional.empty();
         }
 
         if (useRedis()) {
             try {
-                String key = KEY_PREFIX + serverId;
+                String key = KEY_PREFIX + leaseKey;
                 String raw = redisTemplate.opsForValue().get(key);
                 if (raw == null) {
                     return Optional.empty();
@@ -133,10 +140,10 @@ public class StreamLeaseServiceImpl implements StreamLeaseService {
             }
         }
 
-        String existing = localLeases.get(serverId);
+        String existing = localLeases.get(leaseKey);
         if (existing == null || isExpired(existing)) {
             if (existing != null) {
-                localLeases.remove(serverId);
+                localLeases.remove(leaseKey);
             }
             return Optional.empty();
         }
@@ -150,6 +157,13 @@ public class StreamLeaseServiceImpl implements StreamLeaseService {
     @Override
     public boolean isClusterSafe() {
         return useRedis();
+    }
+
+    private static String buildLeaseKey(String merchantId, String serverId) {
+        if (!StringUtils.hasText(merchantId) || !StringUtils.hasText(serverId)) {
+            return null;
+        }
+        return merchantId.trim() + ":" + serverId.trim();
     }
 
     private Map<String, Object> buildLeaseMap(String holderValue, long ttlSeconds) {
