@@ -1,7 +1,7 @@
 """
 StreamingWindowManager — 仅显示层窗口 API（show/hide/focus）。
 
-不影响自动化链路（WebRTC → 解码 → 模板匹配 → step4）。
+不影响自动化链路（RTP → 解码 → 模板匹配 → step4）。
 """
 
 from typing import Any, Dict, Optional

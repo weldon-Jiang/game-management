@@ -97,7 +97,8 @@ auth:
   prefetch_console_discovery: true
 
 discovery:
-  cache_ttl_sec: 60
+  cache_ttl_sec: 90
+  platform_lan_cache_enabled: true   # 同商户同 /24 网段共享平台 Redis 发现缓存
   ssdp_enrich_enabled: false
   smartglass_udp_enabled: true       # OpenXbox 0xDD00 UDP 5050 发现（LAN 优先）
   smartglass_udp_timeout_sec: 5

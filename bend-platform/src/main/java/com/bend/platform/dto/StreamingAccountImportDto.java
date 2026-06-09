@@ -19,5 +19,6 @@ public class StreamingAccountImportDto {
 
     private String authCode;
 
+    @NotBlank(message = "平台类型不能为空")
     private String platform;
 }

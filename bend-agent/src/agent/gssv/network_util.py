@@ -80,3 +80,30 @@ def fit_display_size(
     avail_h = max(240, min(max_h, screen_h - margin))
     scale = min(avail_w / video_w, avail_h / video_h, 1.0)
     return max(320, int(video_w * scale)), max(240, int(video_h * scale))
+
+
+def lan_segment_from_ip(ip: str) -> Optional[str]:
+    """从 IPv4 提取 /24 网段键，如 192.168.1.10 → 192.168.1。"""
+    if not ip:
+        return None
+    trimmed = ip.strip()
+    if "/" in trimmed:
+        trimmed = trimmed.split("/", 1)[0]
+    parts = trimmed.split(".")
+    if len(parts) != 4:
+        return None
+    try:
+        for part in parts:
+            octet = int(part)
+            if octet < 0 or octet > 255:
+                return None
+    except ValueError:
+        return None
+    return f"{parts[0]}.{parts[1]}.{parts[2]}"
+
+
+def is_same_lan_segment(ip_a: str, ip_b: str) -> bool:
+    """判断两个 IPv4 是否处于同一 /24 网段。"""
+    seg_a = lan_segment_from_ip(ip_a)
+    seg_b = lan_segment_from_ip(ip_b)
+    return seg_a is not None and seg_a == seg_b

@@ -139,3 +139,7 @@ stomp:
 task:
   timeout_check_interval: ${TASK_TIMEOUT_CHECK_INTERVAL:60000}
   default_timeout_seconds: ${TASK_DEFAULT_TIMEOUT:3600}
+
+# LAN SmartGlass 发现 Redis 缓存（Agent 回调共享，同商户 + 同 /24）
+discovery:
+  lan-cache-ttl-sec: ${DISCOVERY_LAN_CACHE_TTL_SEC:90}

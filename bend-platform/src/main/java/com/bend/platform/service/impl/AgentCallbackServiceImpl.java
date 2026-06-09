@@ -12,6 +12,9 @@ import com.bend.platform.service.AgentCallbackService;
 import com.bend.platform.service.AgentLoadControlService;
 import com.bend.platform.service.AutomationUsageService;
 import com.bend.platform.service.GameAccountService;
+import com.bend.platform.service.AgentInstanceService;
+import com.bend.platform.service.LanDiscoveryCacheService;
+import com.bend.platform.service.StreamLeaseService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.service.StreamingSessionService;
 import com.bend.platform.service.TaskEventService;
@@ -28,6 +31,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.*;
+import com.bend.platform.util.PlatformTypeUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
@@ -55,6 +59,9 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     private final AgentLoadControlService loadControlService;
     private final StreamingAccountService streamingAccountService;
     private final XboxHostService xboxHostService;
+    private final StreamLeaseService streamLeaseService;
+    private final LanDiscoveryCacheService lanDiscoveryCacheService;
+    private final AgentInstanceService agentInstanceService;
     private final StreamingSessionService streamingSessionService;
     private final TaskEventService taskEventService;
     private final AutomationUsageService automationUsageService;
@@ -420,6 +427,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
                 streamingInfo.put("id", streamingAccount.getId());
                 streamingInfo.put("email", streamingAccount.getEmail());
                 streamingInfo.put("name", streamingAccount.getDisplayLabel());
+                streamingInfo.put("platform", streamingAccount.getPlatform());
                 result.put("streamingAccount", streamingInfo);
             }
         }
@@ -455,24 +463,15 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             throw new BusinessException(ResultCode.System.DATA_NOT_FOUND, "Xbox主机不存在");
         }
 
+        String agentId = requireAuthenticatedAgentId();
         String taskId = payload != null ? (String) payload.get("taskId") : null;
         if (taskId != null) {
             requireTaskForAuthenticatedAgent(taskId);
-        }
-
-        boolean locked = xboxHostService.lock(xboxHostId, taskId);
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("locked", locked);
-
-        if (locked) {
-            result.put("expiresAt", System.currentTimeMillis() + 3600000);
-            log.info("Xbox主机锁定成功 - XboxHostID: {}", xboxHostId);
         } else {
-            log.warn("Xbox主机锁定失败 - XboxHostID: {}, 原因: 已被其他Agent锁定", xboxHostId);
+            throw new BusinessException(400, "taskId 不能为空");
         }
 
-        return result;
+        return acquireStreamLease(host.getXboxId(), host.getId(), agentId, taskId);
     }
 
     @Override
@@ -484,18 +483,9 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             throw new BusinessException(ResultCode.System.DATA_NOT_FOUND, "Xbox主机不存在");
         }
 
-        boolean unlocked = xboxHostService.unlock(xboxHostId);
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("unlocked", unlocked);
-
-        if (unlocked) {
-            log.info("Xbox主机解锁成功 - XboxHostID: {}", xboxHostId);
-        } else {
-            log.warn("Xbox主机解锁失败 - XboxHostID: {}", xboxHostId);
-        }
-
-        return result;
+        String agentId = getAuthenticatedAgentId();
+        String taskId = payload != null ? (String) payload.get("taskId") : null;
+        return releaseStreamLease(host.getXboxId(), host.getId(), agentId, taskId);
     }
 
     @Override
@@ -520,6 +510,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         result.put("status", host.getStatus());
         result.put("locked", host.getLocked() != null && host.getLocked());  // 添加 locked 布尔字段
         result.put("lockedByAgentId", host.getLockedByAgentId());
+        result.put("lockedByTaskId", host.getLockedByTaskId());
         result.put("lockExpiresTime", host.getLockExpiresTime());
         result.put("boundStreamingAccountId", host.getBoundStreamingAccountId());
         result.put("boundGamertag", host.getBoundGamertag());
@@ -534,35 +525,74 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         XboxHost host = xboxHostService.findByXboxId(xboxId);
         Map<String, Object> result = new HashMap<>();
         result.put("registered", host != null);
+        result.put("xboxId", xboxId);
         if (host == null) {
-            result.put("xboxId", xboxId);
             result.put("locked", false);
+            enrichLeaseStatus(result, xboxId, null);
             return result;
         }
         result.putAll(buildXboxHostStatusMap(host));
+        enrichLeaseStatus(result, xboxId, host);
         return result;
+    }
+
+    @Override
+    public Map<String, Object> getLanDiscoveryCache(String localIp, String platform) {
+        String agentId = requireAuthenticatedAgentId();
+        String merchantId = requireMerchantIdForAgent(agentId);
+        String normalizedPlatform = PlatformTypeUtil.requireValid(platform);
+        log.info("LAN 发现缓存查询 agent={} platform={} localIp={}", agentId, normalizedPlatform, localIp);
+        return lanDiscoveryCacheService.getForAgent(merchantId, agentId, normalizedPlatform, localIp);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> reportLanDiscovery(Map<String, Object> payload) {
+        String agentId = requireAuthenticatedAgentId();
+        String merchantId = requireMerchantIdForAgent(agentId);
+        String localIp = payload != null ? (String) payload.get("localIp") : null;
+        String platform = payload != null ? (String) payload.get("platform") : null;
+        List<Map<String, Object>> consoles = payload != null
+                ? (List<Map<String, Object>>) payload.get("consoles") : null;
+        int ttlSec = 0;
+        if (payload != null && payload.get("ttlSec") instanceof Number n) {
+            ttlSec = n.intValue();
+        }
+        String normalizedPlatform = PlatformTypeUtil.requireValid(platform);
+        log.info("LAN 发现上报 agent={} platform={} localIp={} consoles={}",
+                agentId, normalizedPlatform, localIp, consoles != null ? consoles.size() : 0);
+        return lanDiscoveryCacheService.report(
+                merchantId, agentId, normalizedPlatform, localIp, consoles, ttlSec);
+    }
+
+    private String requireMerchantIdForAgent(String agentId) {
+        var instance = agentInstanceService.findByAgentId(agentId);
+        if (instance == null || !StringUtils.hasText(instance.getMerchantId())) {
+            throw new BusinessException(403, "Agent 未绑定商户");
+        }
+        return instance.getMerchantId();
     }
 
     @Override
     public Map<String, Object> lockXboxHostByXboxId(String xboxId, Map<String, Object> payload) {
         log.info("【v2.0】按 xboxId 锁定 Xbox 主机 - xboxId: {}", xboxId);
-        XboxHost host = xboxHostService.findByXboxId(xboxId);
-        Map<String, Object> result = new HashMap<>();
-        result.put("registered", host != null);
-        if (host == null) {
-            result.put("locked", false);
-            return result;
-        }
+        String agentId = requireAuthenticatedAgentId();
         String taskId = payload != null ? (String) payload.get("taskId") : null;
-        if (taskId != null) {
-            requireTaskForAuthenticatedAgent(taskId);
+        if (taskId == null) {
+            throw new BusinessException(400, "taskId 不能为空");
         }
-        boolean locked = xboxHostService.lock(host.getId(), taskId);
-        result.put("locked", locked);
-        result.put("id", host.getId());
-        result.put("xboxId", host.getXboxId());
-        if (locked) {
-            result.put("expiresAt", System.currentTimeMillis() + 3600000);
+        requireTaskForAuthenticatedAgent(taskId);
+
+        XboxHost host = xboxHostService.findByXboxId(xboxId);
+        Map<String, Object> result = acquireStreamLease(
+                xboxId,
+                host != null ? host.getId() : null,
+                agentId,
+                taskId);
+        result.put("registered", host != null);
+        result.put("xboxId", xboxId);
+        if (host != null) {
+            result.put("id", host.getId());
         }
         return result;
     }
@@ -570,18 +600,106 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     @Override
     public Map<String, Object> unlockXboxHostByXboxId(String xboxId, Map<String, Object> payload) {
         log.info("【v2.0】按 xboxId 解锁 Xbox 主机 - xboxId: {}", xboxId);
+        String agentId = getAuthenticatedAgentId();
+        String taskId = payload != null ? (String) payload.get("taskId") : null;
         XboxHost host = xboxHostService.findByXboxId(xboxId);
-        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> result = releaseStreamLease(
+                xboxId,
+                host != null ? host.getId() : null,
+                agentId,
+                taskId);
         result.put("registered", host != null);
-        if (host == null) {
-            result.put("unlocked", false);
+        result.put("xboxId", xboxId);
+        if (host != null) {
+            result.put("id", host.getId());
+        }
+        return result;
+    }
+
+    private String requireAuthenticatedAgentId() {
+        String agentId = getAuthenticatedAgentId();
+        if (!StringUtils.hasText(agentId)) {
+            throw new BusinessException(401, "未认证的 Agent");
+        }
+        return agentId;
+    }
+
+    /**
+     * 跨 Agent 串流租约：先 Redis（未登记主机也可互斥），再 MySQL CAS（已登记时持久化）。
+     */
+    private Map<String, Object> acquireStreamLease(
+            String serverId,
+            String xboxHostRowId,
+            String agentId,
+            String taskId) {
+        Map<String, Object> result = new HashMap<>();
+        int ttl = StreamLeaseService.DEFAULT_CONNECT_LEASE_SEC;
+
+        boolean redisOk = streamLeaseService.tryAcquire(serverId, agentId, taskId, ttl);
+        if (!redisOk) {
+            result.put("locked", false);
+            result.put("reason", "LEASE_HELD");
+            streamLeaseService.getLease(serverId).ifPresent(result::putAll);
             return result;
         }
-        boolean unlocked = xboxHostService.unlock(host.getId());
-        result.put("unlocked", unlocked);
-        result.put("id", host.getId());
-        result.put("xboxId", host.getXboxId());
+
+        if (xboxHostRowId != null) {
+            boolean mysqlOk = xboxHostService.tryLock(
+                    xboxHostRowId, agentId, taskId, ttl);
+            if (!mysqlOk) {
+                streamLeaseService.release(serverId, agentId, taskId);
+                result.put("locked", false);
+                result.put("reason", "DB_LOCK_FAILED");
+                return result;
+            }
+        }
+
+        result.put("locked", true);
+        result.put("leaseHolderAgentId", agentId);
+        result.put("leaseHolderTaskId", taskId);
+        result.put("leaseActive", true);
+        result.put("expiresAt", System.currentTimeMillis() + ttl * 1000L);
+        result.put("leaseClusterSafe", streamLeaseService.isClusterSafe());
         return result;
+    }
+
+    private Map<String, Object> releaseStreamLease(
+            String serverId,
+            String xboxHostRowId,
+            String agentId,
+            String taskId) {
+        Map<String, Object> result = new HashMap<>();
+        boolean redisReleased = false;
+        if (StringUtils.hasText(agentId) && StringUtils.hasText(taskId)) {
+            redisReleased = streamLeaseService.release(serverId, agentId, taskId);
+        }
+        boolean mysqlReleased = false;
+        if (xboxHostRowId != null && StringUtils.hasText(agentId) && StringUtils.hasText(taskId)) {
+            mysqlReleased = xboxHostService.unlock(xboxHostRowId, agentId, taskId);
+        }
+        result.put("unlocked", redisReleased || mysqlReleased);
+        return result;
+    }
+
+    private void enrichLeaseStatus(Map<String, Object> result, String serverId, XboxHost host) {
+        streamLeaseService.getLease(serverId).ifPresent(lease -> {
+            result.putAll(lease);
+            result.put("locked", true);
+        });
+        if (host != null && host.getLocked() != null && host.getLocked()) {
+            boolean expired = host.getLockExpiresTime() != null
+                    && host.getLockExpiresTime().isBefore(LocalDateTime.now());
+            if (!expired) {
+                result.put("locked", true);
+                if (!result.containsKey("leaseHolderAgentId")) {
+                    result.put("leaseHolderAgentId", host.getLockedByAgentId());
+                }
+                if (!result.containsKey("leaseHolderTaskId")) {
+                    result.put("leaseHolderTaskId", host.getLockedByTaskId());
+                }
+            }
+        }
+        result.put("leaseClusterSafe", streamLeaseService.isClusterSafe());
     }
 
     private Map<String, Object> buildXboxHostStatusMap(XboxHost host) {
@@ -598,6 +716,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         result.put("status", host.getStatus());
         result.put("locked", host.getLocked() != null && host.getLocked());
         result.put("lockedByAgentId", host.getLockedByAgentId());
+        result.put("lockedByTaskId", host.getLockedByTaskId());
         result.put("lockExpiresTime", host.getLockExpiresTime());
         result.put("boundStreamingAccountId", host.getBoundStreamingAccountId());
         result.put("boundGamertag", host.getBoundGamertag());

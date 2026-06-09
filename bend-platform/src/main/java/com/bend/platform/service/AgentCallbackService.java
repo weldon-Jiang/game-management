@@ -25,6 +25,12 @@ public interface AgentCallbackService {
 
     Map<String, Object> getXboxHostStatusByXboxId(String xboxId);
 
+    /** 读取同商户、同 platform、同 /24 网段的 LAN 发现缓存。 */
+    Map<String, Object> getLanDiscoveryCache(String localIp, String platform);
+
+    /** 上报 LAN 发现结果并写入 Redis + upsert xbox_host。 */
+    Map<String, Object> reportLanDiscovery(Map<String, Object> payload);
+
     Map<String, Object> exchangeCredential(Map<String, Object> payload);
 
     Map<String, Object> updateProfileBinding(String gameAccountId, Map<String, Object> payload);

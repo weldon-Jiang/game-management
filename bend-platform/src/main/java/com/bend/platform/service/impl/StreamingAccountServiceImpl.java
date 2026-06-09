@@ -114,8 +114,11 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
                 continue;
             }
 
-            if (dto.getPlatform() != null && !dto.getPlatform().isBlank()
-                    && PlatformType.fromCode(dto.getPlatform()) == null) {
+            if (dto.getPlatform() == null || dto.getPlatform().isBlank()) {
+                errors.add(String.format("第%d行: 平台类型不能为空", rowNum));
+                continue;
+            }
+            if (PlatformType.fromCode(dto.getPlatform()) == null) {
                 errors.add(String.format("第%d行: 平台类型无效，仅支持 xbox、playstation", rowNum));
                 continue;
             }
@@ -139,7 +142,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
                 entity.setEmail(dto.getEmail());
                 entity.setPasswordEncrypted(aesUtil.encrypt(dto.getPassword()));
                 entity.setAuthCode(dto.getAuthCode());
-                entity.setPlatform(PlatformTypeUtil.normalizeOrDefault(dto.getPlatform()));
+                entity.setPlatform(PlatformTypeUtil.requireValid(dto.getPlatform()));
                 entity.setStatus("idle");
                 entity.setCreatedTime(LocalDateTime.now());
                 entity.setUpdatedTime(LocalDateTime.now());

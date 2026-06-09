@@ -64,6 +64,9 @@ public class XboxHost {
 
     private String lockedByAgentId;
 
+    /** 锁定该主机的任务 ID（与 lockedByAgentId 配合，跨 Agent 租约校验）。 */
+    private String lockedByTaskId;
+
     private Boolean locked;  // 是否被锁定（优化字段，前端快速判断）
 
     private LocalDateTime lockedTime;

@@ -368,6 +368,7 @@ CREATE TABLE IF NOT EXISTS `xbox_host` (
     `power_state` ENUM('On','Off','Standby') DEFAULT 'Off' COMMENT '电源状态',
     `locked` TINYINT(1) DEFAULT 0 COMMENT '是否被锁定（优化字段）',
     `locked_by_agent_id` VARCHAR(36) DEFAULT NULL COMMENT '锁定Agent ID',
+    `locked_by_task_id` VARCHAR(36) DEFAULT NULL COMMENT '锁定任务ID',
     `locked_time` DATETIME DEFAULT NULL COMMENT '锁定时间',
     `lock_expires_time` DATETIME DEFAULT NULL COMMENT '锁定过期时间',
     `status` ENUM('idle','streaming','error') DEFAULT 'idle' COMMENT '状态',

@@ -165,14 +165,14 @@ class ActionExecutor:
         self.logger.info("动作执行器已绑定Xbox会话")
 
     def set_controller_protocol(self, protocol):
-        """绑定 ControllerProtocol 并同步 WebRTC 会话。"""
+        """绑定 ControllerProtocol 并同步 SmartGlass 会话。"""
         self._controller_protocol = protocol
         if protocol and getattr(protocol, "_stream_controller", None):
             self.set_xbox_session(protocol._stream_controller)
         self.logger.info("动作执行器已绑定手柄协议")
 
     async def _send_gamepad_state(self, gamepad_data: Dict[str, Any]) -> bool:
-        """经 WebRTC DataChannel 或遗留 SmartGlass 会话发送手柄状态。"""
+        """经 SmartGlass 输入通道发送手柄状态。"""
         if self._input_gate is not None and not self._input_gate.is_allowed():
             return False
         if not self._xbox_session:

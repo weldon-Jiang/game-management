@@ -428,7 +428,7 @@ public class TaskControlServiceImpl implements TaskControlService {
         sendTaskControl(task, "skip_game_account", Map.of("gameAccountId", gameAccountId));
     }
 
-    /** 实现：向 Agent 下发 reconnect_stream 指令，由 Agent 端复用 PlaySession 重连 DataChannel。 */
+    /** 实现：向 Agent 下发 reconnect_stream 指令，由 Agent 端重连 LAN SmartGlass 串流。 */
     @Override
     public void reconnectStream(String taskId, String merchantId) {
         Task task = requireTask(taskId, merchantId);

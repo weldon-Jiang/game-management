@@ -30,6 +30,7 @@ Run migrations in lexicographic (filename) order on an existing database. For fr
 - `V20260607_008_system_metrics_trend_index.sql` — add composite index for bounded monitoring trend queries.
 - `V20260608_001_task_game_account_status_comments.sql` — add column comments for task_game_account_status progress fields.
 - `V20260608_002_task_version_column.sql` — add optimistic-lock version column to task table.
+- `V20260609_001_xbox_host_locked_by_task_id.sql` — add locked_by_task_id for cross-agent stream lease.
 
 ## Legacy locations (removed)
 

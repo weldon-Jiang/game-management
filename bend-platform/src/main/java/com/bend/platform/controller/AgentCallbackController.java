@@ -109,7 +109,7 @@ public class AgentCallbackController {
         }
     }
 
-    /** 按 GSSV serverId 锁定主机；平台未登记时返回 locked=false。 */
+    /** 按 GSSV serverId 申请串流租约（Redis 跨 Agent；未登记主机也可互斥）。 */
     @PostMapping("/xbox/device/{xboxId}/lock")
     public ApiResponse<Map<String, Object>> lockXboxHostByXboxId(
             @PathVariable String xboxId,
@@ -128,6 +128,34 @@ public class AgentCallbackController {
             @RequestBody(required = false) Map<String, Object> payload) {
         try {
             return ApiResponse.success(agentCallbackService.unlockXboxHostByXboxId(xboxId, payload));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        }
+    }
+
+    /**
+     * 读取同商户、同 platform、同 /24 网段的 LAN 发现缓存。
+     *
+     * <p>请求方须传本机 RFC1918 地址与 platform；仅同网段时返回缓存。
+     */
+    @GetMapping("/lan-discovery")
+    public ApiResponse<Map<String, Object>> getLanDiscoveryCache(
+            @RequestParam String localIp,
+            @RequestParam String platform) {
+        try {
+            return ApiResponse.success(agentCallbackService.getLanDiscoveryCache(localIp, platform));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        }
+    }
+
+    /**
+     * 上报 LAN SmartGlass 发现结果：写入 Redis（TTL 默认 90s）并 upsert xbox_host。
+     */
+    @PostMapping("/lan-discovery/report")
+    public ApiResponse<Map<String, Object>> reportLanDiscovery(@RequestBody Map<String, Object> payload) {
+        try {
+            return ApiResponse.success(agentCallbackService.reportLanDiscovery(payload));
         } catch (BusinessException e) {
             return ApiResponse.error(e.getCode(), e.getMessage());
         }

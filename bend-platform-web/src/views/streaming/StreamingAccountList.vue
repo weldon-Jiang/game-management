@@ -609,7 +609,7 @@ const formData = reactive({
   email: '',          // 邮箱
   password: '',       // 密码（必填）
   authCode: '',       // 认证码（非必填）
-  platform: 'xbox'    // 平台类型
+  platform: ''    // 平台类型（必填）
 })
 
 // 密码显示状态（编辑时）
@@ -627,6 +627,9 @@ const formRules = {
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' }
+  ],
+  platform: [
+    { required: true, message: '请选择平台类型', trigger: 'change' }
   ]
 }
 
@@ -707,7 +710,7 @@ const showAddDialog = () => {
   formData.email = ''
   formData.password = ''
   formData.authCode = ''
-  formData.platform = 'xbox'
+  formData.platform = ''
   passwordVisible.value = false
   passwordLoaded.value = false
   actualPassword.value = ''
@@ -755,7 +758,7 @@ const showEditDialog = async (row) => {
   formData.email = row.email
   formData.password = ''
   formData.authCode = row.authCode || ''
-  formData.platform = row.platform || 'xbox'
+  formData.platform = row.platform || ''
   passwordVisible.value = false
   passwordLoaded.value = false
   actualPassword.value = ''
@@ -1065,16 +1068,24 @@ const handleImport = async () => {
 
     const authCodeIdx = header.indexOf('认证码')
     const platformIdx = header.indexOf('平台类型')
+    if (platformIdx < 0) {
+      ElMessage.warning('CSV文件必须包含「平台类型」列（xbox 或 playstation）')
+      return
+    }
 
     const accounts = []
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim())
       if (values.length >= 2 && values[emailIdx] && values[passwordIdx]) {
+        const platform = values[platformIdx] || ''
+        if (!platform) {
+          continue
+        }
         accounts.push({
           email: values[emailIdx],
           password: values[passwordIdx],
           authCode: authCodeIdx >= 0 ? (values[authCodeIdx] || '') : '',
-          platform: platformIdx >= 0 ? (values[platformIdx] || 'xbox') : 'xbox'
+          platform
         })
       }
     }

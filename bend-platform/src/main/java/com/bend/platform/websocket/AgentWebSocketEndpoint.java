@@ -507,7 +507,7 @@ public class AgentWebSocketEndpoint {
                     }
 
                     XboxHost host = xboxHostService.createOrUpdate(merchantId, xboxId, name, ipAddress,
-                            port, liveId, consoleType, firmwareVersion, macAddress);
+                            port, liveId, consoleType, firmwareVersion, macAddress, "xbox");
                     
                     Map<String, Object> xboxInfo = new HashMap<>();
                     xboxInfo.put("id", host.getId());

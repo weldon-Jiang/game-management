@@ -84,7 +84,7 @@ class XboxInfo:
     - ip_address: 局域网 IP（LAN 串流必需）
     - live_id: Xbox Live ID
     - mac_address: MAC地址
-    - play_path: PlaySession 创建路径（如 v5/sessions/home/play）
+    - play_path: 历史字段，LAN 路径不再使用 GSSV play session
     - power_state: 云端电源状态
     - console_type: 主机型号
     """

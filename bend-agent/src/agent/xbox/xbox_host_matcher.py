@@ -7,7 +7,8 @@ Xbox 主机智能匹配器
 """
 
 import asyncio
-from typing import Awaitable, Callable, List, Optional, Dict, Any, Set
+import base64
+from typing import Awaitable, Callable, List, Optional, Dict, Any, Set, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -17,8 +18,16 @@ from ..core.config import config
 from ..core.logger import get_logger
 from ..gssv.base_uri import normalize_gssv_base_uri
 from ..gssv.device_info import build_x_ms_device_info
-from ..gssv.network_util import is_blocked_scan_ip, pick_local_lan_ip
-from .smartglass_discovery import SmartGlassConsole, discover_smartglass_consoles
+from ..gssv.network_util import (
+    is_blocked_scan_ip,
+    is_private_lan_ip,
+    pick_local_lan_ip,
+    is_same_lan_segment,
+)
+from .smartglass_discovery import SmartGlassConsole, discover_smartglass_consoles, discover_smartglass_at
+
+if TYPE_CHECKING:
+    from ..api.platform_api_client import PlatformApiClient
 
 
 class XboxMatchPriority(Enum):
@@ -85,11 +94,18 @@ class XboxHostMatcher:
     WAKUP_CHECK_INTERVAL = 3
     DEFAULT_PLAY_PATH = "v5/sessions/home/play"
     STANDBY_POWER_STATES = frozenset({"Standby", "ConnectedStandby", "Off"})
+    LAN_PLATFORM = "xbox"
 
-    def __init__(self, gs_token: str, gssv_base_uri: Optional[str] = None):
+    def __init__(
+        self,
+        gs_token: str,
+        gssv_base_uri: Optional[str] = None,
+        platform_client: Optional["PlatformApiClient"] = None,
+    ):
         self.logger = get_logger('xbox_matcher')
         self._gs_token = gs_token
         self._gssv_base_uri = normalize_gssv_base_uri(gssv_base_uri)
+        self._platform_client = platform_client
         self._authorized_xboxes: List[XboxInfo] = []
         self._local_xboxes: Dict[str, XboxInfo] = {}
         self._lan_certificates: Dict[str, bytes] = {}
@@ -164,7 +180,11 @@ class XboxHostMatcher:
             return []
 
     async def discover_local_xboxes(self) -> Dict[str, XboxInfo]:
-        """SmartGlass UDP 发现局域网 Xbox（仅 0xDD01，无 SSDP/扫描兜底）。"""
+        """
+        SmartGlass UDP 发现局域网 Xbox；优先读平台 Redis 缓存（同商户同 /24）。
+
+        缓存未命中时再发 UDP 广播，成功后回写平台供同 LAN 其他 Agent/账号复用。
+        """
         self.logger.info("SmartGlass UDP 发现局域网 Xbox...")
         self._local_xboxes = {}
         self._lan_certificates = {}
@@ -174,6 +194,9 @@ class XboxHostMatcher:
             self.logger.warning("SmartGlass UDP 跳过：本机不在真实 LAN 网段")
             return {}
 
+        if local_ip and await self._load_from_platform_lan_cache(local_ip):
+            return self._local_xboxes
+
         timeout = float(config.get("discovery.smartglass_udp_timeout_sec", 5))
         subnet_broadcast: Optional[str] = None
         if local_ip:
@@ -181,6 +204,7 @@ class XboxHostMatcher:
             if len(parts) == 4:
                 subnet_broadcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
 
+        consoles: List[SmartGlassConsole] = []
         try:
             consoles = await discover_smartglass_consoles(
                 timeout_sec=timeout,
@@ -190,6 +214,15 @@ class XboxHostMatcher:
             self.logger.error("SmartGlass UDP 发现异常: %s", exc, exc_info=True)
             return {}
 
+        self._ingest_smartglass_consoles(consoles)
+
+        if local_ip and consoles:
+            await self._report_lan_to_platform(local_ip, consoles)
+
+        self.logger.info("✓ SmartGlass UDP 发现 %s 台", len(self._local_xboxes))
+        return self._local_xboxes
+
+    def _ingest_smartglass_consoles(self, consoles: List[SmartGlassConsole]) -> None:
         for console in consoles:
             xbox = self._from_smartglass_console(console)
             if xbox is None:
@@ -204,8 +237,135 @@ class XboxHostMatcher:
                 console.hardware_uuid,
             )
 
-        self.logger.info("✓ SmartGlass UDP 发现 %s 台", len(self._local_xboxes))
-        return self._local_xboxes
+    async def _load_from_platform_lan_cache(self, local_ip: str) -> bool:
+        """读取平台 LAN 缓存；命中且同网段则填充 _local_xboxes。"""
+        if not config.get("discovery.platform_lan_cache_enabled", True):
+            return False
+        if self._platform_client is None:
+            return False
+        if not is_private_lan_ip(local_ip):
+            return False
+
+        cache = await self._platform_client.get_lan_discovery_cache(local_ip, self.LAN_PLATFORM)
+        if not cache or not cache.get("hit"):
+            reason = (cache or {}).get("reason", "MISS")
+            self.logger.info("平台 LAN 缓存未命中 (%s)，将执行 UDP 发现", reason)
+            return False
+
+        consoles = cache.get("consoles") or []
+        if not consoles:
+            return False
+
+        reporter_ip = cache.get("reporterLocalIp") or ""
+        age_sec = cache.get("ageSec")
+        self.logger.info(
+            "平台 LAN 缓存命中 segment=%s consoles=%s ageSec=%s reporter=%s",
+            cache.get("lanSegment"),
+            len(consoles),
+            age_sec,
+            reporter_ip,
+        )
+
+        cert_timeout = float(config.get("discovery.smartglass_udp_timeout_sec", 5))
+        for entry in consoles:
+            ip = entry.get("ipAddress") or entry.get("ip")
+            if not ip or not is_same_lan_segment(local_ip, ip):
+                self.logger.warning("忽略缓存中非本网段主机 ip=%s local=%s", ip, local_ip)
+                continue
+
+            xbox = self._from_cache_entry(entry)
+            if xbox is None:
+                continue
+            self._local_xboxes[xbox.device_id] = xbox
+
+            cert_b64 = entry.get("certificateB64") or entry.get("certificate_b64")
+            if cert_b64:
+                try:
+                    self._lan_certificates[xbox.device_id] = base64.b64decode(cert_b64)
+                except Exception as exc:
+                    self.logger.warning("缓存证书解码失败 %s: %s", xbox.device_id, exc)
+            elif ip:
+                directed = await discover_smartglass_at(ip, timeout_sec=min(3.0, cert_timeout))
+                if directed and directed.certificate:
+                    self._lan_certificates[xbox.device_id] = directed.certificate
+
+            self.logger.info("  [cache] %s @ %s", xbox.name, xbox.ip_address)
+
+        if self._local_xboxes:
+            self.logger.info("✓ 平台 LAN 缓存加载 %s 台（同 /24 网段）", len(self._local_xboxes))
+            return True
+        return False
+
+    @staticmethod
+    def _from_cache_entry(entry: Dict[str, Any]) -> Optional[XboxInfo]:
+        server_id = (
+            entry.get("serverId")
+            or entry.get("deviceId")
+            or entry.get("device_id")
+        )
+        ip = entry.get("ipAddress") or entry.get("ip")
+        if not server_id or not ip:
+            return None
+        device_id = str(server_id).strip().upper()
+        if not device_id.startswith("XBOX-"):
+            device_id = f"XBOX-{device_id}"
+        console_type = entry.get("consoleType") or "Xbox Unknown"
+        return XboxInfo(
+            id=device_id,
+            device_id=device_id,
+            name=entry.get("name") or f"Xbox ({ip})",
+            ip_address=ip,
+            port=int(entry.get("port") or 5050),
+            live_id=device_id,
+            power_state="On",
+            console_type=console_type,
+        )
+
+    async def _report_lan_to_platform(
+        self,
+        local_ip: str,
+        consoles: List[SmartGlassConsole],
+    ) -> None:
+        if self._platform_client is None:
+            return
+        if not config.get("discovery.platform_lan_cache_enabled", True):
+            return
+
+        payload: List[Dict[str, Any]] = []
+        for console in consoles:
+            xbox = self._from_smartglass_console(console)
+            if xbox is None:
+                continue
+            item: Dict[str, Any] = {
+                "serverId": xbox.device_id,
+                "name": xbox.name,
+                "ipAddress": xbox.ip_address,
+                "port": xbox.port,
+                "liveId": xbox.live_id,
+                "consoleType": xbox.console_type,
+            }
+            if console.certificate:
+                item["certificateB64"] = base64.b64encode(console.certificate).decode("ascii")
+            payload.append(item)
+
+        if not payload:
+            return
+
+        ttl = int(config.get("discovery.cache_ttl_sec", 90))
+        result = await self._platform_client.report_lan_discovery(
+            local_ip,
+            payload,
+            ttl_sec=ttl,
+            platform=self.LAN_PLATFORM,
+        )
+        if result and result.get("accepted"):
+            self.logger.info(
+                "LAN 发现已上报平台 segment=%s consoles=%s cached=%s ttl=%s",
+                result.get("lanSegment"),
+                result.get("consoleCount"),
+                result.get("cached"),
+                result.get("ttlSec"),
+            )
 
     @staticmethod
     def _from_smartglass_console(console: SmartGlassConsole) -> Optional[XboxInfo]:

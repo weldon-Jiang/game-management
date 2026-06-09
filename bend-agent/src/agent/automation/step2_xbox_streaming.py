@@ -14,6 +14,62 @@ from ..task.task_context import AgentTaskContext, Step2Result, XboxInfo, TaskSte
 from ..xbox.xbox_host_matcher import XboxHostMatcher, XboxMatchResult, XboxInfo as MatcherXboxInfo
 
 DEFAULT_PLAY_PATH = "v5/sessions/home/play"
+
+
+def _account_platform(context: AgentTaskContext) -> str:
+    """串流账号平台类型：xbox / playstation（由平台维护，用户自行选择）。"""
+    return (getattr(context, "account_platform", None) or "xbox").strip().lower()
+
+
+async def _discover_playstation_lan_step2(
+    context: AgentTaskContext,
+    task_logger,
+    report_progress: Callable,
+) -> Step2Result:
+    """PlayStation 账号 Step2：按 platform 走 PS LAN 发现；串流未开放则标准报错。"""
+    from ..api.platform_api_client import PlatformApiClient
+    from ..playstation.ps_lan_discovery import discover_playstation_lan
+
+    task_logger.info("Step2 PlayStation：按 platform=playstation 执行 LAN 发现")
+    platform_client = PlatformApiClient()
+    try:
+        consoles = await discover_playstation_lan(platform_client)
+    finally:
+        await platform_client.close()
+
+    if not consoles:
+        fail_msg = "局域网未发现 PlayStation 主机（请确认平台类型、主机在同一 LAN，或 PS 发现尚未开放）"
+        await report_progress(
+            context.task_id,
+            "STEP2",
+            "FAILED",
+            fail_msg,
+            errorCode="LAN_NO_HOST",
+            hostAttempts=[],
+        )
+        return Step2Result(
+            success=False,
+            error_code="LAN_NO_HOST",
+            message=fail_msg,
+        )
+
+    fail_msg = "PlayStation 串流尚未开放，当前仅支持 Xbox LAN 串流"
+    await report_progress(
+        context.task_id,
+        "STEP2",
+        "FAILED",
+        fail_msg,
+        errorCode="PS_STREAM_NOT_SUPPORTED",
+        hostAttempts=[],
+        intersectionCount=len(consoles),
+    )
+    return Step2Result(
+        success=False,
+        error_code="PS_STREAM_NOT_SUPPORTED",
+        message=fail_msg,
+    )
+
+
 def _pipeline_diagnostic_from_context(context: AgentTaskContext) -> Dict[str, Any]:
     """构建 TaskDetail 管道诊断（LAN SmartGlass + RTP）。"""
     session = getattr(context, "xbox_session", None)
@@ -127,7 +183,7 @@ async def _is_xbox_occupied_by_server_id(
     context: AgentTaskContext,
     task_logger,
 ) -> bool:
-    """只读占用检测：按 GSSV serverId 查询平台锁定状态。"""
+    """只读占用检测：Redis 租约 + DB 锁；本 task 重入不算占用。"""
     if not server_id:
         return False
     try:
@@ -142,22 +198,29 @@ async def _is_xbox_occupied_by_server_id(
         task_logger.warning("占用检测：无法连接平台（%s）: %s", server_id, e)
         return False
 
-    if not status or not status.get("registered"):
+    if not status:
         return False
 
-    locked_by_agent = status.get("lockedByAgentId")
-    if not locked_by_agent:
+    if not _lease_blocks_task(status, context.task_id):
         return False
 
-    try:
-        from ..core.credentials_provider import get_credentials
-        current_agent_id, _ = get_credentials()
-    except Exception:
-        current_agent_id = None
+    holder_agent = status.get("leaseHolderAgentId") or status.get("lockedByAgentId")
+    holder_task = status.get("leaseHolderTaskId") or status.get("lockedByTaskId")
+    task_logger.info(
+        "主机 %s 已被占用 holderAgent=%s holderTask=%s",
+        server_id,
+        holder_agent,
+        holder_task,
+    )
+    return True
 
-    if current_agent_id and locked_by_agent == current_agent_id:
-        return True
-    if locked_by_agent != current_agent_id:
+
+def _lease_blocks_task(status: dict, task_id: str) -> bool:
+    """True 表示租约/锁存在且非本 task 重入。"""
+    if status.get("leaseActive") or status.get("locked"):
+        holder_task = status.get("leaseHolderTaskId") or status.get("lockedByTaskId")
+        if holder_task and holder_task == task_id:
+            return False
         return True
     return False
 
@@ -167,11 +230,22 @@ async def _try_acquire_xbox_server_id(
     server_id: str,
     task_logger,
 ) -> bool:
-    """锁定 serverId 对应主机；平台未登记时仅更新本地调度器。"""
+    """握手前申请跨 Agent 串流租约（Redis + 平台 CAS）。"""
     if not server_id:
-        return True
+        return False
 
-    platform_locked = False
+    try:
+        from ..task.automation_scheduler import get_active_scheduler
+
+        scheduler = get_active_scheduler()
+        if scheduler:
+            local_ok = await scheduler.acquire_xbox_host(server_id, context.task_id)
+            if not local_ok:
+                task_logger.warning("本地调度器：主机 %s 已被占用", server_id)
+                return False
+    except Exception as e:
+        task_logger.debug("本地调度器占用检查失败: %s", e)
+
     try:
         from ..api.platform_api_client import PlatformApiClient
 
@@ -182,21 +256,53 @@ async def _try_acquire_xbox_server_id(
             )
         finally:
             await api_client.close()
-        if platform_locked:
-            task_logger.info("平台锁定 Xbox serverId=%s 成功", server_id)
+        if not platform_locked:
+            task_logger.warning("平台串流租约申请失败 serverId=%s", server_id)
+            await _release_local_xbox_host(server_id, context.task_id, task_logger)
+            return False
+        task_logger.info("平台串流租约已持有 serverId=%s task=%s", server_id, context.task_id)
+        context._stream_lease_server_id = server_id  # type: ignore[attr-defined]
+        return True
     except Exception as e:
-        task_logger.warning("平台锁定 serverId=%s 失败: %s", server_id, e)
+        task_logger.warning("平台锁定 serverId=%s 异常: %s", server_id, e)
+        await _release_local_xbox_host(server_id, context.task_id, task_logger)
+        return False
 
+
+async def _release_local_xbox_host(server_id: str, task_id: str, task_logger) -> None:
     try:
         from ..task.automation_scheduler import get_active_scheduler
 
         scheduler = get_active_scheduler()
         if scheduler:
-            await scheduler.acquire_xbox_host(server_id, context.task_id)
+            await scheduler.release_xbox_host(server_id, task_id)
     except Exception as e:
-        task_logger.debug("更新本地调度器占用失败: %s", e)
+        task_logger.debug("释放本地调度器占用失败: %s", e)
 
-    return platform_locked or True
+
+async def _release_xbox_server_id(
+    context: AgentTaskContext,
+    server_id: str,
+    task_logger,
+) -> None:
+    """释放平台 Redis 租约与本地调度器占用。"""
+    if not server_id:
+        return
+    try:
+        from ..api.platform_api_client import PlatformApiClient
+
+        api_client = PlatformApiClient()
+        try:
+            unlocked = await api_client.unlock_xbox_by_device_id(server_id, context.task_id)
+        finally:
+            await api_client.close()
+        if unlocked:
+            task_logger.info("已释放平台串流租约 serverId=%s", server_id)
+    except Exception as e:
+        task_logger.warning("释放平台租约失败 serverId=%s: %s", server_id, e)
+    await _release_local_xbox_host(server_id, context.task_id, task_logger)
+    if getattr(context, "_stream_lease_server_id", None) == server_id:
+        context._stream_lease_server_id = None  # type: ignore[attr-defined]
 
 
 async def discover_intersection_and_connect_lan(
@@ -208,7 +314,11 @@ async def discover_intersection_and_connect_lan(
 ) -> Step2Result:
     """
     云端∩LAN 交集发现 + 按序逐台占用检测与 LAN 握手（失败换下一台）。
+    按 streaming_account.platform 分流：xbox → SmartGlass；playstation → PS LAN（占位）。
     """
+    if _account_platform(context) == "playstation":
+        return await _discover_playstation_lan_step2(context, task_logger, report_progress)
+
     gs_token = _get_gs_token(context)
     if not gs_token:
         return Step2Result(
@@ -217,8 +327,18 @@ async def discover_intersection_and_connect_lan(
             message="无可用的 gsToken，请重新执行步骤一",
         )
 
-    matcher = XboxHostMatcher(gs_token, gssv_base_uri=_get_gssv_base_uri(context))
-    discovery_err = await matcher.discover_cloud_and_lan()
+    from ..api.platform_api_client import PlatformApiClient
+
+    platform_client = PlatformApiClient()
+    try:
+        matcher = XboxHostMatcher(
+            gs_token,
+            gssv_base_uri=_get_gssv_base_uri(context),
+            platform_client=platform_client,
+        )
+        discovery_err = await matcher.discover_cloud_and_lan()
+    finally:
+        await platform_client.close()
     if discovery_err is not None:
         fail_msg = _format_xbox_match_message(discovery_err)
         await report_progress(
@@ -310,7 +430,21 @@ async def discover_intersection_and_connect_lan(
         if await _is_xbox_occupied_by_server_id(server_id, context, task_logger):
             attempt["status"] = "occupied"
             attempt["errorCode"] = "XBOX_OCCUPIED"
-            attempt["message"] = f"主机 {candidate.name} 已被其他任务占用"
+            attempt["message"] = f"主机 {candidate.name} 已被其他 Agent/任务占用"
+            host_attempts.append(attempt)
+            await report_progress(
+                context.task_id,
+                "STEP2",
+                "RUNNING",
+                attempt["message"],
+                hostAttempts=host_attempts,
+            )
+            continue
+
+        if not await _try_acquire_xbox_server_id(context, server_id, task_logger):
+            attempt["status"] = "occupied"
+            attempt["errorCode"] = "LEASE_DENIED"
+            attempt["message"] = f"主机 {candidate.name} 租约申请失败（可能被其他 Agent 占用）"
             host_attempts.append(attempt)
             await report_progress(
                 context.task_id,
@@ -345,7 +479,6 @@ async def discover_intersection_and_connect_lan(
             }
 
         if connect_ok:
-            await _try_acquire_xbox_server_id(context, server_id, task_logger)
             attempt["status"] = "success"
             attempt["message"] = "LAN 串流握手成功"
             host_attempts.append(attempt)
@@ -373,6 +506,7 @@ async def discover_intersection_and_connect_lan(
             return Step2Result(success=True, message=success_msg, xbox_info=context.current_xbox)
 
         await _cleanup_lan_connect_attempt(context, task_logger)
+        await _release_xbox_server_id(context, server_id, task_logger)
         error_code = connect_details.get("errorCode", "XBOX_CONNECT_FAILED")
         error_msg = connect_details.get(
             "errorMessage",
@@ -458,8 +592,9 @@ async def step2_execute_streaming(
             task_logger.info(f"xbox_tokens.user_hash: {context.xbox_tokens.user_hash}")
     task_logger.info("=== Token 验证完成 ===")
     
-    context.update_step_status("step2", TaskStepStatus.RUNNING, "正在匹配Xbox主机...")
-    await report_progress(context.task_id, "STEP2", "RUNNING", "正在匹配Xbox主机...")
+    platform_label = "PlayStation" if _account_platform(context) == "playstation" else "Xbox"
+    context.update_step_status("step2", TaskStepStatus.RUNNING, f"正在匹配{platform_label}主机...")
+    await report_progress(context.task_id, "STEP2", "RUNNING", f"正在匹配{platform_label}主机...")
 
     try:
         if check_cancel():
@@ -815,42 +950,13 @@ async def _start_video_receiver(context: AgentTaskContext, task_logger, stream_l
 
 
 async def _release_xbox_host(context: AgentTaskContext):
-    """
-    释放Xbox主机的串流权限（跨Agent场景）
-
-    参数：
-    - context: 任务上下文
-    """
+    """释放 Xbox 串流租约（跨 Agent）。"""
     task_logger = get_task_logger(context.task_id)
-    
-    if context.current_xbox:
+    server_id = getattr(context, "_stream_lease_server_id", None)
+    if not server_id and context.current_xbox:
         server_id = context.current_xbox.id
-        if server_id:
-            try:
-                from ..api.platform_api_client import PlatformApiClient
-
-                api_client = PlatformApiClient()
-                try:
-                    unlocked = await api_client.unlock_xbox_by_device_id(
-                        server_id, context.task_id
-                    )
-                finally:
-                    await api_client.close()
-                if unlocked:
-                    task_logger.info(f"成功通过平台解锁 Xbox serverId: {server_id}")
-                else:
-                    task_logger.info(f"平台未登记或已释放 Xbox serverId: {server_id}")
-            except Exception as e:
-                task_logger.warning(f"通过平台解锁主机失败: {e}")
-
-            try:
-                from ..task.automation_scheduler import get_active_scheduler
-
-                scheduler = get_active_scheduler()
-                if scheduler:
-                    await scheduler.release_xbox_host(server_id, context.task_id)
-            except Exception as e:
-                task_logger.debug(f"更新本地调度器状态失败: {e}")
+    if server_id:
+        await _release_xbox_server_id(context, server_id, task_logger)
 
 
 def _get_gs_token(context: AgentTaskContext) -> Optional[str]:

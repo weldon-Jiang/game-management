@@ -1,7 +1,7 @@
 """
 VisionService — 统一解码管线与 TemplateMatcher API。
 
-帧仅来自 WebRTC/GPU 解码；绝不来自 SDL 窗口后缓冲。
+帧仅来自 RTP/GPU 解码；绝不来自 SDL 窗口后缓冲。
 """
 
 from typing import Any, Callable, List, Optional

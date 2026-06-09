@@ -161,30 +161,48 @@ public class XboxHostServiceImpl implements XboxHostService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean lock(String xboxHostId, String taskId) {
-        XboxHost host = xboxHostMapper.selectById(xboxHostId);
-        if (host == null) {
-            log.warn("锁定Xbox主机失败 - 主机不存在: {}", xboxHostId);
+    public boolean tryLock(String xboxHostId, String agentId, String taskId, int leaseSeconds) {
+        if (xboxHostId == null || agentId == null || taskId == null) {
             return false;
         }
+        LocalDateTime expireTime = LocalDateTime.now().plusSeconds(Math.max(30, leaseSeconds));
+        int updated = xboxHostMapper.casLock(xboxHostId, agentId, taskId, expireTime);
+        if (updated > 0) {
+            log.info("CAS 锁定 Xbox 成功 - id={}, agentId={}, taskId={}, expire={}",
+                    xboxHostId, agentId, taskId, expireTime);
+            return true;
+        }
+        log.warn("CAS 锁定 Xbox 失败 - id={}, agentId={}, taskId={}", xboxHostId, agentId, taskId);
+        return false;
+    }
 
-        if (host.getLocked() != null && host.getLocked() && host.getLockExpiresTime() != null) {
-            if (host.getLockExpiresTime().isAfter(LocalDateTime.now())) {
-                log.warn("锁定Xbox主机失败 - 已被其他Agent锁定: {}, 锁定者: {}, 过期时间: {}",
-                        xboxHostId, host.getLockedByAgentId(), host.getLockExpiresTime());
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean unlock(String xboxHostId, String agentId, String taskId) {
+        if (xboxHostId == null) {
+            return false;
+        }
+        if (agentId == null || taskId == null) {
+            XboxHost host = xboxHostMapper.selectById(xboxHostId);
+            if (host == null) {
                 return false;
             }
+            host.setLockedByAgentId(null);
+            host.setLockedByTaskId(null);
+            host.setLockExpiresTime(null);
+            host.setLockedTime(null);
+            host.setLocked(false);
+            xboxHostMapper.updateById(host);
+            return true;
         }
-
-        LocalDateTime expireTime = LocalDateTime.now().plusHours(1);
-        host.setLockedByAgentId(taskId);
-        host.setLockExpiresTime(expireTime);
-        host.setLockedTime(LocalDateTime.now());
-        host.setLocked(true);  // 更新锁定状态布尔值
-
-        xboxHostMapper.updateById(host);
-        log.info("锁定Xbox主机成功 - ID: {}, TaskID: {}, 过期时间: {}", xboxHostId, taskId, expireTime);
-        return true;
+        int updated = xboxHostMapper.casUnlock(xboxHostId, agentId, taskId);
+        if (updated > 0) {
+            log.info("CAS 解锁 Xbox 成功 - id={}, agentId={}, taskId={}", xboxHostId, agentId, taskId);
+            return true;
+        }
+        log.warn("CAS 解锁 Xbox 失败（非持有者或已释放）- id={}, agentId={}, taskId={}",
+                xboxHostId, agentId, taskId);
+        return false;
     }
 
     @Override
@@ -200,25 +218,6 @@ public class XboxHostServiceImpl implements XboxHostService {
 
         xboxHostMapper.physicalDeleteById(id);
         log.info("物理删除Xbox主机 - ID: {}", id);
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public boolean unlock(String xboxHostId) {
-        XboxHost host = xboxHostMapper.selectById(xboxHostId);
-        if (host == null) {
-            log.warn("解锁Xbox主机失败 - 主机不存在: {}", xboxHostId);
-            return false;
-        }
-
-        host.setLockedByAgentId(null);
-        host.setLockExpiresTime(null);
-        host.setLockedTime(null);
-        host.setLocked(false);  // 更新锁定状态布尔值
-
-        xboxHostMapper.updateById(host);
-        log.info("解锁Xbox主机成功 - ID: {}", xboxHostId);
-        return true;
     }
 
     private boolean isValidStatus(String status) {
@@ -254,25 +253,24 @@ public class XboxHostServiceImpl implements XboxHostService {
     @Transactional(rollbackFor = Exception.class)
     public XboxHost createOrUpdate(String merchantId, String xboxId, String name, String ipAddress,
                                    Integer port, String liveId, String consoleType, 
-                                   String firmwareVersion, String macAddress) {
+                                   String firmwareVersion, String macAddress, String platform) {
         merchantService.validateMerchantActive(merchantId);
+        String normalizedPlatform = PlatformTypeUtil.requireValid(platform);
 
         XboxHost host = findByXboxId(xboxId);
         
         if (host != null) {
-            if (host.getPlatform() == null || host.getPlatform().isBlank()) {
-                host.setPlatform(PlatformTypeUtil.normalizeOrDefault("xbox"));
-            }
+            host.setPlatform(normalizedPlatform);
             updateHostInfo(host, name, ipAddress, port, liveId, consoleType, firmwareVersion, macAddress);
             xboxHostMapper.updateById(host);
-            log.info("更新已发现的Xbox主机 - ID: {}, XboxID: {}", host.getId(), xboxId);
+            log.info("更新已发现的主机 - ID: {}, XboxID: {}, platform={}", host.getId(), xboxId, normalizedPlatform);
             return host;
         }
 
         host = new XboxHost();
         host.setMerchantId(merchantId);
         host.setXboxId(xboxId);
-        host.setPlatform(PlatformTypeUtil.normalizeOrDefault("xbox"));
+        host.setPlatform(normalizedPlatform);
         if (StringUtils.isNotBlank(name)) {
             host.setName(name.trim());
         }

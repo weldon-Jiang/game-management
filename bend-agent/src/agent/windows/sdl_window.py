@@ -5,7 +5,7 @@ SDL2自绘串流窗口
 功能说明：
 - 使用pygame创建自绘串流窗口（仅用于显示，不参与自动化识别）
 - 窗口固定 1280x720、可拖拽、不可缩放、可隐藏
-- 画面捕获/模板匹配使用 WebRTC 原始帧（对齐 streaming 项目 game_mat 逻辑）
+- 画面捕获/模板匹配使用 RTP/GPU 解码原始帧（对齐 streaming 项目 game_mat 逻辑）
 
 技术实现参考（streaming项目）：
 - xsrp.StreamWindow.setFixedSize() 固定窗口尺寸
@@ -66,7 +66,7 @@ class SDLStreamWindow:
     与 streaming StreamWindow 对齐：
     - 固定窗口尺寸（setFixedSize），可拖拽标题栏移动
     - 原始视频帧保存在 _last_source_frame，模板匹配不依赖窗口像素
-    - 窗口隐藏不影响 WebRTC / GPU 解码链路
+    - 窗口隐藏不影响 RTP / GPU 解码链路
     """
 
     def __init__(self, config: Optional[SDLWindowConfig] = None):
@@ -83,7 +83,7 @@ class SDLStreamWindow:
         self._last_frame_time = 0
         self._frame_count = 0
         self._fps = 0.0
-        # game_mat：WebRTC 解码原始帧；capture_mat：仅窗口显示缩放副本
+        # game_mat：解码原始帧；capture_mat：仅窗口显示缩放副本
         self._game_mat: Optional[np.ndarray] = None
         self._capture_mat: Optional[np.ndarray] = None
         self._source_size: Tuple[int, int] = (0, 0)

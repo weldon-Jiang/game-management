@@ -209,7 +209,7 @@ class AccountSwitcher:
         self.logger.info("账号切换器已绑定串流会话（保活）")
 
     def set_reconnect_callback(self, callback: Callable[[], Awaitable[bool]]):
-        """设置 input DataChannel 关闭时的重连回调（复用 PlaySession + SDP）。"""
+        """设置 input 通道关闭时的重连回调（LAN SmartGlass 重握手）。"""
         self._reconnect_callback = callback
         self.logger.info("账号切换器已绑定输入通道重连回调")
 
@@ -796,7 +796,7 @@ class AccountSwitcher:
             self.logger.debug(f"保存调试帧失败: {e}")
 
     def _resolve_input_session(self):
-        """从串流绑定或动作执行器解析 WebRTC/SmartGlass 会话。"""
+        """从串流绑定或动作执行器解析 SmartGlass 会话。"""
         if self._stream_session is not None:
             return self._stream_session
         executor = self._action_executor

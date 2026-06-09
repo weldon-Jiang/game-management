@@ -379,11 +379,11 @@ export const SESSION_PHASE_MAP = {
 }
 
 export const SESSION_PHASE_HINT_MAP = {
-  ready: '账号、主机、WebRTC 首帧和 input 通道已通过检查，可选择自动化类型。',
+  ready: '账号、主机、LAN 首帧和 SmartGlass 输入通道已通过检查，可选择自动化类型。',
   automation_failed: 'Step4 自动化未完成，但串流会话仍保留，可重新选择模式后重试。',
-  initializing_display: '正在建立 WebRTC 首帧和显示链路；若失败通常与主机画面或网络有关。',
-  initializing_input: '正在验证 input DataChannel；若失败通常与 WebRTC 输入通道有关。',
-  failed: '串流准备失败，请结合错误信息区分账号认证、主机匹配、WebRTC 首帧或 input 通道问题。'
+  initializing_display: '正在建立 LAN 首帧和显示链路；若失败通常与主机画面或网络有关。',
+  initializing_input: '正在验证 SmartGlass 输入通道；若失败通常与 LAN 握手或网络有关。',
+  failed: '串流准备失败，请结合错误信息区分账号认证、主机匹配、LAN 首帧或输入通道问题。'
 }
 
 export const GAME_ACCOUNT_RUN_STATUS_MAP = {
@@ -440,10 +440,12 @@ export const TASK_EVENT_MESSAGE_MAP = {
   'Window + decode ready': '窗口与解码就绪',
   'Authenticating': '正在认证',
   'Discovering console': '正在发现主机',
-  'WebRTC 首帧未到达，无法确认真实主机画面': 'WebRTC 首帧失败：无法确认真实主机画面',
-  'WebRTC DataChannel/媒体通道未建立，无法确认真实主机串流': 'WebRTC 输入/媒体通道失败：无法确认真实主机串流',
-  'input DataChannel 未 open': 'input DataChannel 未打开',
-  'input DataChannel keepalive 发送失败': 'input DataChannel 保活失败',
+  'LAN 首帧未到达，无法确认真实主机画面': 'LAN 首帧失败：无法确认真实主机画面',
+  'SmartGlass 输入通道未建立，无法确认真实主机串流': 'SmartGlass 输入通道失败：无法确认真实主机串流',
+  'WebRTC 首帧未到达，无法确认真实主机画面': 'LAN 首帧失败：无法确认真实主机画面',
+  'WebRTC DataChannel/媒体通道未建立，无法确认真实主机串流': 'SmartGlass 输入通道失败：无法确认真实主机串流',
+  'input DataChannel 未 open': 'SmartGlass 输入通道未打开',
+  'input DataChannel keepalive 发送失败': 'SmartGlass 输入保活失败',
   'Cancelled': '已取消',
   'Account skipped': '账号已跳过',
   '准备完成（账号已存在）': '准备完成（账号已存在）',
@@ -475,10 +477,10 @@ export const getSessionPhaseHint = (phase, message = '') => {
   const base = SESSION_PHASE_HINT_MAP[key] || ''
   if (!normalizedMessage) return base
   if (/首帧|FIRST_FRAME/i.test(normalizedMessage)) {
-    return `WebRTC 首帧失败：${normalizedMessage}`
+    return `LAN 首帧失败：${normalizedMessage}`
   }
-  if (/DataChannel|input|输入/i.test(normalizedMessage)) {
-    return `input 通道失败：${normalizedMessage}`
+  if (/DataChannel|SmartGlass|input|输入/i.test(normalizedMessage)) {
+    return `输入通道失败：${normalizedMessage}`
   }
   return base ? `${base} 当前信息：${normalizedMessage}` : normalizedMessage
 }

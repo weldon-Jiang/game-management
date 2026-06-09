@@ -22,7 +22,8 @@ public class StreamingAccountRequest {
     private String authCode;
 
     /**
-     * Platform type: xbox, playstation (default xbox)
+     * 平台类型：xbox、playstation（必填，由用户自行选择）
      */
-    private String platform = "xbox";
+    @NotBlank(message = "平台类型不能为空")
+    private String platform;
 }

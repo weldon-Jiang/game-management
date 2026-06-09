@@ -615,7 +615,7 @@ class PlatformApiClient:
     async def lock_xbox_by_device_id(
         self, xbox_id: str, task_id: Optional[str] = None
     ) -> bool:
-        """按 GSSV serverId 锁定；平台未登记时返回 False。"""
+        """按 GSSV serverId 申请跨 Agent 串流租约（Redis SET NX + DB CAS）。"""
         url = self._get_callback_url(f'xbox/device/{xbox_id}/lock')
         headers = await self._get_headers()
         payload = {'taskId': task_id} if task_id else {}
@@ -659,6 +659,86 @@ class PlatformApiClient:
         except Exception as e:
             self.logger.error(f"按 xboxId 解锁主机异常: {e}")
             return False
+
+    async def get_lan_discovery_cache(
+        self,
+        local_ip: str,
+        platform: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        读取平台 LAN 发现缓存（同商户 + 同 platform + 同 /24 网段）。
+
+        参数:
+            local_ip: 本机 RFC1918 地址
+            platform: xbox 或 playstation
+        """
+        if not local_ip or not platform:
+            return None
+        url = self._get_callback_url('lan-discovery')
+        headers = await self._get_headers()
+        try:
+            session = await self._get_session()
+            async with session.get(
+                url,
+                params={'localIp': local_ip, 'platform': platform},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status != 200:
+                    return None
+                result = await response.json()
+                if result.get('code') == 200:
+                    return result.get('data')
+                return None
+        except Exception as e:
+            self.logger.warning(f"读取 LAN 发现缓存异常: {e}")
+            return None
+
+    async def report_lan_discovery(
+        self,
+        local_ip: str,
+        consoles: List[Dict[str, Any]],
+        ttl_sec: Optional[int] = None,
+        platform: str = "xbox",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        上报 LAN 发现结果到平台（Redis + upsert xbox_host）。
+
+        参数:
+            local_ip: 发现方本机 LAN IP
+            consoles: 主机列表
+            ttl_sec: 缓存 TTL
+            platform: xbox 或 playstation
+        """
+        if not local_ip or not consoles or not platform:
+            return None
+        url = self._get_callback_url('lan-discovery/report')
+        headers = await self._get_headers()
+        payload: Dict[str, Any] = {
+            'localIp': local_ip,
+            'platform': platform,
+            'consoles': consoles,
+        }
+        if ttl_sec is not None:
+            payload['ttlSec'] = ttl_sec
+        try:
+            session = await self._get_session()
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status != 200:
+                    return None
+                result = await response.json()
+                if result.get('code') == 200:
+                    return result.get('data')
+                self.logger.warning(f"LAN 发现上报失败: {result.get('message')}")
+                return None
+        except Exception as e:
+            self.logger.warning(f"LAN 发现上报异常: {e}")
+            return None
 
     async def exchange_credential_token(self, token: str) -> Optional[str]:
         """

@@ -74,21 +74,14 @@ public interface XboxHostService {
     void updateStatus(String id, String status);
 
     /**
-     * 锁定主机（智能锁定逻辑，返回操作结果）
-     *
-     * @param xboxHostId 主机ID
-     * @param taskId     任务ID（用于关联）
-     * @return 是否锁定成功
+     * CAS 锁定主机（agentId + taskId）；返回是否成功。
      */
-    boolean lock(String xboxHostId, String taskId);
+    boolean tryLock(String xboxHostId, String agentId, String taskId, int leaseSeconds);
 
     /**
-     * 解锁主机（返回操作结果）
-     *
-     * @param xboxHostId 主机ID
-     * @return 是否解锁成功
+     * 解锁主机（仅持有 agentId+taskId 可释放）。
      */
-    boolean unlock(String xboxHostId);
+    boolean unlock(String xboxHostId, String agentId, String taskId);
 
     /**
      * 删除主机
@@ -138,7 +131,7 @@ public interface XboxHostService {
      */
     XboxHost createOrUpdate(String merchantId, String xboxId, String name, String ipAddress, 
                             Integer port, String liveId, String consoleType, 
-                            String firmwareVersion, String macAddress);
+                            String firmwareVersion, String macAddress, String platform);
 
     /**
      * 获取并失效凭证（一次性令牌）
