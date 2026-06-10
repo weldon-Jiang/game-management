@@ -472,7 +472,10 @@ public class TaskControlServiceImpl implements TaskControlService {
             try {
                 Map<String, Object> parsed = objectMapper.readValue(
                         event.getPayload(), Map.class);
-                if (parsed.containsKey("auth") || parsed.containsKey("firstFrame")) {
+                if (parsed.containsKey("auth")
+                        || parsed.containsKey("firstFrame")
+                        || parsed.containsKey("gssvPlay")
+                        || parsed.containsKey("webrtc")) {
                     return parsed;
                 }
             } catch (Exception e) {

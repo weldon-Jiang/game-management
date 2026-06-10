@@ -2,7 +2,9 @@
 
 from typing import Any, Optional
 
-DEFAULT_GSSV_BASE_URI = "https://uks.core.gssv-play-prodxhome.xboxlive.com"
+from .region_resolver import KNOWN_XHOME_REGION_URIS
+
+DEFAULT_GSSV_BASE_URI = KNOWN_XHOME_REGION_URIS[0]
 
 
 def normalize_gssv_base_uri(uri: Optional[str]) -> str:

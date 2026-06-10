@@ -1,0 +1,99 @@
+﻿>>> Step1 login ...
+E:\Python\Python39\python.exe : xHome 璁よ瘉鎴愬姛锛屼絾鍝嶅簲涓湭鎵惧埌榛樿鍖哄煙 baseUri锛屽皢浣跨敤榛樿 GSSV 鍦板潃
+所在位置 C:\Users\54327\AppData\Local\Temp\ps-script-acbac571-c8a4-4ea8-adac-07e26b730311.ps1:114 字符: 68
++ ... PATH="src"; E:\Python\Python39\python.exe scripts\diagnose_gamestream ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (xHome 璁よ瘉鎴愬姛锛屼絾...浣跨敤榛樿 GSSV 鍦板潃:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+xHome 璁よ瘉鎴愬姛锛屼絾鍝嶅簲涓湭鎵惧埌榛樿鍖哄煙 baseUri锛屽皢浣跨敤榛樿 GSSV 鍦板潃
+{"asctime": "2026-06-09 21:26:57", "name": "xbox_matcher", "levelname": "INFO", "message": "============================================================"}
+{"asctime": "2026-06-09 21:26:57", "name": "xbox_matcher", "levelname": "INFO", "message": "Xbox 鍙戠幇锛欸SSV 浜戠 + SmartGlass UDP"}
+{"asctime": "2026-06-09 21:26:57", "name": "xbox_matcher", "levelname": "INFO", "message": "============================================================"}
+{"asctime": "2026-06-09 21:26:57", "name": "xbox_matcher", "levelname": "INFO", "message": "姝ｅ湪鑾峰彇浜戠鎺堟潈鐨?Xbox 涓绘満鍒楄〃..."}
+{"asctime": "2026-06-09 21:26:57", "name": "xbox_matcher", "levelname": "INFO", "message": "SmartGlass UDP 鍙戠幇灞€鍩熺綉 Xbox..."}
+{"asctime": "2026-06-09 21:26:57", "name": "smartglass_discovery", "levelname": "INFO", "message": "SmartGlass UDP 鍙戠幇: XboxOne @ 192.168.0.100 (uuid=CB26B9A7-634B-B54B-F691-990DE15BBC08, type=0x0001)"}
+{"asctime": "2026-06-09 21:27:01", "name": "xbox_matcher", "levelname": "INFO", "message": "鉁?鑾峰彇鍒?1 鍙版巿鏉?Xbox 涓绘満"}
+{"asctime": "2026-06-09 21:27:01", "name": "xbox_matcher", "levelname": "INFO", "message": "  - XboxOne (FD0063F45DC0312C...): Power=On, Type=XboxOneS, PlayPath=v5/sessions/home/play"}
+{"asctime": "2026-06-09 21:27:02", "name": "xbox_matcher", "levelname": "INFO", "message": "  - XboxOne @ 192.168.0.100 (uuid=CB26B9A7-634B-B54B-F691-990DE15BBC08)"}
+{"asctime": "2026-06-09 21:27:02", "name": "xbox_matcher", "levelname": "INFO", "message": "鉁?SmartGlass UDP 鍙戠幇 1 鍙?}
+{"asctime": "2026-06-09 21:27:02", "name": "xbox_matcher", "levelname": "INFO", "message": "鉁?浜ら泦 1 鍙帮紙鎸変簯绔『搴忥級"}
+>>> Target XboxOne @ 192.168.0.100
+UDP Connect failed: ConnectResponse 瓒呮椂
+Exception ignored in: <function _ProactorBasePipeTransport.__del__ at 0x000002CA0BBDE700>
+Traceback (most recent call last):
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 116, in __del__
+    self.close()
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 108, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 751, in call_soon
+    self._check_closed()
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 515, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Exception ignored in: <function _ProactorBasePipeTransport.__del__ at 0x000002CA0BBDE700>
+Traceback (most recent call last):
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 116, in __del__
+    self.close()
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 108, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 751, in call_soon
+    self._check_closed()
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 515, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Exception ignored in: <function _ProactorBasePipeTransport.__del__ at 0x000002CA0BBDE700>
+Traceback (most recent call last):
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 116, in __del__
+    self.close()
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 108, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 751, in call_soon
+    self._check_closed()
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 515, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Exception ignored in: <function _ProactorBasePipeTransport.__del__ at 0x000002CA0BBDE700>
+Traceback (most recent call last):
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 116, in __del__
+    self.close()
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 108, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 751, in call_soon
+    self._check_closed()
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 515, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Exception ignored in: <function _ProactorBasePipeTransport.__del__ at 0x000002CA0BBDE700>
+Traceback (most recent call last):
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 116, in __del__
+    self.close()
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 108, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 751, in call_soon
+    self._check_closed()
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 515, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Exception ignored in: <function _ProactorBasePipeTransport.__del__ at 0x000002CA0BBDE700>
+Traceback (most recent call last):
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 116, in __del__
+    self.close()
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 108, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 751, in call_soon
+    self._check_closed()
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 515, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+Exception ignored in: <function _ProactorBasePipeTransport.__del__ at 0x000002CA0BBDE700>
+Traceback (most recent call last):
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 116, in __del__
+    self.close()
+  File "E:\Python\Python39\lib\asyncio\proactor_events.py", line 108, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 751, in call_soon
+    self._check_closed()
+  File "E:\Python\Python39\lib\asyncio\base_events.py", line 515, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed

@@ -61,8 +61,10 @@ class AuthService:
         check_cancel: Optional[Callable[[], bool]] = None,
         report_progress: Optional[Callable] = None,
     ) -> StreamingCredentials:
-        from ..automation.step1_stream_account_login import step1_execute_login
+        from ..auth.step1_router import resolve_step1_execute_login
         from ..task.task_context import AgentTaskContext, TaskStepStatus
+
+        step1_execute_login = resolve_step1_execute_login()
 
         effective_task_id = task_id or f"auth_{streaming_account_id or email}"
         context = AgentTaskContext(
@@ -106,5 +108,9 @@ class AuthService:
             creds.gssv_xsts_token = getattr(xbox_tokens, "xsts_token", "")
             creds.web_xsts_token = getattr(xbox_tokens, "web_xsts_token", "")
             creds.user_hash = getattr(xbox_tokens, "user_hash", "")
+            sid = getattr(xbox_tokens, "server_id", "")
+            pp = getattr(xbox_tokens, "play_path", "")
+            if sid and pp:
+                creds.prefetched_consoles = [{"serverId": sid, "playPath": pp}]
         self._cache[email.lower()] = creds
         return creds

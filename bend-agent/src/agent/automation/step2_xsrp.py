@@ -1,7 +1,7 @@
 """
-步骤二：Xbox LAN 串流（薄编排层）。
+步骤二（xblive/xsrp 栈）：GSSV 发现 + play/WebRTC 串流握手 + 解码首帧 + 输入通道。
 
-核心逻辑位于 xbox/step2_discover_connect.py、xbox/lan_connect.py、xbox/console_lease.py。
+与 step1_xblive_login.py 配套；对齐 streaming/xsrp OpenStreaming 的 GSSV/WebRTC 段。
 """
 
 import asyncio
@@ -10,38 +10,32 @@ from typing import Callable
 from ..core.account_logger import get_stream_logger
 from ..core.task_logger import get_task_logger
 from ..task.task_context import AgentTaskContext, Step2Result, TaskStepStatus
-from ..xbox.console_lease import release_xbox_host
-from ..xbox.lan_connect import cleanup_lan_connect_attempt, connect_to_xbox_lan
-from ..xbox.pipeline_diagnostic import pipeline_diagnostic_from_context
-from ..xbox.step2_discover_connect import discover_intersection_and_connect_lan
-
-# 脚本/旧模块兼容 re-export（新代码请直接 import xbox.*）
-_release_xbox_host = release_xbox_host
-_cleanup_lan_connect_attempt = cleanup_lan_connect_attempt
-_connect_to_xbox_lan = connect_to_xbox_lan
-_pipeline_diagnostic_from_context = pipeline_diagnostic_from_context
+from ..xbox.step2_xsrp_connect import discover_and_connect_xsrp
 
 
-async def step2_execute_xbox_streaming(
+async def step2_execute_xsrp_streaming(
     context: AgentTaskContext,
     check_cancel: Callable[[], bool],
     report_progress: Callable,
 ) -> Step2Result:
-    """Xbox 账号 Step2 入口。"""
+    """xblive/xsrp Step2 入口。"""
     task_logger = get_task_logger(context.task_id)
     stream_logger = get_stream_logger(context.streaming_account_email)
-    task_logger.info("=== 步骤二：开始 Xbox 串流连接 ===")
-    stream_logger.info("=== 开始 Xbox 串流连接 ===")
+    task_logger.info("=== 步骤二（xsrp）：开始 GSSV 发现与串流握手 ===")
+    stream_logger.info("=== 步骤二（xsrp）：开始 GSSV 发现与串流握手 ===")
 
-    context.update_step_status("step2", TaskStepStatus.RUNNING, "正在匹配 Xbox 主机...")
-    await report_progress(context.task_id, "STEP2", "RUNNING", "正在匹配 Xbox 主机...")
+    context.update_step_status("step2", TaskStepStatus.RUNNING, "xsrp 正在发现 Xbox 主机...")
+    await report_progress(
+        context.task_id, "STEP2", "RUNNING", "xsrp 正在发现 Xbox 主机...",
+        streamingStack="xsrp",
+    )
 
     try:
         if check_cancel():
             context.update_step_status("step2", TaskStepStatus.SKIPPED, "任务被取消")
             return Step2Result(success=False, error_code="CANCELLED", message="任务被取消")
 
-        return await discover_intersection_and_connect_lan(
+        return await discover_and_connect_xsrp(
             context, task_logger, stream_logger, check_cancel, report_progress,
         )
 
@@ -50,15 +44,19 @@ async def step2_execute_xbox_streaming(
         return Step2Result(success=False, error_code="CANCELLED", message="任务被取消")
 
     except asyncio.TimeoutError as exc:
-        error_msg = f"步骤二执行超时: {exc}"
+        error_msg = f"xsrp 步骤二超时: {exc}"
         task_logger.error(error_msg, exc_info=True)
         context.update_step_status("step2", TaskStepStatus.FAILED, error_msg, str(exc))
-        await report_progress(context.task_id, "STEP2", "FAILED", error_msg)
+        await report_progress(
+            context.task_id, "STEP2", "FAILED", error_msg, streamingStack="xsrp",
+        )
         return Step2Result(success=False, error_code="TIMEOUT", message=error_msg)
 
     except Exception as exc:
-        error_msg = f"步骤二异常: {exc}"
+        error_msg = f"xsrp 步骤二异常: {exc}"
         task_logger.error(error_msg, exc_info=True)
         context.update_step_status("step2", TaskStepStatus.FAILED, error_msg, str(exc))
-        await report_progress(context.task_id, "STEP2", "FAILED", error_msg)
+        await report_progress(
+            context.task_id, "STEP2", "FAILED", error_msg, streamingStack="xsrp",
+        )
         return Step2Result(success=False, error_code="EXCEPTION", message=error_msg)

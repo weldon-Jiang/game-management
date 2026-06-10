@@ -121,14 +121,9 @@
           class="window-hint"
         />
 
-        <StreamPipelineDiagnostic
-          :events="events"
-          :task="task"
-          :session-phase="displaySessionPhase"
-        />
+        <StreamPipelineDiagnostic :diagnostic="streamPipelineDiagnostic" />
 
         <section class="account-section">
-          <StreamPipelineDiagnostic :diagnostic="streamPipelineDiagnostic" />
           <h3>游戏账号</h3>
           <GameAccountRunTable
             :rows="gameAccountStatuses"

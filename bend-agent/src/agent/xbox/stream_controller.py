@@ -31,7 +31,7 @@ import asyncio
 import json
 import struct
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Callable, List
+from typing import Optional, Dict, Any, Callable, List, Tuple
 from enum import Enum
 
 from ..core.logger import get_logger
@@ -110,7 +110,8 @@ class XboxStreamController:
     - 不使用时调用 disconnect() 断开连接
     """
 
-    SMARTGLASS_PORT = 5050  # SmartGlass协议默认端口
+    SMARTGLASS_UDP_PORT = 5050  # UDP 发现/握手专用，非 TCP 控制端口
+    DEFAULT_TCP_FALLBACK_PORTS = [9002, 5555, 3074]
     PROTOCOL_VERSION = "1.0"  # 协议版本号
 
     def __init__(self):
@@ -134,6 +135,18 @@ class XboxStreamController:
         self._rtp_receive_task: Optional[asyncio.Task] = None  # RTP接收任务
         self._rtp_port: int = 50500  # RTP接收端口
         self._srtp_enabled: bool = False  # SRTP是否启用
+        self._lan_tcp_port: Optional[int] = None
+        self._lan_udp_port: Optional[int] = None
+        self._gamestream_session_id: Optional[str] = None
+        self._smartglass_protocol: Optional[Any] = None
+
+    def attach_smartglass_protocol(self, protocol: Any) -> None:
+        """绑定 UDP SmartGlass 控制协议（LAN 模式唯一控制通道）。"""
+        self._smartglass_protocol = protocol
+
+    @property
+    def smartglass_protocol(self) -> Optional[Any]:
+        return self._smartglass_protocol
 
     @property
     def state(self) -> StreamState:
@@ -153,6 +166,8 @@ class XboxStreamController:
         - True: 已连接（状态为CONNECTED或STREAMING）
         - False: 未连接
         """
+        if self._smartglass_protocol and getattr(self._smartglass_protocol, "is_alive", False):
+            return self._state in [StreamState.CONNECTED, StreamState.STREAMING]
         return self._state in [StreamState.CONNECTED, StreamState.STREAMING]
 
     @property
@@ -161,11 +176,20 @@ class XboxStreamController:
         return "open" if self.is_connected else "closed"
 
     def is_input_channel_healthy(self) -> bool:
-        """InputPump / keepalive 用：SmartGlass TCP 已连接即视为 input 可用。"""
+        """InputPump / keepalive 用：UDP SmartGlass 会话存活即视为 input 可用。"""
+        if self._smartglass_protocol and getattr(self._smartglass_protocol, "is_alive", False):
+            return True
         return self.is_connected
 
     async def send_keepalive(self) -> bool:
-        """发送中性手柄状态作为 keepalive。"""
+        """发送 SmartGlass UDP 心跳或中性手柄状态。"""
+        if self._smartglass_protocol and getattr(self._smartglass_protocol, "is_alive", False):
+            try:
+                self._smartglass_protocol.send_heartbeat()
+                return True
+            except OSError as exc:
+                self.logger.debug("SmartGlass heartbeat 失败: %s", exc)
+                return False
         neutral = {
             "buttons": 0,
             "left_trigger": 0,
@@ -179,22 +203,15 @@ class XboxStreamController:
 
     async def connect(self, xbox_ip: str, port: int = None) -> bool:
         """
-        连接到Xbox主机
-
-        参数说明：
-        - xbox_ip: Xbox主机IP地址
-        - port: SmartGlass端口（可选，默认5050）
-
-        返回值：
-        - True: 连接成功
-        - False: 连接失败
-
-        连接流程：
-        1. 如果已连接到其他Xbox，先断开
-        2. 建立TCP连接
-        3. 进行SmartGlass握手
-        4. 握手成功则状态变为CONNECTED
+        @deprecated LAN 模式请使用 SmartGlass UDP 控制协议，勿再调用 TCP connect。
         """
+        self.logger.warning(
+            "connect() 已废弃：SmartGlass 控制通道为 UDP 5050，请走 lan_connect + SmartGlassProtocol"
+        )
+        return False
+
+    async def _connect_tcp_legacy(self, xbox_ip: str, port: int = None) -> bool:
+        """旧版 TCP JSON 握手（非 SmartGlass 规范，仅保留供排查）。"""
         # 如果已连接到同一Xbox，直接返回成功
         if self.is_connected:
             self.logger.warning(f"Already connected to {self._current_xbox}")
@@ -202,7 +219,7 @@ class XboxStreamController:
                 return True
             await self.disconnect()
 
-        port = port or self.SMARTGLASS_PORT
+        port = port or self.SMARTGLASS_UDP_PORT
         self._state = StreamState.CONNECTING
         self._current_xbox = xbox_ip
 
@@ -250,6 +267,14 @@ class XboxStreamController:
 
         try:
             await self.stop_video_receiver()
+
+            protocol = self._smartglass_protocol
+            if protocol and hasattr(protocol, "stop"):
+                try:
+                    await protocol.stop()
+                except Exception as exc:
+                    self.logger.warning("SmartGlass protocol stop: %s", exc)
+            self._smartglass_protocol = None
             
             if self._writer:
                 try:
@@ -474,6 +499,13 @@ class XboxStreamController:
             self.logger.error("Not connected to Xbox, cannot send gamepad state")
             return False
 
+        protocol = self._smartglass_protocol
+        input_ch = getattr(protocol, "input_channel_id", 0) if protocol else 0
+        session = getattr(protocol, "_session", None) if protocol else None
+        if protocol and input_ch > 0 and session is not None:
+            self.logger.debug("SmartGlass 输入通道已移除，跳过 UDP gamepad 发送")
+            return False
+
         try:
             command = {
                 "type": "input",
@@ -578,25 +610,23 @@ class XboxStreamController:
         user_hash: str,
         port: int = None
     ) -> bool:
-        """
-        使用 Xbox Live Token 连接到 Xbox 主机
+        """@deprecated 请使用 UDP SmartGlass Connect + SmartGlassProtocol。"""
+        self.logger.warning("connect_with_token() 已废弃，SmartGlass 控制通道为 UDP 5050")
+        return False
 
-        参数:
-            xbox_ip: Xbox IP 地址
-            xbox_token: Xbox Live Token
-            user_hash: 用户哈希 (uhs)
-            port: SmartGlass 端口（可选，默认5050）
-
-        返回:
-            True: 连接成功
-            False: 连接失败
-        """
+    async def _connect_with_token_tcp_legacy(
+        self,
+        xbox_ip: str,
+        xbox_token: str,
+        user_hash: str,
+        port: int = None
+    ) -> bool:
         if self.is_connected:
             if self._current_xbox == xbox_ip:
                 return True
             await self.disconnect()
 
-        port = port or self.SMARTGLASS_PORT
+        port = port or self.SMARTGLASS_UDP_PORT
         self._state = StreamState.CONNECTING
         self._current_xbox = xbox_ip
 
@@ -629,6 +659,67 @@ class XboxStreamController:
             self._writer = None
 
         return False
+
+    async def try_tcp_connect(self, xbox_ip: str, port: int, timeout: float = 5.0) -> bool:
+        """@deprecated SmartGlass 控制不使用 TCP。"""
+        self.logger.debug("try_tcp_connect 已禁用 (port=%s)", port)
+        return False
+
+    async def connect_tcp_with_fallback(
+        self,
+        xbox_ip: str,
+        ports: List[int],
+        timeout: float = 5.0,
+    ) -> Tuple[bool, int]:
+        """@deprecated SmartGlass 控制不使用 TCP 兜底端口。"""
+        self.logger.debug("connect_tcp_with_fallback 已禁用 ports=%s", ports)
+        return False, 0
+
+    async def _try_tcp_connect_legacy(self, xbox_ip: str, port: int, timeout: float = 5.0) -> bool:
+        """探测 TCP 端口是否可达（不做 JSON 握手）。"""
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(xbox_ip, port),
+                timeout=timeout,
+            )
+            writer.close()
+            try:
+                await asyncio.wait_for(writer.wait_closed(), timeout=2)
+            except Exception:
+                pass
+            reader.feed_eof()
+            self.logger.info("TCP 端口可达: %s:%s", xbox_ip, port)
+            return True
+        except Exception as exc:
+            self.logger.debug("TCP 端口不可达 %s:%s — %s", xbox_ip, port, exc)
+            return False
+
+    async def mark_lan_session_ready(
+        self,
+        xbox_ip: str,
+        tcp_port: int,
+        udp_port: int,
+        session_id: str = "",
+    ) -> bool:
+        """
+        UDP SmartGlass + Broadcast 协商完成后标记会话就绪。
+
+        跳过错误的 JSON-over-TCP:5050 握手；媒体走协商 udpPort。
+        """
+        self._state = StreamState.STREAMING
+        self._current_xbox = xbox_ip
+        self._lan_tcp_port = tcp_port
+        self._lan_udp_port = udp_port
+        self._gamestream_session_id = session_id or None
+        self._stream_config = StreamConfig(xbox_ip=xbox_ip, xbox_port=tcp_port)
+        self.logger.info(
+            "LAN SmartGlass 会话就绪 %s tcp=%s udp=%s session=%s",
+            xbox_ip,
+            tcp_port,
+            udp_port,
+            session_id or "-",
+        )
+        return True
 
     async def _token_handshake(self, xbox_token: str, user_hash: str) -> bool:
         """

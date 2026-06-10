@@ -42,10 +42,10 @@ def _check_imports() -> List[CheckResult]:
         ("agent.session.api", "StreamingSession"),
         ("agent.automation.step1_stream_account_login", "step1_execute_login"),
         ("agent.automation.step2_router", "step2_execute_streaming"),
-        ("agent.automation.step3_streaming_init", "step3_streaming_init"),
+        ("agent.automation.step3_xsrp", "step3_execute_xsrp_init"),
         ("agent.automation.step4_game_automation", "step4_execute_gaming"),
         ("agent.xbox.xbox_host_matcher", "XboxHostMatcher"),
-        ("agent.xbox.lan_media_session", "establish_lan_media_security"),
+        ("agent.xbox.xsrp_cloud_connect", "connect_xsrp_cloud"),
         ("agent.xbox.stream_recovery", "reconnect_input_channel"),
         ("agent.scene.streaming_scene_detector", "StreamingSceneDetector"),
         ("agent.scene.fc_scene_client", "FCSceneClient"),
@@ -83,57 +83,66 @@ def _check_xbox_host_candidates() -> List[CheckResult]:
     try:
         from agent.xbox.xbox_host_matcher import XboxHostMatcher
 
-        src = inspect.getsource(XboxHostMatcher.build_candidates)
+        src = inspect.getsource(XboxHostMatcher.build_cloud_candidates)
         for token in (
             "assigned_xbox",
             "platform_xbox_hosts",
             "auto_match_host",
         ):
-            results.append(CheckResult(f"XboxHostMatcher.build_candidates uses {token}", token in src))
+            results.append(CheckResult(f"XboxHostMatcher.build_cloud_candidates uses {token}", token in src))
     except Exception as exc:
         results.append(CheckResult("XboxHostMatcher.build_candidates", False, str(exc)))
     return results
 
 
-def _check_step2_lan_hooks() -> List[CheckResult]:
+def _check_step2_xsrp_hooks() -> List[CheckResult]:
     results: List[CheckResult] = []
     try:
-        from agent.xbox import lan_connect as lc
-        from agent.xbox import step2_discover_connect as s2
+        from agent.xbox import step2_xsrp_connect as s2
+        from agent.xbox import xsrp_cloud_connect as xc
 
-        src = inspect.getsource(lc.connect_to_xbox_lan)
-        for token in (
-            "establish_lan_media_security",
-            "context.xbox_session",
-            "_smartglass_enabled",
-        ):
-            results.append(CheckResult(f"lan_connect.connect_to_xbox_lan has {token}", token in src))
+        src = inspect.getsource(xc.connect_xsrp_cloud)
+        for token in ("GssvCloudPlaySession", "GssvWebRtcSession", "context.xbox_session"):
+            results.append(CheckResult(f"connect_xsrp_cloud has {token}", token in src))
 
-        for fn_name in ("discover_intersection_and_connect_lan", "build_candidates"):
-            if fn_name == "build_candidates":
+        for fn_name in ("discover_and_connect_xsrp", "discover_cloud_only"):
+            if fn_name == "discover_cloud_only":
                 from agent.xbox.xbox_host_matcher import XboxHostMatcher
                 fn = getattr(XboxHostMatcher, fn_name, None)
             else:
                 fn = getattr(s2, fn_name, None)
             results.append(CheckResult(f"step2 defines {fn_name}", callable(fn)))
     except Exception as exc:
-        results.append(CheckResult("step2 lan hooks", False, str(exc)))
+        results.append(CheckResult("step2 xsrp hooks", False, str(exc)))
     return results
 
 
 def _check_step3_step4_deps() -> List[CheckResult]:
     results: List[CheckResult] = []
     try:
-        from agent.automation import step3_streaming_init as s3
+        from agent.automation import step3_xsrp as s3
         from agent.automation import step4_game_automation as s4
 
-        s3_src = inspect.getsource(s3.step3_streaming_init) + inspect.getsource(s3._ensure_controller_protocol)
-        results.append(CheckResult("step3 sets context.frame_capture", "context.frame_capture = capture" in inspect.getsource(s3._init_frame_capture)))
+        from agent.automation import step3_streaming_init as s3helpers
+
+        s3_src = inspect.getsource(s3.step3_execute_xsrp_init)
+        results.append(
+            CheckResult(
+                "step3 sets context.frame_capture",
+                "context.frame_capture" in s3_src or "XsrpFrameCapture" in s3_src,
+            )
+        )
         results.append(CheckResult("step3 binds xbox_session", "xbox_session" in s3_src))
         results.append(
             CheckResult(
-                "step3 rtp controller hook",
-                "set_video_controller" in inspect.getsource(s3._init_frame_capture),
+                "step3 direct capture hook",
+                "_direct_capture" in s3_src or "XsrpFrameCapture" in s3_src,
+            )
+        )
+        results.append(
+            CheckResult(
+                "step3 controller protocol helper",
+                callable(getattr(s3helpers, "_ensure_controller_protocol", None)),
             )
         )
 
@@ -172,15 +181,11 @@ def _check_context_field_map() -> List[CheckResult]:
             "assigned_xbox",
             "xbox_session",
             "_video_capture_mode",
-            "_video_stream_controller",
-            "_smartglass_enabled",
+            "_direct_capture",
+            "_cloud_webrtc",
             "_stream_lease_server_id",
-            "_smartglass_certificate",
         ],
         "session sync -> step4": [
-            "_lan_srtp_keys",
-            "_lan_rtp_port",
-            "_lan_endpoints",
             "_stream_lease_server_id",
         ],
         "step3 -> step4": [
@@ -302,7 +307,7 @@ def main() -> int:
     all_results.extend(_check_imports())
     all_results.extend(_check_streaming_task_wiring())
     all_results.extend(_check_xbox_host_candidates())
-    all_results.extend(_check_step2_lan_hooks())
+    all_results.extend(_check_step2_xsrp_hooks())
     all_results.extend(_check_step3_step4_deps())
     all_results.extend(_check_context_field_map())
     all_results.extend(_check_templates())

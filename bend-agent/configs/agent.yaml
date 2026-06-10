@@ -91,7 +91,9 @@ automation:
 # 认证配置
 # ----------------------------------------------
 auth:
-  device_code_timeout: 300   # 设备码认证总超时（秒），默认 5 分钟
+  provider: xblive              # xblive（SISU，对齐 xblive）| msal（旧 Device Code）
+  device_code_timeout: 300      # MSAL 设备码认证总超时（秒）
+  xblive_web_headless: true      # xblive Playwright 回退是否无头
   xhome_token_ttl_sec: 14340
   xsts_token_ttl_sec: 57540
   prefetch_console_discovery: true
@@ -107,17 +109,20 @@ discovery:
   wakeup_timeout_sec: 30
   smartglass_wake_fallback: true
 
-# LAN 媒体（SmartGlass → DTLS-PSK → SRTP → RTP；唯一串流路径）
-lan_stream:
-  rtp_port: 50500
-  dtls_port: 50500
-  handshake_timeout_sec: 15
-  first_frame_timeout_sec: 10
-  per_host_attempt_timeout_sec: 45  # 单台主机握手+首 RTP 总预算，超时换下一台
-  smartglass_udp_connect: true     # OpenXbox 0xCC00 XSTS 授权（UDP 5050）
-  smartglass_connect_timeout_sec: 8
-  # 可选：指向 streaming/xsrp 目录以加载 libxsrp（Windows）
-  xsrp_module_path: ""
+# GSSV / xHome 云端（设备列表、play session；baseUri 来自 xHome offeringSettings.regions）
+gssv:
+  stream_mode: cloud
+  cloud_provision_timeout_sec: 45
+  cloud_webrtc_timeout_sec: 90
+  cloud_first_frame_timeout_sec: 20
+  cloud_post_provision_delay_sec: 2
+  cloud_ice_exchange_timeout_sec: 20
+  # xsrp 栈（对齐 streaming/xsrp.py 帧率 + 空闲保活）
+  xsrp_capture_fps: 30
+  xsrp_idle_keepalive_sec: 60
+  xsrp_idle_pulse_sec: 0.05
+  # 留空则自动从 xHome 响应解析；仅当自动解析/探测失败时手动指定，例如：
+  # base_uri: "https://uks.core.gssv-play-prodxhome.xboxlive.com"
 
 vision:
   decode_mode: auto

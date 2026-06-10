@@ -26,7 +26,7 @@ class PowerManager:
     def __init__(self):
         self.logger = get_logger("power_manager")
         self._wakeup_timeout = int(config.get("discovery.wakeup_timeout_sec", 30))
-        self._smartglass_fallback = bool(config.get("discovery.smartglass_wake_fallback", True))
+        self._smartglass_fallback = False
 
     def classify(self, power_state: str) -> str:
         ps = (power_state or "").strip().lower()

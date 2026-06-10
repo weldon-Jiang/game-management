@@ -25,6 +25,7 @@ import asyncio
 import threading
 import time
 import random
+from pathlib import Path
 from typing import Dict, Optional, List, Any, Callable
 
 from ..core.logger import get_logger
@@ -38,6 +39,10 @@ from ..runtime.input_focus import InputFocusManager
 from ..runtime.phase_fsm import SessionPhase
 from ..core.config import config
 from ..api.platform_api_client import PlatformApiClient
+
+_AGENT_CONFIG_PATH = str(
+    Path(__file__).resolve().parents[3] / "configs" / "agent.yaml"
+)
 
 
 _active_scheduler: Optional["AutomationScheduler"] = None
@@ -306,7 +311,9 @@ class AutomationScheduler:
         await self._semaphore.acquire()
 
         asyncio_task = asyncio.create_task(
-            self._run_task(task_id, runtime, cancel_event, two_phase, game_action_type)
+            self._run_task_wrapper(
+                task_id, runtime, cancel_event, two_phase, game_action_type,
+            )
         )
         runtime.asyncio_task = asyncio_task
 
@@ -431,6 +438,28 @@ class AutomationScheduler:
             event.set()
         return True
 
+    async def _run_task_wrapper(
+        self,
+        task_id: str,
+        runtime: StreamingAccountTaskRuntime,
+        cancel_event: asyncio.Event,
+        two_phase: bool = True,
+        game_action_type: str = "",
+    ) -> None:
+        await self._run_task(
+            task_id, runtime, cancel_event, two_phase, game_action_type,
+        )
+
+    async def _run_task_finally(self, task_id: str, runtime: StreamingAccountTaskRuntime) -> None:
+        with self._lock:
+            self._running_tasks.pop(task_id, None)
+            self._task_objects.pop(task_id, None)
+            self._cancel_events.pop(task_id, None)
+            self._task_contexts.pop(task_id, None)
+        self._registry.unregister(task_id)
+        self._semaphore.release()
+        self.logger.info("任务 %s 协程/宿主结束", task_id)
+
     async def _run_task(
         self,
         task_id: str,
@@ -506,17 +535,7 @@ class AutomationScheduler:
                 )
 
         finally:
-            with self._lock:
-                self._running_tasks.pop(task_id, None)
-                self._task_objects.pop(task_id, None)
-                self._cancel_events.pop(task_id, None)
-                self._task_contexts.pop(task_id, None)
-            self._registry.unregister(task_id)
-
-            # 仅释放当前任务的并发槽位；禁止在此调用 scheduler.close() 误杀其他任务。
-            self._semaphore.release()
-
-            self.logger.info(f"任务 {task_id} 协程结束")
+            await self._run_task_finally(task_id, runtime)
 
     async def pause_task(
         self,

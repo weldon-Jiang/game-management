@@ -2,7 +2,7 @@
 LAN 串流输入通道恢复
 ==================
 
-SmartGlass 输入通道异常时，清理并重新执行 LAN 握手。
+WebRTC 输入通道异常时，清理并重新执行 GSSV 云端握手。
 """
 
 import asyncio
@@ -26,7 +26,7 @@ def _get_reconnect_lock(context: Any) -> asyncio.Lock:
 
 
 async def reconnect_input_channel(context: Any, task_logger=None) -> bool:
-    """重连 LAN SmartGlass 串流（重新握手 + RTP）。"""
+    """重连 GSSV 云端串流（重新 play/WebRTC 握手）。"""
     log = task_logger or logger
     lock = _get_reconnect_lock(context)
 
@@ -56,24 +56,26 @@ async def reconnect_input_channel(context: Any, task_logger=None) -> bool:
                 log.info("input 通道已恢复 open，跳过重连")
                 return True
 
-            from ..xbox.lan_connect import cleanup_lan_connect_attempt, connect_to_xbox_lan
             from ..core.account_logger import get_stream_logger
+            from .streaming_credentials import attach_streaming_credentials
+            from .xsrp_cloud_connect import cleanup_xsrp_cloud_attempt, connect_xsrp_cloud
 
             email = getattr(context, "streaming_account_email", "") or ""
             stream_logger = get_stream_logger(email) if email else log
 
-            log.info("开始重连 LAN SmartGlass 串流")
-            await cleanup_lan_connect_attempt(context, log)
-            ok, details = await connect_to_xbox_lan(context, log, stream_logger)
+            log.info("开始重连 GSSV 云端串流")
+            await cleanup_xsrp_cloud_attempt(context, log)
+            creds = attach_streaming_credentials(context)
+            ok, details = await connect_xsrp_cloud(context, creds, log, stream_logger)
             if not ok:
-                log.error("LAN 串流重连失败: %s", details.get("errorMessage", details))
+                log.error("云端串流重连失败: %s", details.get("errorMessage", details))
                 return False
 
             rebind_stream_bindings(context)
-            log.info("LAN 串流重连成功，会话引用已回绑")
+            log.info("云端串流重连成功，会话引用已回绑")
             return True
         except Exception as exc:
-            log.error("LAN 串流重连异常: %s", exc)
+            log.error("云端串流重连异常: %s", exc)
             return False
 
 

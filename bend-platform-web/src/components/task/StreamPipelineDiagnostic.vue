@@ -1,6 +1,7 @@
 <template>
   <section v-if="steps.length" class="pipeline-diagnostic content-card">
     <h3>串流管道诊断</h3>
+    <p v-if="stackHint" class="pipeline-stack-hint">{{ stackHint }}</p>
     <div class="pipeline-steps">
       <div
         v-for="step in steps"
@@ -15,20 +16,22 @@
         </div>
       </div>
     </div>
-    <p v-if="extra.firstFrameSize || extra.lanIp || extra.streamMode || extra.rtpPort" class="pipeline-extra">
-      <span v-if="extra.streamMode"> · 模式：LAN</span>
-      <span v-if="extra.lanIp"> · IP：{{ extra.lanIp }}</span>
-      <span v-if="extra.rtpPort"> · RTP：{{ extra.rtpPort }}</span>
+    <p v-if="hasExtra" class="pipeline-extra">
+      <span v-if="streamModeLabel">模式：{{ streamModeLabel }}</span>
+      <span v-if="extra.frameCaptureMode"> · 截帧：{{ extra.frameCaptureMode }}</span>
+      <span v-if="extra.decodeMode"> · 解码：{{ extra.decodeMode }}</span>
       <span v-if="extra.firstFrameSize"> · 首帧：{{ extra.firstFrameSize }}</span>
       <span v-if="extra.inputChannelState"> · 输入：{{ extra.inputChannelState }}</span>
+      <span v-if="legacyLanIp"> · LAN IP：{{ legacyLanIp }}</span>
+      <span v-if="extra.rtpPort"> · RTP：{{ extra.rtpPort }}</span>
     </p>
   </section>
 </template>
 
 <script setup>
 /**
- * TaskDetail 管道诊断：auth / discovery / lanConnect / dtlsSrtp / first_frame / input_dc。
- * 数据来自 Agent STEP2/3 上报的 pipelineDiagnostic。
+ * TaskDetail 管道诊断：对齐 Agent xsrp 云端 GSSV/WebRTC 上报字段；
+ * 旧 LAN 任务若仍含 lanConnect/dtlsSrtp 则自动展示 legacy 步骤。
  */
 import { computed } from 'vue'
 
@@ -39,8 +42,20 @@ const props = defineProps({
   }
 })
 
-const STEP_DEFS = [
-  { key: 'auth', label: '认证 (MSAL)' },
+/** xblive/xsrp 云端串流（Route B） */
+const CLOUD_STEP_DEFS = [
+  { key: 'auth', label: '认证 (xblive)' },
+  { key: 'discovery', label: 'GSSV 主机发现' },
+  { key: 'gssvPlay', label: 'Play 会话' },
+  { key: 'webrtc', label: 'WebRTC 握手' },
+  { key: 'firstFrame', label: '首帧' },
+  { key: 'inputDc', label: '输入通道' },
+  { key: 'display', label: 'SDL 显示' }
+]
+
+/** 历史 LAN SmartGlass 任务 */
+const LEGACY_STEP_DEFS = [
+  { key: 'auth', label: '认证' },
   { key: 'discovery', label: '主机发现 (GSSV∩LAN)' },
   { key: 'lanConnect', label: 'LAN 握手' },
   { key: 'dtlsSrtp', label: 'DTLS-SRTP' },
@@ -50,9 +65,46 @@ const STEP_DEFS = [
 
 const extra = computed(() => props.diagnostic || {})
 
+const isLegacyLan = computed(() => {
+  const d = props.diagnostic
+  if (!d) return false
+  return d.lanConnect != null || d.dtlsSrtp != null
+})
+
+const stepDefs = computed(() => (isLegacyLan.value ? LEGACY_STEP_DEFS : CLOUD_STEP_DEFS))
+
 const steps = computed(() => {
   if (!props.diagnostic) return []
-  return STEP_DEFS.filter(s => props.diagnostic[s.key] != null)
+  return stepDefs.value.filter((s) => props.diagnostic[s.key] != null)
+})
+
+const stackHint = computed(() => {
+  const stack = extra.value.streamingStack
+  if (stack === 'xsrp') return '串流栈：xblive / GSSV 云端 Remote Play'
+  if (isLegacyLan.value) return '串流栈：LAN SmartGlass（历史任务）'
+  return ''
+})
+
+const streamModeLabel = computed(() => {
+  const mode = String(extra.value.streamMode || '').toLowerCase()
+  if (mode.includes('cloud') || mode.includes('xsrp')) return '云端 GSSV (xsrp)'
+  if (isLegacyLan.value) return '局域网 SmartGlass'
+  if (extra.value.streamMode) return extra.value.streamMode
+  return ''
+})
+
+const legacyLanIp = computed(() => (isLegacyLan.value ? extra.value.lanIp : null))
+
+const hasExtra = computed(() => {
+  return !!(
+    streamModeLabel.value
+    || extra.value.frameCaptureMode
+    || extra.value.decodeMode
+    || extra.value.firstFrameSize
+    || extra.value.inputChannelState
+    || legacyLanIp.value
+    || extra.value.rtpPort
+  )
 })
 
 const stepClass = (value) => {
@@ -79,6 +131,12 @@ const stepDetail = (value) => {
 .pipeline-diagnostic h3 {
   margin: 0 0 var(--spacing-sm);
   font-size: var(--font-size-md);
+}
+
+.pipeline-stack-hint {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
 }
 
 .pipeline-steps {

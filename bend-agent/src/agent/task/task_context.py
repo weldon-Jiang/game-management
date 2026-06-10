@@ -204,6 +204,7 @@ class AgentTaskContext:
 
     microsoft_tokens: Optional[Any] = None
     xbox_tokens: Optional[Any] = None
+    xblive_auth: Optional[Any] = None  # XbliveAuthResult（xblive Step1）
     xbox_session: Optional[Any] = None
     frame_capture: Optional[Any] = None
 

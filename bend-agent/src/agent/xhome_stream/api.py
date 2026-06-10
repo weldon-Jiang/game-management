@@ -43,7 +43,9 @@ class XHomeStreamService:
         report_progress: Optional[Callable] = None,
         source_context: Optional[AgentTaskContext] = None,
     ) -> MediaSession:
-        from ..automation.step3_streaming_init import step3_streaming_init
+        from ..auth.step3_router import resolve_step3_streaming_init
+
+        step3_streaming_init = resolve_step3_streaming_init()
         from ..vision.decode_strategy import resolve_decode_mode
 
         if source_context is not None:

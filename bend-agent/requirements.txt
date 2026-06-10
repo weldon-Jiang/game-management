@@ -17,4 +17,7 @@ easyocr>=1.7.0
 torch>=2.0.0
 torchvision>=0.15.0
 pyotp>=2.9.0  # TOTP验证码生成，用于MFA自动化
+python-jose[cryptography]>=3.3.0  # xblive SISU ECDSA 签名
 compress-pickle>=2.0.0
+aiortc>=1.9.0,<2.0.0
+av>=12.0.0,<13.0.0

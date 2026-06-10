@@ -73,6 +73,15 @@ async def close_media_context(context: Any, logger=None) -> None:
             log.debug("disconnect xbox session: %s", exc)
     context.xbox_session = None
 
+    stack = getattr(context, "_streaming_stack", "")
+    if stack == "xsrp":
+        try:
+            from ..xbox.xsrp_cleanup import cleanup_xsrp_stream_context
+
+            await cleanup_xsrp_stream_context(context, log)
+        except Exception as exc:
+            log.debug("xsrp stream cleanup: %s", exc)
+
     try:
         from ..xbox.console_lease import release_xbox_host
 
