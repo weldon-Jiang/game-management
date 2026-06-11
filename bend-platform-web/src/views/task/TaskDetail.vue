@@ -148,7 +148,7 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useTaskMonitor } from '@/composables/useTaskMonitor'
 import { taskApi } from '@/api/task'
 import {
@@ -160,6 +160,11 @@ import {
   getSessionPhaseHint,
   getTaskEventMessageText
 } from '@/utils/constants'
+import {
+  confirmCancelPendingTask,
+  confirmTerminateStreamingTask,
+  isConfirmDismissed
+} from '@/utils/taskControlConfirm'
 import SessionPhaseStepper from '@/components/task/SessionPhaseStepper.vue'
 import TaskControlBar from '@/components/task/TaskControlBar.vue'
 import GameAccountRunTable from '@/components/task/GameAccountRunTable.vue'
@@ -320,19 +325,27 @@ const handleResume = async () => {
 }
 
 const handleCancel = async () => {
-  await ElMessageBox.confirm('确定取消该任务？', '确认')
-  await taskApi.cancel(taskId.value)
-  ElMessage.success('已取消')
+  try {
+    await confirmCancelPendingTask()
+    await taskApi.cancel(taskId.value)
+    ElMessage.success('任务已取消')
+  } catch (error) {
+    if (!isConfirmDismissed(error)) {
+      ElMessage.error('取消失败')
+    }
+  }
 }
 
 const handleTerminate = async () => {
-  await ElMessageBox.confirm(
-    '终止将停止任务并关闭串流窗口，确定继续？',
-    '终止任务',
-    { type: 'warning' }
-  )
-  await taskApi.terminate(taskId.value)
-  ElMessage.success('任务已终止，窗口将关闭')
+  try {
+    await confirmTerminateStreamingTask()
+    await taskApi.terminate(taskId.value)
+    ElMessage.success('任务已终止，串流窗口将关闭')
+  } catch (error) {
+    if (!isConfirmDismissed(error)) {
+      ElMessage.error('终止失败')
+    }
+  }
 }
 
 const handleStartAutomation = async (gameActionType) => {

@@ -38,6 +38,7 @@ from ..runtime.task_control_handler import TaskControlHandler  # noqa: F401 — 
 from ..runtime.input_focus import InputFocusManager
 from ..runtime.phase_fsm import SessionPhase
 from ..core.config import config
+from ..core.concurrency_limits import resolve_concurrency_limit
 from ..api.platform_api_client import PlatformApiClient
 
 _AGENT_CONFIG_PATH = str(
@@ -88,9 +89,11 @@ class AutomationScheduler:
         - agent_secret: Agent Secret（用于HTTP认证）
         """
         self.logger = get_logger('automation_scheduler')
-        self._max_concurrent = max_concurrent_tasks or int(
-            config.get("task.max_concurrent", 10)
-        )
+        if max_concurrent_tasks is not None:
+            raw_limit = max_concurrent_tasks
+        else:
+            raw_limit = config.get("task.max_concurrent", 0)
+        self._max_concurrent = resolve_concurrency_limit(raw_limit)
         self._semaphore = asyncio.Semaphore(self._max_concurrent)
 
         self._running_tasks: Dict[str, asyncio.Task] = {}
@@ -287,8 +290,15 @@ class AutomationScheduler:
         context.pause_event = asyncio.Event()
         context.pause_event.set()
 
+        close_terminates = bool(config.get("window.close_terminates_task", True))
+
         def _on_window_close() -> None:
-            asyncio.create_task(self.close_display_window(task_id))
+            if close_terminates:
+                asyncio.create_task(
+                    self._handle_user_window_close_request(task_id)
+                )
+            else:
+                asyncio.create_task(self.close_display_window(task_id))
 
         context.window_close_callback = _on_window_close
 
@@ -584,6 +594,54 @@ class AutomationScheduler:
     async def stop_task(self, task_id: str) -> bool:
         """停止任务并释放串流/窗口资源。"""
         return await self.force_terminate_task(task_id)
+
+    async def _handle_user_window_close_request(self, task_id: str) -> None:
+        """用户点关窗：二次确认后终止串流任务并同步平台。"""
+        context = self._task_contexts.get(task_id)
+        if context and getattr(context, "_user_close_terminating", False):
+            return
+
+        from ..windows.sdl_window import confirm_window_close
+
+        title = str(config.get("window.close_confirm_title", "结束串流"))
+        message = str(
+            config.get(
+                "window.close_confirm_message",
+                "关闭窗口将结束串流任务和自动化，是否继续？",
+            )
+        )
+        confirmed = await asyncio.to_thread(confirm_window_close, title, message)
+        if not confirmed:
+            self.logger.info("用户取消关窗，任务 %s 继续运行", task_id)
+            return
+
+        await self._terminate_from_user_window_close(task_id)
+
+    async def _terminate_from_user_window_close(self, task_id: str) -> None:
+        """关窗确认后：上报 CANCELLED → 本地终止串流与自动化。"""
+        context = self._task_contexts.get(task_id)
+        if context:
+            if getattr(context, "_user_close_terminating", False):
+                return
+            context._user_close_terminating = True
+
+        cancel_message = "用户关闭串流窗口，任务已结束"
+        try:
+            await self._platform_client.report_progress(
+                task_id,
+                "SESSION",
+                "CANCELLED",
+                cancel_message,
+                reason="user_closed_window",
+                windowState="hidden",
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "关窗终止任务：平台上报失败 task=%s: %s", task_id, exc
+            )
+
+        await self.force_terminate_task(task_id)
+        self.logger.info("用户关窗已终止任务 %s（串流与自动化已结束）", task_id)
 
     async def close_display_window(self, task_id: str) -> bool:
         """仅关闭 SDL 显示；保持串流与自动化运行。"""

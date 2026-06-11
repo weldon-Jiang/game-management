@@ -16,7 +16,7 @@ def _load_window_settings() -> Dict[str, Any]:
     """读取 agent.yaml window.* 与 close_terminates_task 映射。"""
     from ..core.config import config as app_config
 
-    close_terminates = bool(app_config.get("window.close_terminates_task", False))
+    close_terminates = bool(app_config.get("window.close_terminates_task", True))
     title_tpl = str(app_config.get("window.title_template", "{email}"))
     return {
         "width": int(app_config.get("window.default_width", 1280)),
@@ -24,6 +24,16 @@ def _load_window_settings() -> Dict[str, Any]:
         "display_fps_max": float(app_config.get("window.display_fps_max", 30)),
         "fit_aspect": bool(app_config.get("window.fit_aspect", True)),
         "hide_on_close": not close_terminates,
+        "close_terminates_task": close_terminates,
+        "close_confirm_title": str(
+            app_config.get("window.close_confirm_title", "结束串流")
+        ),
+        "close_confirm_message": str(
+            app_config.get(
+                "window.close_confirm_message",
+                "关闭窗口将结束串流任务和自动化，是否继续？",
+            )
+        ),
         "title_template": title_tpl,
     }
 
@@ -141,7 +151,7 @@ async def _stop_sdl_display_pump(context: AgentTaskContext) -> None:
 
 
 def _wire_sdl_close_handler(context: AgentTaskContext) -> None:
-    """将标题栏关闭绑定到 window_close_callback（仅显示层）。"""
+    """将标题栏关闭绑定到 window_close_callback（终止任务或仅隐藏显示）。"""
     sdl = context.sdl_window
     if not sdl:
         return

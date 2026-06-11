@@ -64,7 +64,7 @@
 
 <script setup>
 /**
- * 任务控制条：pause/resume/cancel/terminate、窗口 show/hide/focus、重连串流、启动 Step4。
+ * 任务控制条：pause/resume/cancel（仅 pending）/terminate（running+）、窗口、重连、启动 Step4。
  * 按钮可见性由 taskStatus + sessionPhase 联合判定（见下方 computed 注释）。
  */
 import { computed, ref } from 'vue'
@@ -99,12 +99,12 @@ const isAutomating = computed(
   () => !isTerminal.value && props.sessionPhase === 'automating'
 )
 
-// cancel 保留“按任务语义取消”，terminate 是强制终止；终态任务不再显示控制入口。
-const canCancel = computed(
-  () => props.taskStatus === 'pending' || props.taskStatus === 'running'
-)
+// pending 仅「取消」；running 及后续串流阶段仅「终止」，避免两按钮同效造成误解。
+const canCancel = computed(() => props.taskStatus === 'pending')
 
-const canTerminate = computed(() => !isTerminal.value)
+const canTerminate = computed(
+  () => !isTerminal.value && props.taskStatus !== 'pending'
+)
 
 const canShowWindow = computed(() => {
   if (isTerminal.value) return false

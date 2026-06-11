@@ -636,6 +636,8 @@ class XbliveAuthenticator:
         return E.ERRXS_XHOME_QUERY_CONSOLE
 
     async def xal_redirect_url_web(self) -> int:
+        from ..browser_login_controller import BrowserLoginController
+
         web = OAuthWebLogin(
             username=self.username,
             password=self.password,
@@ -644,7 +646,9 @@ class XbliveAuthenticator:
             redirect_uri=C.REDIRECT_URI,
             headless=self.web_headless,
         )
-        location, errno = await web.run()
+        controller = BrowserLoginController.get_instance()
+        async with controller.acquire_context():
+            location, errno = await web.run()
         if errno != E.ERRXS_OK or not location:
             return errno
         self.location = location

@@ -327,10 +327,26 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
 
     private void handleCancelledStatus(Task task, String taskId, String message,
                                         Map<String, Object> response) {
+        if ("cancelled".equals(task.getStatus())) {
+            response.put("action", "STOP");
+            log.info("任务已取消，忽略重复 CANCELLED 回调 - TaskID: {}", taskId);
+            return;
+        }
+
         task.setStatus("cancelled");
         task.setStepStatus("CANCELLED");
+        task.setSessionPhase("closed");
+        task.setWindowVisible(false);
+        task.setGameActionPending(false);
+        task.setCompletedTime(LocalDateTime.now());
         if (message != null) {
             task.setProgressMessage(message);
+            task.setErrorMessage(null);
+        }
+
+        var session = streamingSessionService.findByTaskId(taskId);
+        if (session != null) {
+            streamingSessionService.closeSession(session.getId(), "closed");
         }
 
         clearStreamingAccountBinding(task);
@@ -338,7 +354,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         taskMapper.updateById(task);
 
         response.put("action", "STOP");
-        log.info("任务取消 - TaskID: {}", taskId);
+        log.info("任务取消 - TaskID: {}, Message: {}", taskId, message);
     }
 
     private void updateMetrics(String taskId, String gameAccountId, Map<String, Object> metrics) {

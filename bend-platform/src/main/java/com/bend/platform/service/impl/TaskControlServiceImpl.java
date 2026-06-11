@@ -235,8 +235,28 @@ public class TaskControlServiceImpl implements TaskControlService {
         } catch (Exception e) {
             task.setParams("{}");
         }
-        taskMapper.updateById(task);
-        return task;
+        Task fresh = taskMapper.selectById(task.getId());
+        if (fresh == null) {
+            throw new BusinessException(404, "复用任务不存在");
+        }
+        fresh.setStatus(task.getStatus());
+        fresh.setErrorMessage(task.getErrorMessage());
+        fresh.setResult(task.getResult());
+        fresh.setGameActionType(task.getGameActionType());
+        fresh.setGameActionPending(task.getGameActionPending());
+        fresh.setSessionPhase(task.getSessionPhase());
+        fresh.setWindowVisible(task.getWindowVisible());
+        fresh.setPauseMode(task.getPauseMode());
+        fresh.setProgressMessage(task.getProgressMessage());
+        fresh.setCurrentStep(task.getCurrentStep());
+        fresh.setStepStatus(task.getStepStatus());
+        fresh.setCompletedTime(task.getCompletedTime());
+        fresh.setStartedTime(task.getStartedTime());
+        fresh.setXboxHostId(task.getXboxHostId());
+        fresh.setDescription(task.getDescription());
+        fresh.setParams(task.getParams());
+        taskMapper.updateById(fresh);
+        return fresh;
     }
 
     private void markStreamingAccountsBusy(

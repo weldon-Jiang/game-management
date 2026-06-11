@@ -6,7 +6,7 @@ import asyncio
 import json
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 
@@ -137,7 +137,9 @@ class GssvWebRtcSession:
         self._input_channel = None
         self._control_channel = None
         self._message_channel = None
-        self._local_candidate: Optional[str] = None
+        self._gathered_local_candidates: List[str] = []
+        self._remote_ice_seen: Set[str] = set()
+        self._remote_ice_complete = False
         self._ready = False
         self._input_ready = False
         self._video_task: Optional[asyncio.Task] = None
@@ -213,10 +215,17 @@ class GssvWebRtcSession:
                 loop = asyncio.get_event_loop()
                 self._video_task = loop.create_task(self._consume_video(track))
 
+        self._gathered_local_candidates = []
+        self._remote_ice_seen = set()
+        self._remote_ice_complete = False
+
         @self._pc.on("icecandidate")
         def on_ice_candidate(event):
-            if event.candidate and not self._local_candidate:
-                self._local_candidate = event.candidate.to_sdp()
+            if not event.candidate:
+                return
+            sdp_line = event.candidate.to_sdp()
+            if sdp_line not in self._gathered_local_candidates:
+                self._gathered_local_candidates.append(sdp_line)
 
         self._bind_message_channel()
         self._bind_input_channel()
@@ -230,21 +239,27 @@ class GssvWebRtcSession:
             RTCSessionDescription(sdp=answer_sdp, type="answer")
         )
 
-        if not self._local_candidate and self._pc.localDescription:
-            self._local_candidate = self._extract_first_candidate(
-                self._pc.localDescription.sdp
+        if self._pc.connectionState not in ("connected", "completed"):
+            local_candidates = self._collect_local_candidates()
+            self.logger.info(
+                "ICE gathering 完成，本地 candidate 数量=%d",
+                len(local_candidates),
             )
-        if self._local_candidate and self._pc.connectionState not in ("connected", "completed"):
-            try:
-                await asyncio.wait_for(
-                    self._exchange_ice(self._local_candidate),
-                    timeout=float(config.get("gssv.cloud_ice_exchange_timeout_sec", 20)),
-                )
-            except (asyncio.TimeoutError, RuntimeError) as exc:
-                self.logger.warning(
-                    "HTTP ICE 交换未完成（可能已通过 SDP 内联 candidate 连通）: %s",
-                    exc,
-                )
+            if local_candidates:
+                try:
+                    await asyncio.wait_for(
+                        self._run_ice_exchange(local_candidates),
+                        timeout=float(
+                            config.get("gssv.cloud_ice_exchange_timeout_sec", 30)
+                        ),
+                    )
+                except (asyncio.TimeoutError, RuntimeError) as exc:
+                    self.logger.warning(
+                        "HTTP ICE 交换未完成（可能已通过 SDP 内联 candidate 连通）: %s",
+                        exc,
+                    )
+            else:
+                self.logger.warning("无本地 ICE candidate，跳过 HTTP ICE 交换")
 
         await self._wait_connection_state(timeout=25.0)
         await self._wait_input_ready(timeout=15.0)
@@ -340,12 +355,30 @@ class GssvWebRtcSession:
         except asyncio.TimeoutError:
             self.logger.warning("ICE gathering 超时，继续 SDP 交换")
 
+    def _collect_local_candidates(self) -> List[str]:
+        """合并 trickle 事件与 local SDP 中的全部本地 candidate（去重保序）。"""
+        seen: Set[str] = set()
+        ordered: List[str] = []
+        for raw in self._gathered_local_candidates:
+            line = _normalize_candidate_line(raw)
+            if line not in seen:
+                seen.add(line)
+                ordered.append(line)
+        if self._pc and self._pc.localDescription:
+            for raw in self._extract_all_candidates(self._pc.localDescription.sdp):
+                line = _normalize_candidate_line(raw)
+                if line not in seen:
+                    seen.add(line)
+                    ordered.append(line)
+        return ordered
+
     @staticmethod
-    def _extract_first_candidate(sdp: str) -> Optional[str]:
+    def _extract_all_candidates(sdp: str) -> List[str]:
+        results: List[str] = []
         for line in (sdp or "").splitlines():
             if "a=candidate:" in line:
-                return line.split("a=", 1)[1]
-        return None
+                results.append(line.split("a=", 1)[1])
+        return results
 
     async def _exchange_sdp(self, offer_sdp: str) -> str:
         url = self._endpoints.sdp(self._play_ctx.session_path)
@@ -393,77 +426,211 @@ class GssvWebRtcSession:
             text = text.replace("\n", "\r\n")
         return text
 
-    async def _exchange_ice(self, local_candidate: str) -> None:
+    async def _post_local_ice_candidate(self, candidate_line: str) -> None:
+        """向 GSSV 上报单条本地 ICE candidate（含 end-of-candidates）。"""
         url = self._endpoints.ice(self._play_ctx.session_path)
-        candidate_line = _normalize_candidate_line(local_candidate)
         body = {"messageType": "iceCandidate", "candidate": candidate_line}
         async with await self._client.post(url, body, timeout=30) as resp:
+            text = await resp.text()
             if resp.status not in (200, 202, 204):
-                text = await resp.text()
-                raise RuntimeError(f"GSSV ICE POST failed: HTTP {resp.status} {text[:300]}")
+                raise RuntimeError(
+                    f"GSSV ICE POST failed: HTTP {resp.status} {text[:300]}"
+                )
+            if text:
+                await self._apply_remote_ice(text)
 
-        deadline = time.monotonic() + 30.0
-        while time.monotonic() < deadline:
+    async def _run_ice_exchange(self, local_candidates: List[str]) -> None:
+        """
+        完整 HTTP ICE 交换：上报全部本地 candidate → 轮询远端 trickle candidate。
+
+        GSSV answer SDP 使用 ice-options:trickle 且 c=0.0.0.0，必须双向补 candidate。
+        """
+        url = self._endpoints.ice(self._play_ctx.session_path)
+        remote_applied = 0
+
+        for candidate_line in local_candidates:
+            self.logger.info("上报本地 ICE candidate: %s", candidate_line[:120])
+            await self._post_local_ice_candidate(candidate_line)
+
+        self.logger.info("上报本地 end-of-candidates")
+        await self._post_local_ice_candidate("end-of-candidates")
+
+        poll_deadline = time.monotonic() + float(
+            config.get("gssv.cloud_ice_poll_sec", 25)
+        )
+        while time.monotonic() < poll_deadline:
+            if self._pc and self._pc.connectionState in ("connected", "completed"):
+                self.logger.info(
+                    "HTTP ICE 轮询期间 WebRTC 已连通 (state=%s)",
+                    self._pc.connectionState,
+                )
+                return
+            if self._remote_ice_complete and remote_applied > 0:
+                self.logger.info(
+                    "已收到远端 end-of-candidates 且应用 %d 条 candidate",
+                    remote_applied,
+                )
+                return
+
             async with await self._client.get(url, timeout=30) as resp:
                 text = await resp.text()
                 if resp.status in (202, 204):
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(0.5)
                     continue
                 if resp.status != 200:
-                    raise RuntimeError(f"GSSV ICE GET failed: HTTP {resp.status} {text[:300]}")
-                if await self._apply_remote_ice(text):
+                    raise RuntimeError(
+                        f"GSSV ICE GET failed: HTTP {resp.status} {text[:300]}"
+                    )
+                if not text:
+                    self.logger.debug("GSSV ICE GET 200 但 body 为空")
+                    await asyncio.sleep(0.5)
+                    continue
+                applied = await self._apply_remote_ice(text)
+                remote_applied += applied
+                if self._remote_ice_complete and remote_applied > 0:
                     return
-            await asyncio.sleep(1.0)
-        raise TimeoutError("GSSV ICE 远端 candidate 等待超时")
+            await asyncio.sleep(0.5)
 
-    async def _apply_remote_ice(self, response_text: str) -> bool:
+        if remote_applied == 0:
+            raise TimeoutError("GSSV ICE 远端 candidate 等待超时（未收到可解析 candidate）")
+        self.logger.warning(
+            "GSSV ICE 轮询超时，但已应用 %d 条远端 candidate，继续连接等待",
+            remote_applied,
+        )
+
+    @staticmethod
+    def _parse_ice_response_items(response_text: str) -> List[Dict[str, Any]]:
+        """从 GSSV ICE 响应提取 candidate 条目（兼容 JSON / 转义嵌套）。"""
+        text = (response_text or "").strip()
+        if not text or '"candidate"' not in text and '\\"candidate\\"' not in text:
+            return []
+
+        items: List[Dict[str, Any]] = []
+
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict):
+                exchange = _parse_exchange_response(data)
+            else:
+                exchange = data
+            if isinstance(exchange, list):
+                for element in exchange:
+                    if isinstance(element, dict):
+                        items.append(element)
+                    elif isinstance(element, str):
+                        try:
+                            parsed = json.loads(element)
+                            if isinstance(parsed, dict):
+                                items.append(parsed)
+                        except json.JSONDecodeError:
+                            pass
+            elif isinstance(exchange, dict):
+                items.append(exchange)
+            if items:
+                return items
+        except json.JSONDecodeError:
+            pass
+
+        marker = '{\\"candidate\\"'
+        if marker in text:
+            offset = 0
+            while True:
+                start = text.find(marker, offset)
+                if start < 0:
+                    break
+                end = text.find("}", start) + 1
+                if end <= start:
+                    break
+                chunk = text[start:end].replace("\\", "")
+                try:
+                    item = json.loads(chunk)
+                    if isinstance(item, dict):
+                        items.append(item)
+                except json.JSONDecodeError:
+                    pass
+                offset = end
+        return items
+
+    async def _apply_remote_ice(self, response_text: str) -> int:
+        """解析并应用 GSSV 返回的远端 ICE candidate，返回本次新应用条数。"""
         if not self._pc:
-            return False
-        applied = False
-        if '"candidate"' in response_text:
-            marker = '{\\"candidate\\"'
-            alt = '{"candidate"'
-            parts = []
-            if marker in response_text:
-                offset = 0
-                while True:
-                    start = response_text.find(marker, offset)
-                    if start < 0:
-                        break
-                    end = response_text.find("}", start) + 1
-                    if end <= start:
-                        break
-                    chunk = response_text[start:end].replace("\\", "")
-                    parts.append(chunk)
-                    offset = end
-            elif alt in response_text:
-                try:
-                    data = json.loads(response_text)
-                    exchange = _parse_exchange_response(data)
-                    if isinstance(exchange, list):
-                        parts = [json.dumps(item) for item in exchange]
-                    elif isinstance(exchange, dict):
-                        parts = [json.dumps(exchange)]
-                except json.JSONDecodeError:
-                    parts = []
-            for part in parts:
-                try:
-                    item = json.loads(part)
-                except json.JSONDecodeError:
-                    continue
-                cand = str(item.get("candidate", ""))
-                if not cand or "end-of-candidates" in cand:
-                    applied = True
-                    continue
-                line = _normalize_candidate_line(cand)
-                try:
-                    ice = candidate_from_sdp(line)
-                    await self._pc.addIceCandidate(ice)
-                    applied = True
-                    self.logger.info("已添加远端 ICE candidate")
-                except Exception as exc:
-                    self.logger.warning("添加 ICE candidate 失败: %s", exc)
+            return 0
+
+        items = self._parse_ice_response_items(response_text)
+        if not items and response_text.strip():
+            preview = response_text.strip().replace("\n", " ")[:240]
+            self.logger.debug("GSSV ICE 响应未能解析 candidate: %s", preview)
+
+        applied = 0
+        for item in items:
+            cand = str(item.get("candidate", "")).strip()
+            if not cand:
+                continue
+            if cand in self._remote_ice_seen:
+                continue
+            self._remote_ice_seen.add(cand)
+
+            if "end-of-candidates" in cand:
+                self._remote_ice_complete = True
+                self.logger.info("收到远端 end-of-candidates")
+                applied += 1
+                continue
+
+            ice = self._build_remote_ice_candidate(item)
+            if ice is None:
+                continue
+            try:
+                await self._pc.addIceCandidate(ice)
+                applied += 1
+                self.logger.info(
+                    "已添加远端 ICE candidate (mid=%s idx=%s): %s",
+                    ice.sdpMid,
+                    ice.sdpMLineIndex,
+                    _normalize_candidate_line(cand)[:120],
+                )
+            except Exception as exc:
+                self.logger.warning(
+                    "添加 ICE candidate 失败 (%s): %s",
+                    _normalize_candidate_line(cand)[:80],
+                    exc,
+                )
         return applied
+
+    def _build_remote_ice_candidate(
+        self, item: Dict[str, Any]
+    ) -> Optional[RTCIceCandidate]:
+        """从 GSSV ICE 条目构造 aiortc candidate（补全 sdpMid / sdpMLineIndex）。"""
+        cand = str(item.get("candidate", "")).strip()
+        if not cand or "end-of-candidates" in cand:
+            return None
+
+        line = _normalize_candidate_line(cand)
+        try:
+            ice = candidate_from_sdp(line)
+        except Exception as exc:
+            self.logger.warning("解析远端 candidate 失败 (%s): %s", line[:80], exc)
+            return None
+
+        sdp_mid = item.get("sdpMid")
+        if sdp_mid is None and item.get("id") is not None:
+            sdp_mid = item.get("id")
+
+        mline_index = item.get("sdpMLineIndex")
+        if mline_index is None and item.get("label") is not None:
+            mline_index = item.get("label")
+
+        if sdp_mid is None and mline_index is None:
+            # GSSV trickle 常只给 candidate 行；BUNDLE 会话默认挂到 video (mid=0)
+            sdp_mid = "0"
+            mline_index = 0
+
+        if sdp_mid is not None:
+            ice.sdpMid = str(sdp_mid)
+        if mline_index is not None:
+            ice.sdpMLineIndex = int(mline_index)
+        elif ice.sdpMid is None:
+            ice.sdpMLineIndex = 0
+        return ice
 
     async def _wait_connection_state(self, timeout: float) -> None:
         if not self._pc:

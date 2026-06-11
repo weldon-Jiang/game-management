@@ -16,6 +16,7 @@ import time
 
 from ..core.logger import get_logger
 from ..core.config import config
+from ..core.concurrency_limits import resolve_concurrency_limit
 
 
 class TaskStatus(Enum):
@@ -635,9 +636,9 @@ async def handle_scene_detection(params: Dict[str, Any], check_cancel: Callable)
 # 全局任务执行器实例
 # =============================================
 
-# 从配置文件读取并发参数
-max_concurrent = config.get('task.max_concurrent', 100)
-max_xbox_sessions = config.get('task.max_xbox_sessions', 100)
+# 从配置文件读取并发参数（0=压测不限制）
+max_concurrent = resolve_concurrency_limit(config.get('task.max_concurrent', 0))
+max_xbox_sessions = resolve_concurrency_limit(config.get('task.max_xbox_sessions', 0))
 
 # 创建全局任务执行器实例
 task_executor = HighConcurrencyTaskExecutor(

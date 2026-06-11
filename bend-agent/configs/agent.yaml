@@ -93,6 +93,8 @@ automation:
 # ----------------------------------------------
 auth:
   provider: xblive              # 生产固定 xblive（SISU）；MSAL 仅 scripts/debug
+  # 唯一保留的并发上限：Playwright 浏览器登录（压测后按实测调整）
+  browser_login_max_concurrent: 3
   device_code_timeout: 300      # MSAL 设备码认证总超时（秒）
   xblive_web_headless: true      # xblive Playwright 回退是否无头
   xhome_token_ttl_sec: 14340
@@ -132,9 +134,10 @@ vision:
 # 任务执行器配置（高并发支持）
 # ----------------------------------------------
 task:
-  max_concurrent: 10
-  max_concurrent_gpu: 3
-  max_xbox_sessions: 100
+  # 0=不限制，压测后按实测写入正整数
+  max_concurrent: 0
+  max_concurrent_gpu: 0
+  max_xbox_sessions: 0
   result_ttl: 3600
   cleanup_interval: 300
 
@@ -159,4 +162,6 @@ window:
   default_mode: headless       # Phase A 无头；focus 时升 full
   display_fps_max: 30           # 对齐 streaming XsrpConfig.DECODE_VIDEO_FPS
   title_template: "{email}"     # 对齐 Worker.window_tile
-  close_terminates_task: false  # 关窗 hide，不结束任务（streaming 一致）
+  close_terminates_task: true   # 关窗确认后终止串流+自动化并上报平台
+  close_confirm_title: "结束串流"
+  close_confirm_message: "关闭窗口将结束串流任务和自动化，是否继续？"

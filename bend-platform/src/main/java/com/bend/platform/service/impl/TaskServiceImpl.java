@@ -17,6 +17,7 @@ import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountService;
+import com.bend.platform.service.StreamingSessionService;
 import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.service.TaskService;
 import com.bend.platform.service.TaskStateMachine;
@@ -85,6 +86,9 @@ public class TaskServiceImpl implements TaskService {
 
     @Autowired
     private MerchantService merchantService;
+
+    @Autowired
+    private StreamingSessionService streamingSessionService;
 
     /**
      * 创建任务
@@ -911,13 +915,19 @@ public class TaskServiceImpl implements TaskService {
         List<Task> runningTasks = taskMapper.selectList(wrapper);
 
         for (Task task : runningTasks) {
-            stateMachine.validateTransition(task, TaskStatus.PENDING);
-            task.setStatus("pending");
+            if (!stateMachine.canTransition(task, TaskStatus.CANCELLED)) {
+                log.warn("Agent离线：任务无法转为 cancelled，跳过 - taskId: {}, status: {}",
+                        task.getId(), task.getStatus());
+                continue;
+            }
+            task.setStatus(TaskStatus.CANCELLED.getCode());
+            task.setSessionPhase("closed");
+            task.setCompletedTime(LocalDateTime.now());
             task.setTargetAgentId(null);
             task.setAssignedTime(null);
-            task.setErrorMessage("Agent离线，任务自动重置");
+            task.setErrorMessage("Agent离线，任务已取消");
             taskMapper.updateById(task);
-            log.warn("任务因Agent离线被重置 - taskId: {}, agentId: {}", task.getId(), agentId);
+            log.warn("任务因Agent离线被取消 - taskId: {}, agentId: {}", task.getId(), agentId);
 
             // 重置流媒体账号状态
             String streamingAccountId = task.getStreamingAccountId();
@@ -970,11 +980,23 @@ public class TaskServiceImpl implements TaskService {
         log.info("Agent {} 上线，开始清理 {} 个未完成任务", agentId, incompleteTasks.size());
 
         for (Task task : incompleteTasks) {
-            task.setStatus("failed");
+            if (!stateMachine.canTransition(task, TaskStatus.FAILED)) {
+                log.warn("Agent上线清理：任务状态无法转为 failed - taskId: {}, status: {}",
+                        task.getId(), task.getStatus());
+                continue;
+            }
+            String originalStatus = task.getStatus();
+            task.setStatus(TaskStatus.FAILED.getCode());
+            task.setSessionPhase("closed");
             task.setErrorMessage("Agent重新上线，任务已清理");
             task.setCompletedTime(LocalDateTime.now());
             taskMapper.updateById(task);
-            log.info("清理任务 - TaskID: {}, 原状态: {}", task.getId(), task.getStatus());
+            log.info("清理任务 - TaskID: {}, 原状态: {}", task.getId(), originalStatus);
+
+            var session = streamingSessionService.findByTaskId(task.getId());
+            if (session != null) {
+                streamingSessionService.closeSession(session.getId(), "agent_reconnect_cleanup");
+            }
 
             LambdaQueryWrapper<TaskGameAccountStatus> statusWrapper = new LambdaQueryWrapper<>();
             statusWrapper.eq(TaskGameAccountStatus::getTaskId, task.getId());

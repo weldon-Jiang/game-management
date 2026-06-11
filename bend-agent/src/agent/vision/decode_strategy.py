@@ -1,9 +1,12 @@
 """
-GPU 优先解码；并发超限时回退 CPU。
+GPU 优先解码；可选并发上限，超出时 auto 模式回退 CPU。
+
+task.max_concurrent_gpu 语义：
+- 0 或未配置：不限制 GPU 路数（压测默认）
+- >0：最多 N 路 GPU，满额后 auto 降级 CPU
 """
 
 import threading
-from typing import Optional
 
 from ..core.config import config
 from ..core.logger import get_logger
@@ -14,7 +17,14 @@ _lock = threading.Lock()
 
 
 def get_max_gpu_decodes() -> int:
-    return int(config.get("task.max_concurrent_gpu", config.get("task.max_concurrent", 3)))
+    """返回 GPU 解码槽上限；0 表示不限制。"""
+    raw = config.get("task.max_concurrent_gpu", 0)
+    if raw is None:
+        return 0
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 0
 
 
 def resolve_decode_mode(requested: str = "auto") -> str:
@@ -23,7 +33,7 @@ def resolve_decode_mode(requested: str = "auto") -> str:
 
     - gpu: 强制 GPU
     - cpu: 强制 CPU
-    - auto: 未超 GPU 并发上限时用 GPU，否则 CPU
+    - auto: 未超 GPU 并发上限时用 GPU，否则 CPU（上限为 0 时不降级）
     """
     global _active_gpu_decodes
     requested = (requested or "auto").lower()
@@ -35,13 +45,19 @@ def resolve_decode_mode(requested: str = "auto") -> str:
 
     max_gpu = get_max_gpu_decodes()
     with _lock:
-        if _active_gpu_decodes < max_gpu:
+        if max_gpu <= 0 or _active_gpu_decodes < max_gpu:
             _active_gpu_decodes += 1
-            _logger.info(
-                "Decode mode: gpu (%s/%s active)",
-                _active_gpu_decodes,
-                max_gpu,
-            )
+            if max_gpu <= 0:
+                _logger.info(
+                    "Decode mode: gpu (%s active, unlimited)",
+                    _active_gpu_decodes,
+                )
+            else:
+                _logger.info(
+                    "Decode mode: gpu (%s/%s active)",
+                    _active_gpu_decodes,
+                    max_gpu,
+                )
             return "gpu"
     _logger.info("Decode mode: cpu (GPU slots full %s/%s)", _active_gpu_decodes, max_gpu)
     return "cpu"

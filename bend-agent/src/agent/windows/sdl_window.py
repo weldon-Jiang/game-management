@@ -24,6 +24,7 @@ from enum import Enum
 import numpy as np
 
 from ..core.logger import get_logger
+from ..core.paths import resolve_agent_path
 
 try:
     import pygame
@@ -43,6 +44,27 @@ class SDLWindowState(Enum):
     HIDDEN = "hidden"
     CLOSED = "closed"
     ERROR = "error"
+
+
+def confirm_window_close(title: str, message: str) -> bool:
+    """关窗二次确认（Windows MessageBox；其他平台默认确认）。"""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            MB_YESNO = 0x00000004
+            MB_ICONWARNING = 0x00000030
+            IDYES = 6
+            result = ctypes.windll.user32.MessageBoxW(
+                None,
+                message,
+                title,
+                MB_YESNO | MB_ICONWARNING,
+            )
+            return result == IDYES
+        except Exception:
+            return False
+    return True
 
 
 @dataclass
@@ -136,6 +158,7 @@ class SDLStreamWindow:
 
             self._apply_window_constraints()
             self._center_on_screen()
+            self._apply_window_icon()
 
             self._running = True
             self._state = SDLWindowState.READY
@@ -166,6 +189,7 @@ class SDLStreamWindow:
                 )
                 self._apply_window_constraints()
                 self._center_on_screen()
+                self._apply_window_icon()
                 self._running = True
                 self._state = SDLWindowState.READY
                 self.logger.info(
@@ -327,6 +351,52 @@ class SDLStreamWindow:
             user32.SetWindowPos(hwnd, 0, x, y, 0, 0, 0x0001 | 0x0004)  # NOSIZE | NOZORDER
         except Exception as e:
             self.logger.debug(f"窗口居中失败: {e}")
+
+    def _apply_window_icon(self) -> None:
+        """设置标题栏与任务栏图标（优先 assets/window_icon.*）。"""
+        if not PYGAME_AVAILABLE:
+            return
+
+        png_path = resolve_agent_path("assets/window_icon.png")
+        ico_path = resolve_agent_path("assets/window_icon.ico")
+
+        try:
+            if png_path.is_file():
+                icon_surface = pygame.image.load(str(png_path))
+                pygame.display.set_icon(icon_surface)
+        except Exception as exc:
+            self.logger.debug("pygame window icon failed: %s", exc)
+
+        if sys.platform != "win32" or not ico_path.is_file():
+            return
+
+        try:
+            import ctypes
+
+            hwnd = self._get_hwnd()
+            if not hwnd:
+                return
+
+            WM_SETICON = 0x0080
+            ICON_SMALL = 0
+            ICON_BIG = 1
+            IMAGE_ICON = 1
+            LR_LOADFROMFILE = 0x0010
+            user32 = ctypes.windll.user32
+
+            for icon_id, width, height in ((ICON_SMALL, 16, 16), (ICON_BIG, 32, 32)):
+                hicon = user32.LoadImageW(
+                    None,
+                    str(ico_path),
+                    IMAGE_ICON,
+                    width,
+                    height,
+                    LR_LOADFROMFILE,
+                )
+                if hicon:
+                    user32.SendMessageW(hwnd, WM_SETICON, icon_id, hicon)
+        except Exception as exc:
+            self.logger.debug("win32 window icon failed: %s", exc)
 
     def set_display_fps_max(self, fps: float) -> None:
         """显示刷新上限（对齐 streaming DECODE_VIDEO_FPS，默认 30）。"""
@@ -502,6 +572,7 @@ class SDLStreamWindow:
             except Exception as e:
                 self.logger.warning(f"显示窗口失败: {e}")
         self._apply_window_constraints()
+        self._apply_window_icon()
         self._bring_to_front()
         self._visible = True
         if self._running:
@@ -525,7 +596,7 @@ class SDLStreamWindow:
         """
         处理pygame事件。
 
-        关闭按钮默认隐藏窗口而非退出，避免中断自动化。
+        关闭按钮：hide_on_close 时仅隐藏；否则由 close_callback 处理（可终止任务）。
         """
         if not PYGAME_AVAILABLE:
             return False

@@ -168,13 +168,22 @@
               重试
             </el-button>
             <el-button
-              v-if="row.status === 'running' || row.status === 'pending'"
+              v-if="row.status === 'pending'"
               type="danger"
               link
               size="small"
               @click="handleCancel(row)"
             >
               取消
+            </el-button>
+            <el-button
+              v-if="row.status === 'running'"
+              type="danger"
+              link
+              size="small"
+              @click="handleTerminate(row)"
+            >
+              终止
             </el-button>
             <el-button
               v-if="row.status === 'running' && row.targetAgentId"
@@ -308,6 +317,11 @@ import {
   getSessionPhaseText,
   getSessionPhaseType
 } from '@/utils/constants'
+import {
+  confirmCancelPendingTask,
+  confirmTerminateStreamingTask,
+  isConfirmDismissed
+} from '@/utils/taskControlConfirm'
 
 const router = useRouter()
 const route = useRoute()
@@ -651,10 +665,8 @@ const handleRetry = async (task) => {
 
 const handleCancel = async (task) => {
   try {
-    // 运行中任务走 terminate（TaskControl 控制面）；pending 仍可用 cancel 语义。
-    const res = task.status === 'pending'
-      ? await taskApi.cancel(task.id)
-      : await taskApi.terminate(task.id)
+    await confirmCancelPendingTask()
+    const res = await taskApi.cancel(task.id)
     if (res.code === 0 || res.code === 200) {
       ElMessage.success('任务已取消')
       loadData()
@@ -662,7 +674,26 @@ const handleCancel = async (task) => {
       ElMessage.error(res.message || '取消失败')
     }
   } catch (error) {
-    ElMessage.error('取消失败')
+    if (!isConfirmDismissed(error)) {
+      ElMessage.error('取消失败')
+    }
+  }
+}
+
+const handleTerminate = async (task) => {
+  try {
+    await confirmTerminateStreamingTask()
+    const res = await taskApi.terminate(task.id)
+    if (res.code === 0 || res.code === 200) {
+      ElMessage.success('任务已终止')
+      loadData()
+    } else {
+      ElMessage.error(res.message || '终止失败')
+    }
+  } catch (error) {
+    if (!isConfirmDismissed(error)) {
+      ElMessage.error('终止失败')
+    }
   }
 }
 
