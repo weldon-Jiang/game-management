@@ -2,7 +2,7 @@
 步骤一（xblive 路线）：SISU + Device Token 认证。
 
 产出与 xblive handle_return 一致：gsToken、serverId、playPath、gamerTag。
-旧 MSAL Step1 保留，由 auth.provider 配置切换。
+生产 Step1 入口；legacy MSAL 见 step1_stream_account_login（仅 debug）。
 """
 
 from __future__ import annotations

@@ -59,6 +59,7 @@ fc_server:
   host: "127.0.0.1"
   port: 8080
   prefer_remote_scene: false
+  use_remote_play: false   # 启用 FC PLAY 20Hz 比赛 loop（需 enabled=true）
 
 # ----------------------------------------------
 # 场景检测配置
@@ -91,7 +92,7 @@ automation:
 # 认证配置
 # ----------------------------------------------
 auth:
-  provider: xblive              # xblive（SISU，对齐 xblive）| msal（旧 Device Code）
+  provider: xblive              # 生产固定 xblive（SISU）；MSAL 仅 scripts/debug
   device_code_timeout: 300      # MSAL 设备码认证总超时（秒）
   xblive_web_headless: true      # xblive Playwright 回退是否无头
   xhome_token_ttl_sec: 14340

@@ -591,7 +591,7 @@ class AutomationScheduler:
         if not context:
             return False
 
-        from ..automation.step3_streaming_init import step3_close_display
+        from ..automation.step3_display_helpers import step3_close_display
 
         await step3_close_display(context)
         runtime = self._registry.get(task_id)
@@ -607,7 +607,7 @@ class AutomationScheduler:
             self.logger.warning("ensure_display_window: no context for %s", task_id)
             return False
 
-        from ..automation.step3_streaming_init import step3_ensure_display
+        from ..automation.step3_display_helpers import step3_ensure_display
 
         ok = await step3_ensure_display(context)
         runtime = self._registry.get(task_id)

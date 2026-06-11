@@ -18,7 +18,7 @@ from ..xbox.xsrp_pipeline_diagnostic import pipeline_diagnostic_from_context
 from ..xbox.xsrp_stream_keepalive import start_xsrp_idle_keepalive
 
 # 复用旧 Step3 的窗口/输入/S DL 泵实现，避免重复维护
-from .step3_streaming_init import (
+from .step3_display_helpers import (
     _ensure_controller_protocol,
     _format_window_title,
     _init_gamepad_controller,
@@ -33,10 +33,9 @@ from .step3_streaming_init import (
 
 
 def _build_step3_pipeline_diagnostic(context: AgentTaskContext) -> Dict[str, Any]:
-    diag = pipeline_diagnostic_from_context(context)
-    diag["inputDc"] = "ok" if not getattr(context, "_input_channel_dirty", False) else "fail"
-    if context.sdl_window is not None:
-        diag["display"] = "ok"
+    diag = pipeline_diagnostic_from_context(context, step3_merged=True)
+    if getattr(context, "_input_channel_dirty", False):
+        diag["inputDc"] = "fail"
     return diag
 
 
@@ -96,6 +95,12 @@ async def step3_execute_xsrp_init(
         task_logger.info("xsrp 首帧: %sx%s", frame.width, frame.height)
         stream_logger.info(f"xsrp 首帧: {frame.width}x{frame.height}")
 
+        from ..runtime.stream_runtime import get_or_create_stream_runtime
+
+        stream_runtime = get_or_create_stream_runtime(context)
+        stream_runtime.seed_latest_frame(frame)
+        await stream_runtime.start_long_lived(task_logger)
+
         await _ensure_controller_protocol(context, task_logger, stream_logger)
         _bind_xsrp_input_close_handler(context, task_logger)
 
@@ -137,6 +142,7 @@ async def step3_execute_xsrp_init(
                 "pipelineDiagnostic": _build_step3_pipeline_diagnostic(context),
             },
         )
+        context._step3_init_completed = True
         return Step3Result(success=True, message=success_msg)
 
     except asyncio.CancelledError:
@@ -148,6 +154,15 @@ async def step3_execute_xsrp_init(
         context.update_step_status("step3", TaskStepStatus.FAILED, msg, str(exc))
         await report_progress(context.task_id, "STEP3", "FAILED", msg, streamingStack="xsrp")
         return Step3Result(success=False, error_code="EXCEPTION", message=msg)
+
+
+def is_xsrp_stream_media_ready(context: AgentTaskContext) -> bool:
+    """Step2 链末尾已跑完 Step3 时为 True，open_stream 可跳过重复初始化。"""
+    return bool(
+        getattr(context, "_step3_init_completed", False)
+        and getattr(context, "frame_capture", None) is not None
+        and getattr(context, "xbox_session", None) is not None
+    )
 
 
 def _bind_xsrp_input_close_handler(context: AgentTaskContext, task_logger) -> None:
@@ -165,12 +180,14 @@ def _bind_xsrp_input_close_handler(context: AgentTaskContext, task_logger) -> No
 
 async def _validate_xsrp_stream_readiness(context, task_logger, stream_logger) -> tuple:
     """验证 WebRTC 帧与 DataChannel 输入（无 LAN 重连）。"""
+    from ..runtime.stream_runtime import capture_task_frame
+
     async def _check_frames() -> tuple:
         if context.frame_capture is None:
             return False, "画面捕获器未初始化"
         sizes = []
         for _ in range(3):
-            frame = await context.frame_capture.capture_frame()
+            frame = await capture_task_frame(context, timeout=1.0)
             if frame is None:
                 return False, "连续截帧失败"
             sizes.append((frame.width, frame.height))

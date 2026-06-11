@@ -8,9 +8,11 @@ Bend Agent 自动化模块
 - 实时同步任务状态到平台
 
 模块结构：
-- step1_stream_account_login: 步骤一：串流账号登录
+- step1_xblive_login: 步骤一：串流账号登录（xblive SISU，生产）
+- step1_stream_account_login: legacy MSAL（仅 debug）
 - step2_xsrp: 步骤二：GSSV 云端串流握手
 - step3_xsrp: 步骤三：串流环境初始化（SDL + WebRTC 帧）
+- step3_display_helpers: Step3 SDL/InputPump 辅助
 - step4_game_automation: 步骤四：游戏比赛自动化
 
 作者：技术团队

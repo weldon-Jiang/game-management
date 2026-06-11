@@ -240,7 +240,7 @@ class StreamingAccountTask:
 
     async def _ensure_display_after_stream(self) -> bool:
         try:
-            from ..automation.step3_streaming_init import step3_ensure_display
+            from ..automation.step3_display_helpers import step3_ensure_display
 
             ok = await step3_ensure_display(self.context)
             self.runtime.window_visible = ok
@@ -282,6 +282,8 @@ class StreamingAccountTask:
         "_keyboard_mapper",
         "_gamepad_controller",
         "_sdl_display_task",
+        "_stream_runtime",
+        "_step3_init_completed",
     )
 
     def _sync_media_context(self, media_ctx: AgentTaskContext) -> None:

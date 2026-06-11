@@ -104,6 +104,10 @@ class InputPump:
     async def _run(self) -> None:
         while True:
             try:
+                runtime = getattr(self._context, "_stream_runtime", None)
+                if runtime is not None and not runtime.is_manual_input_allowed():
+                    await asyncio.sleep(self._background_interval)
+                    continue
                 focused = self._focus.should_accept_physical_input(self._task_id)
                 interval = self._focus_interval if focused else self._background_interval
                 signal = self._collect_signal()

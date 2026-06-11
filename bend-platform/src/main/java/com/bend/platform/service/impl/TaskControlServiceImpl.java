@@ -475,7 +475,9 @@ public class TaskControlServiceImpl implements TaskControlService {
                 if (parsed.containsKey("auth")
                         || parsed.containsKey("firstFrame")
                         || parsed.containsKey("gssvPlay")
-                        || parsed.containsKey("webrtc")) {
+                        || parsed.containsKey("webrtc")
+                        || parsed.containsKey("capturePump")
+                        || parsed.containsKey("streamRuntime")) {
                     return parsed;
                 }
             } catch (Exception e) {

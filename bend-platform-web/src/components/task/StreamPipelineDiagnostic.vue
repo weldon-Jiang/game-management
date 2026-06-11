@@ -22,6 +22,7 @@
       <span v-if="extra.decodeMode"> · 解码：{{ extra.decodeMode }}</span>
       <span v-if="extra.firstFrameSize"> · 首帧：{{ extra.firstFrameSize }}</span>
       <span v-if="extra.inputChannelState"> · 输入：{{ extra.inputChannelState }}</span>
+      <span v-if="extra.step3Merged"> · Step2+3：已合并</span>
       <span v-if="legacyLanIp"> · LAN IP：{{ legacyLanIp }}</span>
       <span v-if="extra.rtpPort"> · RTP：{{ extra.rtpPort }}</span>
     </p>
@@ -49,8 +50,11 @@ const CLOUD_STEP_DEFS = [
   { key: 'gssvPlay', label: 'Play 会话' },
   { key: 'webrtc', label: 'WebRTC 握手' },
   { key: 'firstFrame', label: '首帧' },
+  { key: 'capturePump', label: 'Capture 泵' },
   { key: 'inputDc', label: '输入通道' },
-  { key: 'display', label: 'SDL 显示' }
+  { key: 'inputPump', label: 'InputPump' },
+  { key: 'display', label: 'SDL 显示' },
+  { key: 'streamRuntime', label: 'StreamRuntime' }
 ]
 
 /** 历史 LAN SmartGlass 任务 */
@@ -80,7 +84,12 @@ const steps = computed(() => {
 
 const stackHint = computed(() => {
   const stack = extra.value.streamingStack
-  if (stack === 'xsrp') return '串流栈：xblive / GSSV 云端 Remote Play'
+  const merged = extra.value.step3Merged === true || extra.value.step3Merged === 'true'
+  if (stack === 'xsrp') {
+    return merged
+      ? '串流栈：xblive / GSSV 云端（Step2+3 已合并执行）'
+      : '串流栈：xblive / GSSV 云端 Remote Play'
+  }
   if (isLegacyLan.value) return '串流栈：LAN SmartGlass（历史任务）'
   return ''
 })
@@ -102,6 +111,7 @@ const hasExtra = computed(() => {
     || extra.value.decodeMode
     || extra.value.firstFrameSize
     || extra.value.inputChannelState
+    || extra.value.step3Merged
     || legacyLanIp.value
     || extra.value.rtpPort
   )

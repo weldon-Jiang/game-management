@@ -251,9 +251,41 @@ async def discover_and_connect_xsrp(
             host_attempts.append(attempt)
             context._lan_direct = False
             context.assigned_xbox = context.current_xbox
-            success_msg = f"xsrp 串流连接成功: {candidate.name} ({server_id})"
-            context.update_step_status("step2", TaskStepStatus.COMPLETED, success_msg)
+            handshake_msg = f"xsrp WebRTC 握手成功: {candidate.name} ({server_id})"
+            context.update_step_status(
+                "step2", TaskStepStatus.RUNNING, f"{handshake_msg}，正在初始化串流环境...",
+            )
             pipeline = _xsrp_pipeline_diag(context)
+            await report_progress(
+                context.task_id,
+                "STEP2",
+                "RUNNING",
+                handshake_msg,
+                hostAttempts=host_attempts,
+                selectedServerId=server_id,
+                pipelineDiagnostic=pipeline,
+                firstFrameReady=pipeline.get("firstFrame") == "ok",
+                firstFrameSize=pipeline.get("firstFrameSize"),
+                inputChannelState=pipeline.get("inputChannelState"),
+                streamingStack="xsrp",
+            )
+
+            step3_result = await _run_xsrp_step3_after_connect(
+                context, check_cancel, report_progress, task_logger, stream_logger,
+            )
+            if not step3_result.success:
+                await cleanup_xsrp_cloud_attempt(context, task_logger)
+                await release_server_id(context, server_id, task_logger)
+                context.update_step_status("step2", TaskStepStatus.FAILED, step3_result.message)
+                return Step2Result(
+                    success=False,
+                    error_code=step3_result.error_code or "STEP3_FAILED",
+                    message=step3_result.message,
+                )
+
+            success_msg = f"xsrp 串流就绪: {candidate.name} ({server_id})"
+            context.update_step_status("step2", TaskStepStatus.COMPLETED, success_msg)
+            pipeline = _xsrp_pipeline_diag(context, step3_merged=True)
             await report_progress(
                 context.task_id,
                 "STEP2",
@@ -266,6 +298,7 @@ async def discover_and_connect_xsrp(
                 firstFrameSize=pipeline.get("firstFrameSize"),
                 inputChannelState=pipeline.get("inputChannelState"),
                 streamingStack="xsrp",
+                step3Merged=True,
             )
             bind_client = PlatformApiClient()
             try:
@@ -313,6 +346,35 @@ async def discover_and_connect_xsrp(
         streamingStack="xsrp",
     )
     return Step2Result(success=False, error_code="ALL_HOSTS_FAILED", message=fail_msg)
+
+
+async def _run_xsrp_step3_after_connect(
+    context: AgentTaskContext,
+    check_cancel: Callable[[], bool],
+    report_progress: Callable,
+    task_logger,
+    stream_logger,
+):
+    """
+    Step2 握手成功后立即跑 Step3（对齐 streaming OpenStreaming 单链）。
+
+    平台仍分别收到 STEP2/STEP3 进度；SessionPhase.READY 门闩不变。
+    """
+    from ..auth.step3_router import resolve_step3_streaming_init
+    from ..task.task_context import Step3Result
+
+    step3_init = resolve_step3_streaming_init()
+    task_logger.info("xsrp Step2 握手完成，链接执行 Step3 串流环境初始化")
+    stream_logger.info("xsrp Step2→Step3 执行层合并：开始串流环境初始化")
+    result = await step3_init(context, check_cancel, report_progress)
+    if isinstance(result, Step3Result):
+        return result
+    success = bool(getattr(result, "success", False))
+    return Step3Result(
+        success=success,
+        message=getattr(result, "message", ""),
+        error_code=getattr(result, "error_code", None),
+    )
 
 
 def _build_xsrp_candidates(

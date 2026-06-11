@@ -1,5 +1,5 @@
 """
-StreamService — Step3 窗口/解码初始化封装（LAN 串流上下文）。
+StreamService — Step3 窗口/解码初始化封装（经 step3_router → step3_xsrp）。
 """
 
 from dataclasses import dataclass
@@ -27,7 +27,7 @@ class MediaSession:
 
 
 class XHomeStreamService:
-    """保留类名以兼容 StreamingSession；仅 LAN 路径。"""
+    """Step3 媒体层：经 router 调用 xsrp/cloud Step3。"""
 
     def __init__(self):
         self.logger = get_logger("stream_service")
@@ -79,6 +79,19 @@ class XHomeStreamService:
         async def _report(*args, **kwargs):
             if report_progress:
                 await report_progress(*args, **kwargs)
+
+        from ..automation.step3_xsrp import is_xsrp_stream_media_ready
+
+        if is_xsrp_stream_media_ready(context):
+            self.logger.info(
+                "Step3 已在 Step2 链完成 (task=%s)，跳过 open_stream 重复初始化",
+                task_id[:8],
+            )
+            return MediaSession(
+                task_id=task_id,
+                context=context,
+                decode_mode=resolved_mode,
+            )
 
         try:
             result = await step3_streaming_init(

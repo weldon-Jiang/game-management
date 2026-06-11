@@ -45,18 +45,20 @@ bend-agent/
 │       │   ├── platform_api_client.py   # 平台 API 客户端（含认证）
 │       │   ├── registration.py          # 注册激活
 │       │   └── websocket.py             # WebSocket 客户端
-│       ├── auth/             # 认证模块
-│       │   ├── microsoft_auth_msal.py  # Microsoft MSAL 认证（支持Token自动刷新）
-│       │   ├── browser_automation.py   # 浏览器自动化
-│       │   └── browser_login_controller.py  # 浏览器登录控制器
-│       ├── automation/       # 四步骤实现
-│       │   ├── step1_stream_account_login.py
-│       │   ├── step2_xbox_streaming.py
-│       │   ├── step3_streaming_init.py
+│       ├── auth/             # 认证（xblive 默认；MSAL legacy 可选）
+│       │   ├── xblive/             # SISU / OAuth（生产路径）
+│       │   └── step{1,2,3}_router.py
+│       ├── automation/       # 四步骤 + 路由
+│       │   ├── step1_xblive_login.py
+│       │   ├── step2_xsrp.py / step2_router.py
+│       │   ├── step3_xsrp.py
+│       │   ├── step3_streaming_init.py  # SDL/InputPump 共享 helper
 │       │   └── step4_game_automation.py
-│       ├── task/              # 任务调度与编排
+│       ├── orchestration/    # StreamingAccountTask FSM
+│       ├── session/          # StreamingSession 编排
+│       ├── gssv/             # GSSV HTTP + cloud WebRTC
+│       ├── task/              # 任务调度
 │       │   ├── automation_scheduler.py
-│       │   ├── automation_task.py
 │       │   ├── task_executor.py
 │       │   └── task_context.py
 │       ├── core/             # 核心模块
@@ -89,13 +91,11 @@ bend-agent/
 │       │   ├── stream_window.py     # 串流窗口管理
 │       │   ├── sdl_window.py        # SDL自绘窗口（优化）
 │       │   └── task_window_manager.py # 任务窗口管理器
-│       ├── xbox/              # Xbox 控制模块
-│       │   ├── stream_controller.py # 流媒体控制器
-│       │   ├── xbox_discovery.py    # Xbox SSDP 发现
-│       │   ├── play_session.py      # PlaySession管理器（优化）
-│       │   └── webrtc_handler.py    # WebRTC处理器（优化）
-│       └── utils/             # 工具模块
-│           └── crypto_util.py       # 加密工具
+│       ├── xbox/              # Xbox 云端串流
+│       │   ├── xsrp_cloud_connect.py
+│       │   ├── cloud_stream_controller.py
+│       │   ├── xbox_host_matcher.py
+│       │   └── xbox_discovery.py    # SSDP（发现增强，非串流主路径）
 ├── tokens/                   # Token 存储目录（运行时生成，不提交）
 │   └── refresh_tokens.json   # Refresh Token 持久化存储
 ├── logs/                     # 日志目录

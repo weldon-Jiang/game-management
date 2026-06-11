@@ -138,7 +138,7 @@ def resolve_streaming_credentials(context: AgentTaskContext) -> StreamingAuthCre
         user_hash = user_hash or getattr(tokens, "user_hash", "") or ""
         xsts_token = xsts_token or getattr(tokens, "xsts_token", "") or ""
         if provider == "unknown":
-            provider = "msal"
+            provider = "xblive"
         if not step1_preloaded and server_id and play_path:
             step1_preloaded = True
 

@@ -1,7 +1,8 @@
 """
 AuthService — 串流基础设施的分级令牌链。
 
-封装现有 MSAL 认证；session/discovery/stream 仅消费 StreamingCredentials。
+生产热路径经 xblive Step1；MSAL 模块保留供 scripts/debug。
+session/discovery/stream 仅消费 StreamingCredentials。
 """
 
 from dataclasses import dataclass, field

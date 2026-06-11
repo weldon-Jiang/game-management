@@ -40,7 +40,7 @@ def _check_imports() -> List[CheckResult]:
     modules = [
         ("agent.orchestration.streaming_account_task", "StreamingAccountTask"),
         ("agent.session.api", "StreamingSession"),
-        ("agent.automation.step1_stream_account_login", "step1_execute_login"),
+        ("agent.auth.step1_router", "resolve_step1_execute_login"),
         ("agent.automation.step2_router", "step2_execute_streaming"),
         ("agent.automation.step3_xsrp", "step3_execute_xsrp_init"),
         ("agent.automation.step4_game_automation", "step4_execute_gaming"),
@@ -95,15 +95,56 @@ def _check_xbox_host_candidates() -> List[CheckResult]:
     return results
 
 
+def _check_step1_router() -> List[CheckResult]:
+    results: List[CheckResult] = []
+    try:
+        import agent.auth.step1_router as router
+
+        src = inspect.getsource(router.resolve_step1_execute_login)
+        results.append(
+            CheckResult(
+                "step1_router uses xblive login",
+                "step1_xblive_login" in src and "step1_stream_account_login" not in src,
+            )
+        )
+        fn = router.resolve_step1_execute_login()
+        results.append(
+            CheckResult(
+                "step1_router resolves xblive",
+                fn.__module__.endswith("step1_xblive_login"),
+            )
+        )
+    except Exception as exc:
+        results.append(CheckResult("step1_router", False, str(exc)))
+    return results
+
+
 def _check_step2_xsrp_hooks() -> List[CheckResult]:
     results: List[CheckResult] = []
     try:
         from agent.xbox import step2_xsrp_connect as s2
         from agent.xbox import xsrp_cloud_connect as xc
 
-        src = inspect.getsource(xc.connect_xsrp_cloud)
+        src = inspect.getsource(s2.discover_and_connect_xsrp)
+        results.append(
+            CheckResult(
+                "step2 merges step3 after connect",
+                "_run_xsrp_step3_after_connect" in src,
+            )
+        )
+        xc_src = inspect.getsource(xc.connect_xsrp_cloud)
         for token in ("GssvCloudPlaySession", "GssvWebRtcSession", "context.xbox_session"):
-            results.append(CheckResult(f"connect_xsrp_cloud has {token}", token in src))
+            results.append(CheckResult(f"connect_xsrp_cloud has {token}", token in xc_src))
+
+        from agent.xhome_stream import api as xhs
+
+        xhs_src = inspect.getsource(xhs.XHomeStreamService.open_stream)
+        results.append(
+            CheckResult(
+                "open_stream skips merged step3",
+                "is_xsrp_stream_media_ready" in xhs_src,
+            )
+        )
 
         for fn_name in ("discover_and_connect_xsrp", "discover_cloud_only"):
             if fn_name == "discover_cloud_only":
@@ -123,7 +164,7 @@ def _check_step3_step4_deps() -> List[CheckResult]:
         from agent.automation import step3_xsrp as s3
         from agent.automation import step4_game_automation as s4
 
-        from agent.automation import step3_streaming_init as s3helpers
+        from agent.automation import step3_display_helpers as s3helpers
 
         s3_src = inspect.getsource(s3.step3_execute_xsrp_init)
         results.append(
@@ -143,6 +184,13 @@ def _check_step3_step4_deps() -> List[CheckResult]:
             CheckResult(
                 "step3 controller protocol helper",
                 callable(getattr(s3helpers, "_ensure_controller_protocol", None)),
+            )
+        )
+
+        results.append(
+            CheckResult(
+                "step3 stream ready helper",
+                callable(getattr(s3, "is_xsrp_stream_media_ready", None)),
             )
         )
 
@@ -307,6 +355,7 @@ def main() -> int:
     all_results.extend(_check_imports())
     all_results.extend(_check_streaming_task_wiring())
     all_results.extend(_check_xbox_host_candidates())
+    all_results.extend(_check_step1_router())
     all_results.extend(_check_step2_xsrp_hooks())
     all_results.extend(_check_step3_step4_deps())
     all_results.extend(_check_context_field_map())
@@ -327,7 +376,7 @@ def main() -> int:
 
     if total_fail == 0:
         print("Pipeline wiring: OK (code-level)")
-        print("Note: Full E2E still requires real MSAL/Xbox credentials and platform task dispatch.")
+        print("Note: Full E2E still requires real xblive/Xbox credentials and platform task dispatch.")
     else:
         print("Pipeline wiring: ISSUES FOUND")
     print("=" * 60)

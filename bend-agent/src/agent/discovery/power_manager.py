@@ -1,7 +1,7 @@
 """
 电源路由：开机放行 / 待机唤醒 / 关机报错。
 
-以 GSSV 为主；配置时 SmartGlass 兜底（P2）。
+以 GSSV 云端电源 API 唤醒待机主机。
 """
 
 from dataclasses import dataclass
@@ -26,7 +26,6 @@ class PowerManager:
     def __init__(self):
         self.logger = get_logger("power_manager")
         self._wakeup_timeout = int(config.get("discovery.wakeup_timeout_sec", 30))
-        self._smartglass_fallback = False
 
     def classify(self, power_state: str) -> str:
         ps = (power_state or "").strip().lower()
@@ -82,12 +81,6 @@ class PowerManager:
                     message="唤醒超时",
                 )
 
-        if self._smartglass_fallback:
-            woke = await self._smartglass_wake(credentials, console, timeout)
-            if woke:
-                console.power_state = "On"
-                return PowerResult(ok=True, power_state="On")
-
         return PowerResult(
             ok=False,
             error_code="WAKEUP_FAILED",
@@ -109,22 +102,4 @@ class PowerManager:
                             return True
             except Exception as exc:
                 self.logger.warning("Power poll error: %s", exc)
-        return False
-
-    async def _smartglass_wake(self, credentials: Any, console: Any, timeout: int) -> bool:
-        """GSSV 电源 API 不可用时尽力 SmartGlass 唤醒。"""
-        ip = getattr(console, "ip_address", "")
-        if not ip:
-            return False
-        try:
-            from ..xbox.stream_controller import XboxStreamController
-
-            ctrl = XboxStreamController()
-            connected = await ctrl.connect(ip)
-            if connected:
-                self.logger.info("SmartGlass wake fallback connected to %s", ip)
-                await ctrl.disconnect()
-                return True
-        except Exception as exc:
-            self.logger.debug("SmartGlass wake fallback failed: %s", exc)
         return False

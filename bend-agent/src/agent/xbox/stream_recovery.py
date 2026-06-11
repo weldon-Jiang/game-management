@@ -1,8 +1,5 @@
 """
-LAN 串流输入通道恢复
-==================
-
-WebRTC 输入通道异常时，清理并重新执行 GSSV 云端握手。
+GSSV 云端串流输入通道恢复 — WebRTC 异常时重新 play/握手。
 """
 
 import asyncio
@@ -90,13 +87,13 @@ def rebind_stream_bindings(
     if session is None:
         return
 
-    video_controller = getattr(context, "_video_stream_controller", None)
-    if video_controller is not None and hasattr(video_controller, "update_session"):
-        video_controller.update_session(session)
-
+    direct_capture = getattr(context, "_direct_capture", None)
     frame_capture = getattr(context, "frame_capture", None)
-    if frame_capture is not None and hasattr(frame_capture, "set_stream_controller"):
-        frame_capture.set_stream_controller(session)
+    if frame_capture is not None and direct_capture is not None:
+        if hasattr(frame_capture, "set_direct_capture"):
+            frame_capture.set_direct_capture(direct_capture)
+        elif hasattr(frame_capture, "_source"):
+            frame_capture._source = direct_capture
 
     protocol = getattr(context, "_controller_protocol", None)
     if protocol is not None and hasattr(protocol, "set_stream_controller"):

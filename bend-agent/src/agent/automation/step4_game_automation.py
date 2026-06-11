@@ -46,9 +46,7 @@ from ..task.task_context import (
     TaskMainStatus,
     GameAccountInfo
 )
-from ..input.football_controller import FootballController
 from ..input.controller_protocol import XboxButtonFlag
-from ..scene.scene_action_mapper import SceneActionMapper
 
 VALID_TASK_TYPES = frozenset({
     'auction_transfer',
@@ -236,16 +234,89 @@ async def _ensure_fc_scene_client(context: AgentTaskContext, task_logger):
 
     host = agent_config.get('fc_server.host', '127.0.0.1')
     port = int(agent_config.get('fc_server.port', 8080))
+    width = int(agent_config.get('window.default_width', 1280))
+    height = int(agent_config.get('window.default_height', 720))
+    runtime = getattr(context, '_stream_runtime', None)
+    latest = runtime.get_latest_frame() if runtime else None
+    if latest is not None:
+        width = int(getattr(latest, 'width', width) or width)
+        height = int(getattr(latest, 'height', height) or height)
+
     client = FCSceneClient(
         host=host,
         port=port,
         username=context.streaming_account_email,
         session_token=getattr(context, '_fc_session_token', ''),
         gamepad_index=0,
+        frame_width=width,
+        frame_height=height,
     )
     context._fc_scene_client = client
     task_logger.info("FCSceneClient 已就绪 (%s:%s)", host, port)
     return client
+
+
+def _fc_remote_play_enabled() -> bool:
+    from ..core.config import config as agent_config
+    return bool(
+        agent_config.get('fc_server.enabled', False)
+        and agent_config.get('fc_server.use_remote_play', False)
+    )
+
+
+async def _build_fc_play_handler(context: AgentTaskContext, task_logger):
+    """FC PLAY 20Hz handler，供 StreamRuntime play loop 调用。"""
+    from ..scene.fc_scene_client import FC_ERR_NETWORK, FC_ERR_OK
+
+    fc_client = await _ensure_fc_scene_client(context, task_logger)
+    if fc_client is None:
+        return None
+
+    async def _handler(image) -> int:
+        result = await fc_client.play_frame(image)
+        if result.controller_actions:
+            await _apply_fc_controller_actions(
+                context, result.controller_actions, task_logger
+            )
+        return result.errno if result.errno else FC_ERR_NETWORK
+
+    return _handler
+
+
+async def _fc_init_match_session(context: AgentTaskContext, task_logger) -> bool:
+    from ..scene.fc_scene_client import FC_ERR_MATCH_EXISTED, FC_ERR_OK
+
+    if not _fc_remote_play_enabled():
+        return True
+    fc_client = await _ensure_fc_scene_client(context, task_logger)
+    if fc_client is None:
+        return False
+    runtime = getattr(context, '_stream_runtime', None)
+    latest = runtime.get_latest_frame() if runtime else None
+    if latest is not None:
+        fc_client.update_frame_size(
+            int(getattr(latest, 'width', fc_client.frame_width)),
+            int(getattr(latest, 'height', fc_client.frame_height)),
+        )
+    report = await fc_client.init_match()
+    if report.errno in (FC_ERR_OK, FC_ERR_MATCH_EXISTED):
+        context._fc_session_token = report.session or fc_client.session_token
+        task_logger.info("FC 比赛会话已初始化 (errno=%s)", report.errno)
+        return True
+    task_logger.warning("FC init_match 失败: %s", report.errmsg or report.errno)
+    return False
+
+
+async def _fc_terminate_match_session(context: AgentTaskContext, task_logger) -> None:
+    if not _fc_remote_play_enabled():
+        return
+    fc_client = getattr(context, '_fc_scene_client', None)
+    if fc_client is None:
+        return
+    try:
+        await fc_client.terminate_match()
+    except Exception as exc:
+        task_logger.debug("FC terminate_match: %s", exc)
 
 
 async def _match_expected_screen(
@@ -273,7 +344,9 @@ async def _match_expected_screen(
     deadline = time.time() + timeout_sec
 
     while time.time() < deadline:
-        frame = await context.frame_capture.capture_frame()
+        from ..runtime.stream_runtime import capture_task_frame
+
+        frame = await capture_task_frame(context, timeout=0.8)
         if frame is None:
             await asyncio.sleep(0.4)
             continue
@@ -715,61 +788,37 @@ async def step4_execute_gaming(
     context._automation_engine = engine
     context._account_switcher = switcher
 
-    global_frame_queue = None
-    global_scene_queue = None
-    global_cancel_event = None
-    global_async_tasks = []
-    football_controller = None
-    scene_action_mapper = None
+    from ..runtime.stream_runtime import get_or_create_stream_runtime
 
-    async def _send_controller_signal(signal):
-        """发送手柄信号到Xbox"""
-        if engine and hasattr(engine, 'send_controller_signal'):
-            try:
-                await engine.send_controller_signal(signal)
-                task_logger.debug(f"[手柄信号] 发送: {signal}")
-            except Exception as e:
-                task_logger.error(f"[手柄信号] 发送失败: {e}")
-        else:
-            task_logger.warning("[手柄信号] 引擎不支持信号发送")
+    stream_runtime = get_or_create_stream_runtime(context)
 
     try:
         keyboard_mapper = getattr(context, "_keyboard_mapper", None)
         if keyboard_mapper and getattr(keyboard_mapper, "_running", False):
             await keyboard_mapper.stop()
-            task_logger.info("步骤四已停止键盘映射器，避免与 SDL 显示循环并发访问 pygame")
+            task_logger.info("步骤四已停止键盘映射器，避免与自动化输入并发")
 
-        if context.enable_window_display and context.sdl_window is not None:
-            task_logger.info("[全局异步] 启动帧捕获、显示和场景检测任务")
-            global_frame_queue = asyncio.Queue(maxsize=5)
-            global_scene_queue = asyncio.Queue(maxsize=5)
-            global_cancel_event = asyncio.Event()
+        from ..core.config import config as agent_config
 
-            # Step4 自动化期间独占这些循环；finally 须停止三者，避免孤儿帧读取协程。
-            capture_task = asyncio.create_task(
-                _capture_loop(context, global_frame_queue, global_cancel_event, task_logger)
-            )
-            display_task = asyncio.create_task(
-                _display_loop(context, global_frame_queue, global_cancel_event, task_logger)
-            )
-            detect_task = asyncio.create_task(
-                _detect_loop(context, global_frame_queue, global_scene_queue, global_cancel_event, task_logger)
-            )
+        prefer_remote = agent_config.get("fc_server.prefer_remote_scene", False)
+        fc_client = await _ensure_fc_scene_client(context, task_logger) if prefer_remote else None
+        scene_detector = None if prefer_remote and fc_client else await _ensure_streaming_scene_detector(
+            context, task_logger
+        )
+        play_handler = None
+        if _fc_remote_play_enabled():
+            play_handler = await _build_fc_play_handler(context, task_logger)
+            context._fc_remote_play = play_handler is not None
+        else:
+            context._fc_remote_play = False
 
-            global_async_tasks = [capture_task, display_task, detect_task]
-            task_logger.info("[全局异步] 帧捕获、显示和场景检测任务已启动")
-
-            task_logger.info("[比赛控制] 初始化比赛控制器和场景动作映射器")
-            football_controller = FootballController()
-            football_controller.set_signal_sender(_send_controller_signal)
-
-            scene_action_mapper = SceneActionMapper(
-                scene_detector=None,
-                football_controller=football_controller
-            )
-            task_logger.info("[比赛控制] 比赛控制器和场景动作映射器已初始化")
-
-        context.matches_completed_today = {}
+        await stream_runtime.start_automation(
+            task_logger,
+            scene_detector=scene_detector,
+            fc_client=fc_client,
+            apply_fc_actions=_apply_fc_controller_actions,
+            play_handler=play_handler,
+        )
         for ga in context.game_accounts:
             context.matches_completed_today[ga.id] = ga.today_match_count or 0
 
@@ -789,9 +838,9 @@ async def step4_execute_gaming(
             detector = await _ensure_streaming_scene_detector(context, task_logger)
 
             async def _capture_for_provisioning():
-                if context.frame_capture is None:
-                    return None
-                return await context.frame_capture.capture_frame()
+                from ..runtime.stream_runtime import capture_task_frame
+
+                return await capture_task_frame(context, timeout=0.8)
 
             provisioning_module.refresh_dependencies(
                 detector,
@@ -1050,8 +1099,15 @@ async def step4_execute_gaming(
                 cleanup_needed = True
                 try:
                     match_success, match_error_code, match_error_msg = await _execute_match_for_account(
-                    context, game_account, task_logger, game_logger, check_cancel, report_progress
-                )
+                        context,
+                        game_account,
+                        task_logger,
+                        game_logger,
+                        check_cancel,
+                        report_progress,
+                        frame_queue=stream_runtime.frame_queue,
+                        scene_queue=stream_runtime.scene_queue,
+                    )
                     cleanup_needed = False
                 finally:
                     if cleanup_needed:
@@ -1230,11 +1286,9 @@ async def step4_execute_gaming(
         return Step4Result(success=False, error_code="EXCEPTION", message=error_msg)
 
     finally:
-        if global_async_tasks:
-            task_logger.info("[全局异步] 停止帧捕获、显示和场景检测任务")
-            global_cancel_event.set()
-            await asyncio.gather(*global_async_tasks, return_exceptions=True)
-            task_logger.info("[全局异步] 帧捕获、显示和场景检测任务已停止")
+        await _fc_terminate_match_session(context, task_logger)
+        await stream_runtime.stop_automation()
+        task_logger.info("StreamRuntime 自动化循环已停止（capture/display 保留）")
 
 
 async def _close_task_window(window_manager, task_id: str, reason: str, task_logger):
@@ -1416,7 +1470,9 @@ async def _init_game_automation(
                 switcher.set_scene_detector(streaming_detector)
 
                 async def _capture_for_switcher():
-                    return await context.frame_capture.capture_frame()
+                    from ..runtime.stream_runtime import capture_task_frame
+
+                    return await capture_task_frame(context, timeout=0.8)
 
                 switcher.set_frame_getter(_capture_for_switcher)
             except Exception as e:
@@ -1892,6 +1948,13 @@ async def _wait_for_match_start(
 
     await asyncio.sleep(3)
 
+    if not await _fc_init_match_session(context, task_logger):
+        task_logger.warning("FC 比赛会话初始化失败，仍尝试本地 play loop")
+
+    runtime = getattr(context, "_stream_runtime", None)
+    if runtime:
+        runtime.enter_play_mode()
+
 
 async def _play_match(
     context: AgentTaskContext,
@@ -1926,8 +1989,21 @@ async def _play_match(
     task_logger.info(f"比赛中，预计时长: {match_duration}秒")
     game_logger.info(f"[场景: IN_GAME] 比赛中，预计时长: {match_duration}秒")
 
-    if frame_queue and scene_queue:
-        task_logger.info("[比赛进行] 使用全局异步任务进行场景检测和动作控制")
+    if getattr(context, "_fc_remote_play", False):
+        runtime = getattr(context, "_stream_runtime", None)
+        if runtime:
+            task_logger.info("[比赛进行] FC PLAY loop 已接管（StreamRuntime play 20Hz）")
+            try:
+                await asyncio.wait_for(runtime.match_over.wait(), timeout=match_duration)
+                task_logger.info("FC 报告比赛结束 (ERR_MATCH_OVER)")
+                game_logger.info("[场景: SETTLEMENT] FC 比赛结束")
+                return
+            except asyncio.TimeoutError:
+                task_logger.info("FC 比赛等待超时，按本地时长结束")
+            return
+
+    if scene_queue is not None:
+        task_logger.info("[比赛进行] 使用 StreamRuntime graph/scene_queue 辅助检测")
 
     for i in range(match_duration // 10):
         if check_cancel():
@@ -1942,13 +2018,6 @@ async def _play_match(
                 if scene_result and scene_result != "UNKNOWN":
                     task_logger.info(f"[比赛进行] 检测到场景: {scene_result}")
                     game_logger.info(f"[比赛进行] 检测到场景: {scene_result}")
-
-                    if scene_action_mapper:
-                        try:
-                            await scene_action_mapper.on_scene_detected(scene_result)
-                            task_logger.info(f"[比赛进行] 场景 {scene_result} 对应动作已执行")
-                        except Exception as e:
-                            task_logger.error(f"[比赛进行] 执行动作失败: {e}")
             except asyncio.TimeoutError:
                 pass
 
@@ -2008,6 +2077,11 @@ async def _finish_match(
     """
     task_logger.info(f"比赛结束: {game_account.gamertag}")
     game_logger.info("[场景: MATCH_END] 比赛结束")
+
+    runtime = getattr(context, "_stream_runtime", None)
+    if runtime:
+        runtime.exit_play_mode()
+    await _fc_terminate_match_session(context, task_logger)
 
     await _skip_settlement(context, task_logger, game_logger)
 
@@ -2093,7 +2167,9 @@ async def _detect_screen_state(
             game_logger.warning("[场景检测] 画面捕获器不可用")
             return False
 
-        frame = await context.frame_capture.capture_frame()
+        from ..runtime.stream_runtime import capture_task_frame
+
+        frame = await capture_task_frame(context)
         if frame is None:
             task_logger.warning("无法捕获画面")
             game_logger.warning(f"[场景: {expected_screen}] 无法捕获画面")
@@ -2144,8 +2220,10 @@ async def _wait_for_match_started(
     - bool: 是否检测到比赛开始
     """
     try:
+        from ..runtime.stream_runtime import capture_task_frame
+
         for _ in range(10):
-            frame = await context.frame_capture.capture_frame()
+            frame = await capture_task_frame(context, timeout=0.8)
             if frame:
                 task_logger.info("检测到比赛开始")
                 game_logger.info("[场景: MATCH_START] 检测到比赛开始")
@@ -2186,7 +2264,9 @@ async def _detect_match_ended(
     - bool: 是否检测到比赛结束
     """
     try:
-        frame = await context.frame_capture.capture_frame()
+        from ..runtime.stream_runtime import capture_task_frame
+
+        frame = await capture_task_frame(context, timeout=0.5)
         if frame:
             return False
 
@@ -2282,185 +2362,3 @@ async def _cleanup_account_resources(
         task_logger.error(f"清理账号资源异常: {e}")
         game_logger.error(f"清理账号资源异常: {e}")
 
-
-async def _capture_loop(
-    context: AgentTaskContext,
-    frame_queue: asyncio.Queue,
-    cancel_event: asyncio.Event,
-    task_logger
-) -> None:
-    """
-    持续捕获帧的异步任务
-
-    功能说明：
-    - 持续从frame_capture捕获视频帧
-    - 将帧放入frame_queue供其他任务使用
-    - 支持窗口显示模式
-
-    参数：
-    - context: 任务上下文（包含frame_capture）
-    - frame_queue: 帧队列
-    - cancel_event: 取消事件
-    - task_logger: 日志记录器
-    """
-    task_logger.info("[显示循环] 启动帧捕获任务")
-    frame_count = 0
-    last_log_time = time.time()
-
-    while not cancel_event.is_set():
-        try:
-            if context.frame_capture is None:
-                await asyncio.sleep(0.1)
-                continue
-
-            frame = await asyncio.wait_for(
-                context.frame_capture.capture_frame(),
-                timeout=1.0
-            )
-
-            if frame is not None:
-                await asyncio.wait_for(
-                    frame_queue.put(frame),
-                    timeout=0.5
-                )
-                frame_count += 1
-
-                if time.time() - last_log_time > 10:
-                    fps = frame_count / (time.time() - last_log_time)
-                    task_logger.info(f"[显示循环] 捕获帧率: {fps:.1f} FPS")
-                    frame_count = 0
-                    last_log_time = time.time()
-
-        except asyncio.TimeoutError:
-            continue
-        except Exception as e:
-            task_logger.debug(f"[显示循环] 捕获帧异常: {e}")
-            await asyncio.sleep(0.1)
-
-    task_logger.info("[显示循环] 帧捕获任务已停止")
-
-
-async def _display_loop(
-    context: AgentTaskContext,
-    frame_queue: asyncio.Queue,
-    cancel_event: asyncio.Event,
-    task_logger
-) -> None:
-    """
-    持续更新SDL窗口显示的异步任务
-
-    功能说明：
-    - 从frame_queue获取帧
-    - 更新SDL窗口显示
-    - 支持高性能渲染
-
-    参数：
-    - context: 任务上下文（包含sdl_window）
-    - frame_queue: 帧队列
-    - cancel_event: 取消事件
-    - task_logger: 日志记录器
-    """
-    if context.sdl_window is None:
-        task_logger.info("[显示循环] SDL窗口未初始化，跳过显示循环")
-        return
-
-    task_logger.info("[显示循环] 启动SDL显示任务")
-    frame_count = 0
-    last_log_time = time.time()
-
-    while not cancel_event.is_set():
-        try:
-            if hasattr(context.sdl_window, 'process_events'):
-                context.sdl_window.process_events()
-
-            frame = await asyncio.wait_for(
-                frame_queue.get(),
-                timeout=0.5
-            )
-
-            if frame is not None and hasattr(frame, 'data'):
-                context.sdl_window.update_frame(frame.data)
-                frame_count += 1
-
-                if time.time() - last_log_time > 10:
-                    fps = frame_count / (time.time() - last_log_time)
-                    task_logger.info(f"[显示循环] 显示帧率: {fps:.1f} FPS")
-                    frame_count = 0
-                    last_log_time = time.time()
-
-        except asyncio.TimeoutError:
-            continue
-        except Exception as e:
-            task_logger.debug(f"[显示循环] 显示帧异常: {e}")
-            await asyncio.sleep(0.1)
-
-    task_logger.info("[显示循环] SDL显示任务已停止")
-
-
-async def _detect_loop(
-    context: AgentTaskContext,
-    frame_queue: asyncio.Queue,
-    scene_queue: asyncio.Queue,
-    cancel_event: asyncio.Event,
-    task_logger
-) -> None:
-    """
-    持续场景识别的异步任务
-
-    功能说明：
-    - 从frame_queue获取帧
-    - 执行场景识别
-    - 将场景结果放入scene_queue供手柄控制使用
-
-    参数：
-    - context: 任务上下文
-    - frame_queue: 帧队列
-    - scene_queue: 场景队列
-    - cancel_event: 取消事件
-    - task_logger: 日志记录器
-    """
-    task_logger.info("[显示循环] 启动场景识别任务")
-
-    while not cancel_event.is_set():
-        try:
-            frame = await asyncio.wait_for(
-                frame_queue.get(),
-                timeout=0.5
-            )
-
-            if frame is not None:
-                scene = await _detect_scene_from_frame(frame, task_logger)
-                await asyncio.wait_for(
-                    scene_queue.put(scene),
-                    timeout=0.5
-                )
-
-        except asyncio.TimeoutError:
-            continue
-        except Exception as e:
-            task_logger.debug(f"[显示循环] 场景识别异常: {e}")
-            await asyncio.sleep(0.1)
-
-    task_logger.info("[显示循环] 场景识别任务已停止")
-
-
-async def _detect_scene_from_frame(frame, task_logger) -> str:
-    """
-    从帧数据中检测场景
-
-    参数：
-    - frame: 帧数据
-    - task_logger: 日志记录器
-
-    返回：
-    - str: 场景类型
-    """
-    try:
-        if frame is None:
-            return "UNKNOWN"
-
-        return "MAIN_MENU"
-
-    except Exception as e:
-        task_logger.debug(f"场景检测异常: {e}")
-        return "UNKNOWN"

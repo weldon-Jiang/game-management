@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from ..gssv.cloud_webrtc import GssvWebRtcSession
 from ..core.logger import get_logger
-from .stream_controller import StreamState
+from .stream_state import StreamState
 
 
 class CloudStreamController:
