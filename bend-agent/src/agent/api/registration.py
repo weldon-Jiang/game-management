@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from ..core.config import config
 from ..core.logger import get_logger
 from ..core.machine_identity import machine_identity
+from ..core.install_guard import assert_single_install
+from ..core.paths import get_agent_root
 from ..core.system_resource_detector import SystemResourceDetector
 
 
@@ -129,6 +131,8 @@ class RegistrationActivator:
         """
         self.logger.info("Starting Agent activation with registration code...")
 
+        assert_single_install()
+
         agent_id = self._get_or_generate_agent_id()
         agent_secret = self._generate_agent_secret()
         
@@ -151,6 +155,7 @@ class RegistrationActivator:
                     registration_code=registration_code
                 )
                 self._save_credentials()
+                machine_identity.mark_installed(str(get_agent_root()))
                 self.logger.info(f"Agent activated successfully, Merchant ID: {result['merchantId']}")
                 return self._credentials
             else:

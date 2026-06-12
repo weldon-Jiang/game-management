@@ -19,6 +19,15 @@ $ErrorActionPreference = "Stop"
 $serviceName = "BendAgent"
 $agentDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $nssmPath = Join-Path $agentDir "nssm.exe"
+$registryPath = "HKCU:\SOFTWARE\BendPlatform\Agent"
+
+function Clear-AgentInstallRegistry {
+    if (Test-Path $registryPath) {
+        Write-Host "正在清除 Agent 注册表..."
+        Remove-Item -Path $registryPath -Recurse -Force
+        Write-Host "注册表已清除" -ForegroundColor Green
+    }
+}
 
 # 检查管理员权限
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -56,4 +65,7 @@ if ($deleteFiles -eq "Y" -or $deleteFiles -eq "y") {
     Write-Host "保留安装目录" -ForegroundColor Yellow
 }
 
+Clear-AgentInstallRegistry
+
 Write-Host "`n卸载完成！" -ForegroundColor Green
+Write-Host "如需彻底卸载凭证与平台绑定，请运行 uninstall_agent.ps1 或 BendAgent.exe --uninstall"

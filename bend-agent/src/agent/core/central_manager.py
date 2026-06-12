@@ -325,10 +325,9 @@ class CentralManager:
                 if result.get('data', {}).get('needReregister'):
                     self.logger.info("Platform requires re-registration after uninstall")
                 if clear_registry:
-                    # 清除本地机器标识
                     from ..core.machine_identity import machine_identity
-                    machine_identity.reset_machine_id()
-                    self.logger.info("Machine registry has been cleared")
+                    machine_identity.clear_install_registry()
+                    self.logger.info("Agent install registry has been cleared")
                 self.logger.info("Notified backend of uninstall")
         except Exception as e:
             self.logger.error(f"Failed to notify uninstall: {e}")

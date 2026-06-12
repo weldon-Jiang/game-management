@@ -17,6 +17,12 @@ if not getattr(sys, 'frozen', False):
 
 from agent.core.config import get_config, load_config, AgentConfig
 from agent.core.logger import get_logger
+from agent.core.install_guard import (
+    assert_single_install,
+    InstallGuardError,
+    migrate_install_marker_if_needed,
+)
+from agent.core.agent_uninstall import perform_agent_uninstall
 from agent.api.registration import RegistrationActivator
 from agent.core.central_manager import CentralManager
 
@@ -129,6 +135,11 @@ async def main():
     parser = argparse.ArgumentParser(description='Bend Agent - Xbox Automation Controller')
     parser.add_argument('--code', help='Registration code for activation')
     parser.add_argument('--config', help='Path to config file')
+    parser.add_argument(
+        '--uninstall',
+        action='store_true',
+        help='Uninstall local Agent (notify platform, clear credentials and registry)',
+    )
     args = parser.parse_args()
 
     # 自动加载配置文件
@@ -152,6 +163,27 @@ async def main():
                 load_config(config_path)
                 config_loaded = True
                 break
+
+    logger = get_logger('runner')
+
+    if args.uninstall:
+        try:
+            await perform_agent_uninstall(reason="用户主动卸载")
+            print("\n卸载完成。本机 Agent 安装标记与凭证已清除，可重新安装。")
+            return 0
+        except Exception as e:
+            logger.error(f"Uninstall failed: {e}")
+            print(f"\n卸载失败: {e}")
+            return 1
+
+    try:
+        assert_single_install()
+    except InstallGuardError as exc:
+        print(f"\n{exc}")
+        return 1
+
+    activator = RegistrationActivator()
+    migrate_install_marker_if_needed(activator.has_credentials())
 
     runner = AgentRunner()
     try:

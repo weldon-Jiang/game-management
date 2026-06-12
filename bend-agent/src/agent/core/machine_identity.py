@@ -6,6 +6,7 @@ import hashlib
 import platform
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -26,7 +27,10 @@ class MachineIdentity:
 
     REGISTRY_PATH = r"SOFTWARE\BendPlatform\Agent"
     MACHINE_ID_KEY = "MachineId"
+    INSTALL_PATH_KEY = "InstallPath"
+    INSTALLED_AT_KEY = "InstalledAt"
     FILE_NAME = "machine_id"
+    INSTALL_PATH_FILE = "install_path"
 
     def __init__(self):
         self.logger = get_logger('machine_identity')
@@ -35,6 +39,10 @@ class MachineIdentity:
     def _identity_file_path(self) -> Path:
         """非 Windows 平台将机器 ID 持久化到 logs 目录旁的文件。"""
         return Path(get_logs_dir_fallback()).parent / self.FILE_NAME
+
+    def _install_path_file(self) -> Path:
+        """非 Windows 平台安装路径标记文件。"""
+        return Path(get_logs_dir_fallback()).parent / self.INSTALL_PATH_FILE
 
     def get_machine_id(self) -> str:
         """
@@ -197,41 +205,118 @@ class MachineIdentity:
         """
         return self.get_machine_id()
 
-    def reset_machine_id(self) -> bool:
+    def get_install_path(self) -> Optional[str]:
+        """读取本机 Agent 安装目录标记；未安装时返回 None。"""
+        if sys.platform == "win32":
+            return self._read_registry_string(self.INSTALL_PATH_KEY)
+        return self._load_install_path_from_file()
+
+    def mark_installed(self, install_path: str) -> bool:
         """
-        重置机器 ID（测试或排障用）。
-        警告：平台将把该 Agent 视为全新安装。
+        写入安装目录与安装时间；首次激活或迁移旧版本时调用。
+        """
+        normalized = str(Path(install_path).resolve())
+        installed_at = datetime.now(timezone.utc).isoformat()
+
+        if sys.platform == "win32":
+            if winreg is None:
+                return False
+            try:
+                key = winreg.CreateKey(
+                    winreg.HKEY_CURRENT_USER,
+                    self.REGISTRY_PATH,
+                )
+                winreg.SetValueEx(
+                    key, self.INSTALL_PATH_KEY, 0, winreg.REG_SZ, normalized,
+                )
+                winreg.SetValueEx(
+                    key, self.INSTALLED_AT_KEY, 0, winreg.REG_SZ, installed_at,
+                )
+                winreg.CloseKey(key)
+            except WindowsError as exc:
+                self.logger.error("Failed to save install path to registry: %s", exc)
+                return False
+        elif not self._save_install_path_to_file(normalized):
+            return False
+
+        self.logger.info("Marked Agent install path: %s", normalized)
+        return True
+
+    def clear_install_registry(self) -> bool:
+        """
+        清除本机 Agent 安装标记（MachineId、InstallPath、InstalledAt）。
+        卸载后调用，允许在同一台电脑重新安装。
         """
         if sys.platform == "win32":
             if winreg is None:
                 return False
             try:
-                key = winreg.OpenKey(
-                    winreg.HKEY_CURRENT_USER,
-                    self.REGISTRY_PATH,
-                    0,
-                    winreg.KEY_WRITE
-                )
-                try:
-                    winreg.DeleteValue(key, self.MACHINE_ID_KEY)
-                except FileNotFoundError:
-                    pass
-                winreg.CloseKey(key)
-            except WindowsError as e:
-                self.logger.error(f"Failed to reset machine ID: {e}")
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, self.REGISTRY_PATH)
+            except FileNotFoundError:
+                pass
+            except WindowsError as exc:
+                self.logger.error("Failed to clear install registry: %s", exc)
                 return False
         else:
-            path = self._identity_file_path()
-            try:
-                if path.is_file():
-                    path.unlink()
-            except OSError as e:
-                self.logger.error(f"Failed to reset machine ID file: {e}")
-                return False
+            for path in (self._identity_file_path(), self._install_path_file()):
+                try:
+                    if path.is_file():
+                        path.unlink()
+                except OSError as exc:
+                    self.logger.error("Failed to clear install marker file %s: %s", path, exc)
+                    return False
 
         self._machine_id = None
-        self.logger.warning("Machine ID has been reset")
+        self.logger.warning("Agent install registry cleared")
         return True
+
+    def reset_machine_id(self) -> bool:
+        """
+        重置机器 ID（测试或排障用）。
+        警告：平台将把该 Agent 视为全新安装。
+        """
+        return self.clear_install_registry()
+
+    def _read_registry_string(self, value_name: str) -> Optional[str]:
+        if winreg is None:
+            return None
+        try:
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                self.REGISTRY_PATH,
+                0,
+                winreg.KEY_READ,
+            )
+            try:
+                value, _ = winreg.QueryValueEx(key, value_name)
+                winreg.CloseKey(key)
+                return value if value else None
+            except FileNotFoundError:
+                winreg.CloseKey(key)
+                return None
+        except WindowsError:
+            return None
+
+    def _load_install_path_from_file(self) -> Optional[str]:
+        path = self._install_path_file()
+        try:
+            if not path.is_file():
+                return None
+            value = path.read_text(encoding="utf-8").strip()
+            return value or None
+        except OSError as exc:
+            self.logger.warning("Failed to load install path file: %s", exc)
+            return None
+
+    def _save_install_path_to_file(self, install_path: str) -> bool:
+        path = self._install_path_file()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(install_path, encoding="utf-8")
+            return True
+        except OSError as exc:
+            self.logger.error("Failed to save install path file: %s", exc)
+            return False
 
 
 machine_identity = MachineIdentity()

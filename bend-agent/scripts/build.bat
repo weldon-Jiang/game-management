@@ -138,6 +138,12 @@ if exist "%OUTPUT_DIR%\BendAgent.exe" (
         echo   - Copied README.txt
     )
 
+    REM Copy uninstall script for merchant package
+    if exist "%PROJECT_ROOT%\uninstall_agent.ps1" (
+        copy /y "%PROJECT_ROOT%\uninstall_agent.ps1" "%OUTPUT_DIR%\"
+        echo   - Copied uninstall_agent.ps1
+    )
+
     REM Copy templates (scene PNGs for streaming_scene_detector)
     if exist "%PROJECT_ROOT%\templates" (
         robocopy "%PROJECT_ROOT%\templates" "%OUTPUT_DIR%\templates" *.png /NFL /NDL /NJH /NJS >nul
