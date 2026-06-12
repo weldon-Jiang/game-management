@@ -561,6 +561,127 @@ class PlatformApiClient:
             self.logger.warning("确保主机绑定异常（非致命）: %s", e)
             return None
 
+    async def get_auth_cache(
+        self,
+        streaming_account_id: str,
+        task_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Step1 读取串流账号 xblive Token 平台缓存。
+
+        返回 data 字段（含 found/tokenDoc/tokenVersion）；失败返回 None。
+        """
+        url = self._get_callback_url(
+            f"streaming-accounts/{streaming_account_id}/auth-cache"
+        )
+        headers = await self._get_headers()
+        try:
+            session = await self._get_session()
+            async with session.get(
+                url,
+                params={"taskId": task_id},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status != 200:
+                    self.logger.warning("读取 auth-cache HTTP 错误: %s", response.status)
+                    return None
+                result = await response.json()
+                if result.get("code") == 200:
+                    return result.get("data") or {}
+                self.logger.warning("读取 auth-cache 失败: %s", result.get("message"))
+                return None
+        except Exception as exc:
+            self.logger.warning("读取 auth-cache 异常: %s", exc)
+            return None
+
+    async def put_auth_cache(
+        self,
+        streaming_account_id: str,
+        task_id: str,
+        token_doc: Dict[str, Any],
+        *,
+        expected_token_version: int = 0,
+        auth_state: str = "valid",
+        xhome_expires_at: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Step1 写入串流账号 xblive Token 平台缓存。
+
+        成功返回 data（含 tokenVersion）；409 返回 None 供上层重试。
+        """
+        url = self._get_callback_url(
+            f"streaming-accounts/{streaming_account_id}/auth-cache"
+        )
+        headers = await self._get_headers()
+        payload: Dict[str, Any] = {
+            "taskId": task_id,
+            "tokenDoc": token_doc,
+            "expectedTokenVersion": expected_token_version,
+            "authState": auth_state,
+        }
+        if xhome_expires_at:
+            payload["xhomeExpiresAt"] = xhome_expires_at
+
+        try:
+            session = await self._get_session()
+            async with session.put(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status == 409:
+                    self.logger.info(
+                        "auth-cache 版本冲突 account=%s expected=%s",
+                        streaming_account_id,
+                        expected_token_version,
+                    )
+                    return None
+                if response.status != 200:
+                    self.logger.warning("写入 auth-cache HTTP 错误: %s", response.status)
+                    return None
+                result = await response.json()
+                if result.get("code") == 409:
+                    return None
+                if result.get("code") == 200:
+                    return result.get("data") or {}
+                self.logger.warning("写入 auth-cache 失败: %s", result.get("message"))
+                return None
+        except Exception as exc:
+            self.logger.warning("写入 auth-cache 异常: %s", exc)
+            return None
+
+    async def delete_auth_cache(
+        self,
+        streaming_account_id: str,
+        task_id: str,
+    ) -> bool:
+        """Step1 清除串流账号 xblive Token 平台缓存。"""
+        url = self._get_callback_url(
+            f"streaming-accounts/{streaming_account_id}/auth-cache"
+        )
+        headers = await self._get_headers()
+        try:
+            session = await self._get_session()
+            async with session.delete(
+                url,
+                params={"taskId": task_id},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status != 200:
+                    self.logger.warning("清除 auth-cache HTTP 错误: %s", response.status)
+                    return False
+                result = await response.json()
+                if result.get("code") == 200:
+                    return bool((result.get("data") or {}).get("deleted", True))
+                self.logger.warning("清除 auth-cache 失败: %s", result.get("message"))
+                return False
+        except Exception as exc:
+            self.logger.warning("清除 auth-cache 异常: %s", exc)
+            return False
+
     async def unlock_xbox_host(self, xbox_host_id: str, task_id: Optional[str] = None) -> bool:
         """
         解锁Xbox主机（v2.0）

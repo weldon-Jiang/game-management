@@ -50,6 +50,8 @@ async def step1_execute_login(
             context.streaming_account_email,
             context.streaming_account_password,
             context.streaming_account_auto_code or "",
+            streaming_account_id=context.streaming_account_id or "",
+            task_id=context.task_id or "",
             web_headless=web_headless,
         )
 

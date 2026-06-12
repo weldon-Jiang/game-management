@@ -16,6 +16,7 @@ import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.LanDiscoveryCacheService;
 import com.bend.platform.service.StreamLeaseService;
+import com.bend.platform.service.StreamingAccountAuthCacheService;
 import com.bend.platform.service.StreamingAccountHostBindingService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.service.StreamingSessionService;
@@ -60,6 +61,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
     private final TaskGameAccountStatusService statusService;
     private final AgentLoadControlService loadControlService;
     private final StreamingAccountService streamingAccountService;
+    private final StreamingAccountAuthCacheService streamingAccountAuthCacheService;
     private final XboxHostService xboxHostService;
     private final StreamingAccountHostBindingService hostBindingService;
     private final StreamLeaseService streamLeaseService;
@@ -607,6 +609,125 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         result.put("xboxId", host.getXboxId());
         result.put("streamingAccountId", streamingAccountId);
         return result;
+    }
+
+    @Override
+    public Map<String, Object> getStreamingAuthCache(String streamingAccountId, String taskId) {
+        if (!StringUtils.hasText(taskId)) {
+            throw new BusinessException(400, "taskId 不能为空");
+        }
+        Task task = requireTaskForAuthenticatedAgent(taskId);
+        if (!streamingAccountId.equals(task.getStreamingAccountId())) {
+            throw new BusinessException(403, "串流账号与任务不匹配");
+        }
+        String agentId = requireAuthenticatedAgentId();
+        String merchantId = requireMerchantIdForAgent(agentId);
+        log.info(
+                "读取串流 Token 缓存 accountId={} taskId={} agent={}",
+                streamingAccountId,
+                taskId,
+                agentId);
+        return streamingAccountAuthCacheService.getAuthCache(streamingAccountId, merchantId);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> saveStreamingAuthCache(
+            String streamingAccountId,
+            Map<String, Object> payload) {
+        if (payload == null) {
+            throw new BusinessException(400, "请求体不能为空");
+        }
+        String taskId = (String) payload.get("taskId");
+        if (!StringUtils.hasText(taskId)) {
+            throw new BusinessException(400, "taskId 不能为空");
+        }
+        Task task = requireTaskForAuthenticatedAgent(taskId);
+        if (!streamingAccountId.equals(task.getStreamingAccountId())) {
+            throw new BusinessException(403, "串流账号与任务不匹配");
+        }
+
+        Object tokenDocRaw = payload.get("tokenDoc");
+        if (tokenDocRaw == null) {
+            tokenDocRaw = payload.get("token_doc");
+        }
+        if (!(tokenDocRaw instanceof Map)) {
+            throw new BusinessException(400, "tokenDoc 必须为对象");
+        }
+        Map<String, Object> tokenDoc = (Map<String, Object>) tokenDocRaw;
+
+        Integer expectedVersion = parseIntegerField(payload, "expectedTokenVersion", "expected_token_version");
+        String authState = firstNonBlank(payload, "authState", "auth_state");
+        LocalDateTime xhomeExpiresAt = parseDateTimeField(payload, "xhomeExpiresAt", "xhome_expires_at");
+
+        String agentId = requireAuthenticatedAgentId();
+        String merchantId = requireMerchantIdForAgent(agentId);
+        log.info(
+                "写入串流 Token 缓存 accountId={} taskId={} agent={} expectedVersion={}",
+                streamingAccountId,
+                taskId,
+                agentId,
+                expectedVersion);
+        return streamingAccountAuthCacheService.saveAuthCache(
+                streamingAccountId,
+                merchantId,
+                agentId,
+                tokenDoc,
+                expectedVersion,
+                authState,
+                xhomeExpiresAt);
+    }
+
+    @Override
+    public Map<String, Object> deleteStreamingAuthCache(String streamingAccountId, String taskId) {
+        if (!StringUtils.hasText(taskId)) {
+            throw new BusinessException(400, "taskId 不能为空");
+        }
+        Task task = requireTaskForAuthenticatedAgent(taskId);
+        if (!streamingAccountId.equals(task.getStreamingAccountId())) {
+            throw new BusinessException(403, "串流账号与任务不匹配");
+        }
+        String agentId = requireAuthenticatedAgentId();
+        String merchantId = requireMerchantIdForAgent(agentId);
+        log.info(
+                "清除串流 Token 缓存 accountId={} taskId={} agent={}",
+                streamingAccountId,
+                taskId,
+                agentId);
+        streamingAccountAuthCacheService.deleteAuthCache(streamingAccountId, merchantId);
+        return Map.of("deleted", true, "streamingAccountId", streamingAccountId);
+    }
+
+    private static Integer parseIntegerField(Map<String, Object> payload, String... keys) {
+        for (String key : keys) {
+            Object raw = payload.get(key);
+            if (raw == null) {
+                continue;
+            }
+            if (raw instanceof Number number) {
+                return number.intValue();
+            }
+            if (raw instanceof String text && StringUtils.hasText(text)) {
+                return Integer.parseInt(text.trim());
+            }
+        }
+        return null;
+    }
+
+    private static LocalDateTime parseDateTimeField(Map<String, Object> payload, String... keys) {
+        for (String key : keys) {
+            Object raw = payload.get(key);
+            if (raw == null) {
+                continue;
+            }
+            if (raw instanceof LocalDateTime dateTime) {
+                return dateTime;
+            }
+            if (raw instanceof String text && StringUtils.hasText(text)) {
+                return LocalDateTime.parse(text.trim());
+            }
+        }
+        return null;
     }
 
     private static String firstNonBlank(Map<String, Object> payload, String... keys) {

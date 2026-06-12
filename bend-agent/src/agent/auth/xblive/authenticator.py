@@ -8,6 +8,7 @@ SISU authorize → XSTS (gssv) → xHome login → /v6/servers/home 查主机。
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import math
@@ -25,7 +26,12 @@ from .models import XbliveAuthResult
 from .oauth_web import OAuthWebLogin
 from .pkce_util import generate_pkce_pair
 from .signature import create_signing_key, make_signature, proof_key_dict
-from .token_storage import delete_token_doc, load_token_doc, save_token_doc
+from .token_storage import (
+    invalidate_token_cache,
+    persist_token_doc,
+    resolve_token_doc,
+    should_preserve_cache_on_failure,
+)
 
 logger = logging.getLogger("xblive_authenticator")
 
@@ -196,7 +202,6 @@ class XbliveAuthenticator:
             logger.info("account %s 从 refresh token 续期", self.username)
             errno = await self.refresh_user_token()
             if errno == E.ERRXS_OAUTH_TOKEN:
-                delete_token_doc(self.username)
                 errno = await self.get_device_token(True)
         else:
             logger.info("account %s 全量 SISU 认证", self.username)
@@ -684,15 +689,25 @@ async def authenticate_account(
     password: str,
     verify_code: str = "",
     *,
+    streaming_account_id: str = "",
+    task_id: str = "",
+    platform_client: Optional[Any] = None,
     force_full: bool = False,
     web_headless: bool = True,
 ) -> Tuple[int, Optional[XbliveAuthResult]]:
     """
-    执行 xblive 认证；成功时持久化 token 缓存。
+    执行 xblive 认证；成功时持久化 token 缓存（平台 + 本地）。
 
     返回 (errno, XbliveAuthResult|None)。
     """
-    token_doc = None if force_full else load_token_doc(email)
+    token_doc, platform_version = await resolve_token_doc(
+        email,
+        streaming_account_id=streaming_account_id,
+        task_id=task_id,
+        platform_client=platform_client,
+        force_full=force_full,
+    )
+    snapshot_doc = copy.deepcopy(token_doc) if token_doc else None
     async with XbliveAuthenticator(
         email,
         password,
@@ -701,8 +716,35 @@ async def authenticate_account(
         web_headless=web_headless,
     ) as auth:
         errno = await auth.do_authentication()
+        doc = auth.to_token_doc()
         if errno == E.ERRXS_OK:
-            save_token_doc(email, auth.to_token_doc())
+            await persist_token_doc(
+                email,
+                doc,
+                streaming_account_id=streaming_account_id,
+                task_id=task_id,
+                platform_client=platform_client,
+                platform_token_version=platform_version,
+                errno=errno,
+            )
+        elif should_preserve_cache_on_failure(snapshot_doc, doc):
+            logger.info(
+                "account %s 认证失败(errno=%s)，缓存未变化，保留平台/本地原 token",
+                email,
+                errno,
+            )
+        else:
+            logger.warning(
+                "account %s 认证失败(errno=%s)，清除平台与本地 token 缓存",
+                email,
+                errno,
+            )
+            await invalidate_token_cache(
+                email,
+                streaming_account_id=streaming_account_id,
+                task_id=task_id,
+                platform_client=platform_client,
+            )
+        if errno == E.ERRXS_OK:
             return errno, auth.build_result()
-        save_token_doc(email, auth.to_token_doc())
         return errno, None

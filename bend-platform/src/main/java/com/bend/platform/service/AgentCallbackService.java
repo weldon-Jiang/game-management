@@ -42,6 +42,15 @@ public interface AgentCallbackService {
      */
     Map<String, Object> ensureHostBinding(String streamingAccountId, Map<String, Object> payload);
 
+    /** Step1 读取串流账号 xblive Token 平台缓存。 */
+    Map<String, Object> getStreamingAuthCache(String streamingAccountId, String taskId);
+
+    /** Step1 写入/刷新串流账号 xblive Token 平台缓存。 */
+    Map<String, Object> saveStreamingAuthCache(String streamingAccountId, Map<String, Object> payload);
+
+    /** Step1 清除串流账号 xblive Token 平台缓存。 */
+    Map<String, Object> deleteStreamingAuthCache(String streamingAccountId, String taskId);
+
     void reportTaskStatusLegacy(String taskId, Map<String, String> payload);
 
     void updateGameAccountStatusLegacy(String taskId, String gameAccountId, Map<String, Object> payload);
