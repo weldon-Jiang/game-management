@@ -1,8 +1,14 @@
+> **架构勘误（2026-06-13）**：生产 Step2–3 为 **xblive/xsrp（GSSV 云端 + WebRTC）**，入口见 `bend-agent/src/agent/automation/step2_xsrp.py`、`step3_xsrp.py`。下文 SmartGlass LAN、`step2_xbox_streaming.py` 等为**历史方案**；SmartGlass UDP 仅作 LAN 发现/唤醒兜底。详见 [00_架构勘误_xsrp_step2.md](./00_架构勘误_xsrp_step2.md)。
+
 # Streaming vs Agent 技术栈对比报告
 
-**版本**: 1.0
-**最后更新**: 2026-05-30
+**版本**: 1.1（勘误 2026-06-13）
+**最后更新**: 2026-06-13
 **对比项目**: Streaming (C++/Python) vs Bend Agent (Python)
+
+### 当前结论（2026-06-13）
+
+Agent Step2–3 已与 Streaming **同协议族**（GSSV + WebRTC / xsrp 栈），不再以 SmartGlass LAN 为主链路。下文 2026-05-30 对比表保留作历史参考。
 
 ---
 
@@ -14,9 +20,9 @@
 |----------|-----------|-------|----------|
 | **视频解码** | FFmpeg (C++) + GPU NVDEC | imageio-ffmpeg + GPU检测 | ⚠️ 技术栈不同 |
 | **窗口渲染** | SDL2 (C++/pygame) | pygame + win32gui | ⚠️ 混合方案 |
-| **手柄控制** | SDL2 GameController | pygame + SmartGlass | ✅ 功能等价 |
+| **手柄控制** | SDL2 GameController | DataChannel + `ControllerProtocol` | ✅ 功能等价（协议不同） |
 | **场景识别** | OpenCV matchTemplate | OpenCV matchTemplate | ✅ 功能等价 |
-| **Xbox通信** | xsrpwrapper (C++) | SmartGlass协议 | ⚠️ 技术栈不同 |
+| **Xbox通信** | xsrpwrapper (C++) / libxsrp | GSSV REST + WebRTC（xsrp 栈） | ✅ 同协议族（实现语言不同） |
 | **GUI界面** | PySide6 (Qt6) | 无 (Web管理) | ✅ Agent更轻量 |
 | **进程管理** | multiprocessing | asyncio | ⚠️ 技术栈不同 |
 
@@ -34,16 +40,16 @@
 │       ├── FFmpeg 硬件解码 (C++)                                 │
 │       ├── SDL2 窗口渲染 (C++)                                   │
 │       ├── SDL2 手柄控制 (C++)                                   │
-│       └── SmartGlass 通信 (C++)                                 │
+│       └── GSSV/WebRTC 串流 (C++ xsrp)                           │
 │                                                                  │
-│  Agent: Python 原生实现                                         │
+│  Agent: Python 原生实现（2026-06 起 xsrp 热路径）               │
 │  ─────────────────────────────────────────────────────────────  │
-│  Python asyncio                                                 │
+│  Python asyncio + aiortc                                        │
 │       │                                                          │
-│       ├── imageio-ffmpeg (Python) + GPU 检测                    │
-│       ├── pygame 窗口渲染 (Python)                              │
-│       ├── pygame 手柄 + SmartGlass (Python)                     │
-│       └── asyncio TCP (Python)                                  │
+│       ├── WebRTC 视频帧（Step3 XsrpFrameCapture）               │
+│       ├── SDL 窗口（step3_display_helpers）                     │
+│       ├── DataChannel 手柄（ControllerProtocol）                │
+│       └── GSSV 云端 play（step2_xsrp_connect）                  │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -237,7 +243,7 @@ await protocol.send_gamepad_state(signals)
 | **发送方式** | xsrp C++ 模块 | SmartGlass asyncio | 技术栈不同 |
 | **协议封装** | C++ xsrp | Python asyncio | 功能等价 |
 
-**结论**: Agent 手柄控制功能已完整实现，通过 SmartGlass 协议发送。
+**结论（2026-06-13）**: Agent 生产路径通过 **WebRTC DataChannel + `ControllerProtocol`** 发送手柄；SmartGlass TCP 为历史/调试路径。下表为 2026-05-30 历史对比。
 
 ---
 

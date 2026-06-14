@@ -1,3 +1,5 @@
+> **架构勘误（2026-06-13）**：生产 Step2–3 为 **xblive/xsrp（GSSV 云端 + WebRTC）**，入口见 `bend-agent/src/agent/automation/step2_xsrp.py`、`step3_xsrp.py`。下文 SmartGlass LAN、`step2_xbox_streaming.py` 等为**历史方案**；SmartGlass UDP 仅作 LAN 发现/唤醒兜底。详见 [00_架构勘误_xsrp_step2.md](./00_架构勘误_xsrp_step2.md)。
+
 # RTP 解封装实现方案
 
 **版本**: 1.0
@@ -527,7 +529,7 @@ class XboxStreamController:
             self._video_callback(nalu, nal_type)
 ```
 
-### 4.3 修改 `step2_xbox_streaming.py`
+### 4.3 修改 `step2_xsrp.py`
 
 **当前状态**：
 - Xbox 连接
@@ -584,7 +586,7 @@ async def _start_video_receiver(context, ...):
 | 任务 | 说明 | 工作量 |
 |------|------|--------|
 | 修改 `stream_controller.py` | 添加视频接收 | 0.5天 |
-| 修改 `step2_xbox_streaming.py` | 集成视频流 | 0.5天 |
+| 修改 `step2_xsrp.py` | 集成视频流 | 0.5天 |
 | 端到端测试 | 验证完整流程 | 1天 |
 
 ---

@@ -1,6 +1,6 @@
 # Bend Platform - Agent 全局技能文档
 
-**版本** 3.4 · **更新** 2026-06-07 · **范围** 后端 (Spring Boot 3.2.5/Java 17) · 网关 (Spring Cloud Gateway 4.1.x) · 前端 (Vue 3.5/Vite 8) · Agent (Python 3.9/asyncio)
+**版本** 3.5 · **更新** 2026-06-13 · **范围** 后端 (Spring Boot 3.2.5/Java 17) · 网关 (Spring Cloud Gateway 4.1.x) · 前端 (Vue 3.5/Vite 8) · Agent (Python 3.9/asyncio)
 
 ---
 
@@ -105,7 +105,7 @@ docker compose -f docker/docker-compose.yml logs -f backend
 
 ### Agent `bend-agent`（20 子包，Python 3.9 / asyncio）
 
-`automation/` 四步骤（核心） · `api/` HTTP+WS · `auth/` MSAL · `core/` 中央管理/日志/路径 · `discovery/` Xbox 发现 · `game/` 账号切换 · `gssv/` GSSV API · `input/` 手柄/键盘 · `orchestration/` 两阶段编排 · `**runtime/` 并发原语**（task_registry/phase_fsm/input_gate/input_focus/task_control_handler） · `scene/` 场景检测 · `session/` `system/` `task/` 调度执行 · `utils/`（crypto） · `vision/` 模板/解码/捕获 · `window/` `windows/` SDL · `xbox/` SmartGlass/LAN · `xhome_stream/`
+`automation/` 四步骤（核心） · `api/` HTTP+WS · `auth/` MSAL/xblive 路由 · `core/` 中央管理/日志/路径 · `discovery/` Xbox 发现 · `game/` 账号切换 · `gssv/` GSSV API · `input/` 手柄/键盘 · `orchestration/` 两阶段编排 · `**runtime/` 并发原语**（task_registry/phase_fsm/input_gate/input_focus/task_control_handler） · `scene/` 场景检测 · `session/` `system/` `task/` 调度执行 · `utils/`（crypto） · `vision/` 模板/解码/捕获 · `window/` `windows/` SDL · `xbox/` GSSV 云端串流 + LAN 发现（SmartGlass UDP 仅发现/唤醒兜底） · `xhome_stream/`
 
 配置：`configs/agent.yaml` · `configs/scene_schemas.py` (SCENE_SCHEMAS 100 行 + SCENE_NAMES ID 1-204) · `configs/scene_transitions.py` · `templates/{场景}.{模板}.png`
 
@@ -195,9 +195,9 @@ headers['X-Agent-Secret'] = base64.b64encode(agent_secret.encode()).decode()
 
 | 步骤  | 文件                              | 主入口                       | 职责                           |
 | --- | ------------------------------- | ------------------------- | ---------------------------- |
-| 1   | `step1_stream_account_login.py` | `step1_execute_login`     | MSAL 设备码 + Token 自动刷新        |
-| 2   | `step2_xbox_streaming.py`       | `step2_execute_streaming` | GSSV∩LAN 发现 + SmartGlass 握手 |
-| 3   | `step3_streaming_init.py`       | `step3_streaming_init`    | SDL 窗口 + GPU 解码              |
+| 1   | `step1_xblive_login.py`（`auth/step1_router`） | `step1_execute_login`     | xblive 认证 + Xbox/GSSV Token        |
+| 2   | `step2_xsrp.py`（`step2_router` → `xbox/step2_xsrp_connect.py`） | `step2_execute_streaming` | GSSV 云端发现 + play/WebRTC 握手（对齐 streaming/xsrp OpenStreaming 段） |
+| 3   | `step3_xsrp.py`（`auth/step3_router`） | `step3_execute_xsrp_init` | WebRTC 帧捕获 + SDL 窗口 + 输入通道就绪              |
 | 4   | `step4_game_automation.py`      | `step4_execute_gaming`    | 游戏自动化（`task_type` **仅此处生效**） |
 
 
@@ -444,5 +444,6 @@ task:
 | 3.2 | 2026-06-07              | 全系统盘点修订；架构红线 + 并发反模式禁忌；WS 协议矩阵；Docker 4 profile + `--env-file`；精简至约 350 行 |
 | 3.3 | 2026-06-07              | 串流任务长寿命化（任务复用 + `streaming_session` 多轮）；Step4 失败保留串流（`automation_failed`）；`InputGate` 统一收敛自动化按键；新增 Step1–3 vs Step4 边界表 |
 | 3.4 | 2026-06-07              | 强化前端、后端、Agent 注释规范；要求接口、方法、字段、逻辑分支、自动化步骤与核心环节写清楚注释 |
+| 3.5 | 2026-06-13              | 文档对齐 xsrp Step2–3：GSSV 云端 + WebRTC 为生产热路径；SmartGlass 仅 LAN 发现/唤醒兜底 |
 
 
