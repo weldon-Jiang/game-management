@@ -1,15 +1,20 @@
 """
 InputPump — 物理输入 DataChannel 泵。
 
-焦点任务 125Hz，背景 8Hz，保持 input DataChannel 不断开并持续发送手柄状态。
+焦点任务 125Hz，背景 10Hz，持续发送 neutral gamepad 保持 input DataChannel。
 """
 
 import asyncio
+import time
 from typing import Any, Optional
 
 from ..core.config import config as app_config
 from ..core.logger import get_logger
 from ..runtime.input_focus import InputFocusManager
+from ..xbox.controller_write import (
+    get_controller_written_timestamp,
+    send_gssv_idle_pulse,
+)
 from .controller_protocol import ControllerProtocol, ControllerSignal
 
 
@@ -29,10 +34,39 @@ class InputPump:
         self._focus = focus_manager or InputFocusManager.get_instance()
         self.logger = get_logger("input_pump")
         focus_hz = float(app_config.get("input.pump_focus_hz", 125))
-        bg_hz = float(app_config.get("input.pump_background_hz", 8))
+        bg_hz = float(app_config.get("input.pump_background_hz", 10))
         self._focus_interval = 1.0 / max(1.0, focus_hz)
         self._background_interval = 1.0 / max(1.0, bg_hz)
         self._task: Optional[asyncio.Task] = None
+
+    async def _send_void_or_pulse(self) -> None:
+        """
+        人工输入转发；void 保活由 xsrp access 输入环负责（对齐 xsrpd WriteControllerData）。
+
+        非 xsrp 栈或无 access 环时回退为本地 neutral 写入。
+        """
+        from ..xbox.controller_write import NEUTRAL_GAMEPAD, schedule_input_reconnect, write_controller_final
+        from ..xbox.stream_keepalive import is_input_channel_open
+        from ..xbox.xsrp_access_input_loop import is_xsrp_access_input_loop_running
+
+        session = getattr(self._context, "xbox_session", None)
+        if session is None or not is_input_channel_open(session):
+            schedule_input_reconnect(self._context)
+            return
+
+        signal = self._collect_signal()
+        if not signal.is_void():
+            await self._protocol.send_manual_signal(signal)
+            return
+
+        if is_xsrp_access_input_loop_running(self._context):
+            return
+
+        await write_controller_final(
+            session,
+            dict(NEUTRAL_GAMEPAD),
+            context=self._context,
+        )
 
     @property
     def running(self) -> bool:
@@ -105,13 +139,19 @@ class InputPump:
         while True:
             try:
                 runtime = getattr(self._context, "_stream_runtime", None)
-                if runtime is not None and not runtime.is_manual_input_allowed():
-                    await asyncio.sleep(self._background_interval)
-                    continue
-                focused = self._focus.should_accept_physical_input(self._task_id)
-                interval = self._focus_interval if focused else self._background_interval
-                signal = self._collect_signal()
-                await self._protocol.send_manual_signal(signal)
+                manual_allowed = (
+                    runtime is None or runtime.is_manual_input_allowed()
+                )
+                if manual_allowed:
+                    focused = self._focus.should_accept_physical_input(self._task_id)
+                    interval = (
+                        self._focus_interval if focused else self._background_interval
+                    )
+                    await self._send_void_or_pulse()
+                else:
+                    # Step4 graph/play：自动化按键为主；无输入时补 DPadUp。
+                    interval = self._background_interval
+                    await self._send_void_or_pulse()
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 raise

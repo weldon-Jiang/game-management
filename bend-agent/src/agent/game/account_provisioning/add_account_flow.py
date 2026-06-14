@@ -1,6 +1,6 @@
 """AddAccountFlow — 在 Xbox 主机添加微软账号并同步 Gamertag 到平台。"""
 
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from ...core.logger import get_logger
 from ...task.task_context import GameAccountInfo
@@ -14,6 +14,8 @@ class AddAccountFlow:
         platform_client: Any = None,
         frame_getter: Any = None,
         stream_session: Any = None,
+        reconnect_callback: Optional[Callable[[], Awaitable[bool]]] = None,
+        task_context: Any = None,
     ):
         self.logger = get_logger("add_account_flow")
         self._scene = scene_detector
@@ -21,6 +23,8 @@ class AddAccountFlow:
         self._platform_client = platform_client
         self._frame_getter = frame_getter
         self._stream_session = stream_session
+        self._reconnect_callback = reconnect_callback
+        self._task_context = task_context
 
     def _build_switcher(self):
         from ..account_switcher import AccountSwitcher
@@ -42,21 +46,22 @@ class AddAccountFlow:
             switcher.set_frame_getter(self._frame_getter)
         if self._stream_session is not None:
             switcher.set_stream_session(self._stream_session)
+        if self._reconnect_callback is not None:
+            switcher.set_reconnect_callback(self._reconnect_callback)
+        if self._task_context is not None:
+            switcher.set_task_context(self._task_context)
         if self._platform_client and hasattr(self._platform_client, "update_profile_binding"):
 
             async def _sync_binding(
                 ga_id: str,
-                position_index: int,
                 game_name: Optional[str] = None,
             ) -> None:
                 await self._platform_client.update_profile_binding(
                     ga_id,
-                    profile_bound=True,
-                    position_index=position_index,
                     game_name=game_name,
                 )
 
-            switcher.set_profile_bound_callback(_sync_binding)
+            switcher.set_gamertag_sync_callback(_sync_binding)
         return switcher
 
     async def run(

@@ -32,7 +32,11 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import com.bend.platform.util.PlatformTypeUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -54,6 +58,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class AgentCallbackServiceImpl implements AgentCallbackService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final Set<String> TERMINAL_TASK_STATUSES =
+            Set.of("completed", "failed", "cancelled", "stopped");
+    private static final Set<String> TERMINAL_SESSION_PHASES =
+            Set.of("closed", "failed", "closing");
 
     private final TaskService taskService;
     private final GameAccountService gameAccountService;
@@ -159,6 +167,13 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         if ("pending".equals(task.getStatus())) {
             task.setStatus("running");
             task.setStartedTime(LocalDateTime.now());
+        } else if (shouldPromoteStreamingTaskToRunning(task, step)) {
+            // 复用串流任务时 status 可能残留上一轮 completed，Step/会话进度到达后拉回 running
+            task.setStatus("running");
+            task.setCompletedTime(null);
+            if (task.getStartedTime() == null) {
+                task.setStartedTime(LocalDateTime.now());
+            }
         }
 
         if (step != null) {
@@ -284,6 +299,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         }
 
         clearStreamingAccountBinding(task);
+        releaseTaskHostLease(task);
         loadControlService.decrementTaskCount(task.getTargetAgentId(), taskId);
         taskMapper.updateById(task);
 
@@ -352,6 +368,7 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         }
 
         clearStreamingAccountBinding(task);
+        releaseTaskHostLease(task);
         loadControlService.decrementTaskCount(task.getTargetAgentId(), taskId);
         taskMapper.updateById(task);
 
@@ -464,9 +481,6 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
                 gaInfo.put("gamertag", ga.getGameName());
                 gaInfo.put("gameName", ga.getGameName());
                 gaInfo.put("dailyMatchLimit", ga.getDailyMatchLimit());
-                if (ga.getPositionIndex() != null) {
-                    gaInfo.put("positionIndex", ga.getPositionIndex());
-                }
                 gameAccounts.add(gaInfo);
             }
         }
@@ -724,10 +738,29 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
                 return dateTime;
             }
             if (raw instanceof String text && StringUtils.hasText(text)) {
-                return LocalDateTime.parse(text.trim());
+                return parseFlexibleDateTime(text.trim());
             }
         }
         return null;
+    }
+
+    /** 兼容 Agent 侧 ISO-8601（含 +00:00 / Z 时区后缀）与无时区 LocalDateTime 字符串。 */
+    private static LocalDateTime parseFlexibleDateTime(String text) {
+        try {
+            return LocalDateTime.parse(text);
+        } catch (DateTimeParseException ignored) {
+            // fall through
+        }
+        try {
+            return OffsetDateTime.parse(text).toLocalDateTime();
+        } catch (DateTimeParseException ignored) {
+            // fall through
+        }
+        try {
+            return Instant.parse(text).atZone(ZoneOffset.UTC).toLocalDateTime();
+        } catch (DateTimeParseException e) {
+            throw new BusinessException(400, "无法解析时间: " + text);
+        }
     }
 
     private static String firstNonBlank(Map<String, Object> payload, String... keys) {
@@ -875,15 +908,26 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             });
         }
         if (host != null && host.getLocked() != null && host.getLocked()) {
-            boolean expired = host.getLockExpiresTime() != null
-                    && host.getLockExpiresTime().isBefore(LocalDateTime.now());
-            if (!expired) {
-                result.put("locked", true);
-                if (!result.containsKey("leaseHolderAgentId")) {
-                    result.put("leaseHolderAgentId", host.getLockedByAgentId());
+            String lockTaskId = host.getLockedByTaskId();
+            if (StringUtils.hasText(lockTaskId)) {
+                Task lockTask = taskMapper.selectById(lockTaskId);
+                if (lockTask != null && TERMINAL_TASK_STATUSES.contains(lockTask.getStatus())) {
+                    xboxHostService.unlock(
+                            merchantId, host.getId(), host.getLockedByAgentId(), lockTaskId);
+                    host = xboxHostService.findByMerchantIdAndXboxId(merchantId, serverId);
                 }
-                if (!result.containsKey("leaseHolderTaskId")) {
-                    result.put("leaseHolderTaskId", host.getLockedByTaskId());
+            }
+            if (host != null && host.getLocked() != null && host.getLocked()) {
+                boolean expired = host.getLockExpiresTime() != null
+                        && host.getLockExpiresTime().isBefore(LocalDateTime.now());
+                if (!expired) {
+                    result.put("locked", true);
+                    if (!result.containsKey("leaseHolderAgentId")) {
+                        result.put("leaseHolderAgentId", host.getLockedByAgentId());
+                    }
+                    if (!result.containsKey("leaseHolderTaskId")) {
+                        result.put("leaseHolderTaskId", host.getLockedByTaskId());
+                    }
                 }
             }
         }
@@ -1204,6 +1248,15 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             if ("automating".equals(phase)) {
                 task.setGameActionPending(false);
             }
+            // STEP2/3 失败后 Agent 会依次上报 closing → closed；勿将任务拉回 running
+            if (TERMINAL_SESSION_PHASES.contains(phase.toLowerCase())
+                    && "FAILED".equalsIgnoreCase(task.getStepStatus())
+                    && "running".equals(task.getStatus())) {
+                task.setStatus("failed");
+                if (task.getCompletedTime() == null) {
+                    task.setCompletedTime(LocalDateTime.now());
+                }
+            }
         }
         if (message != null) {
             task.setProgressMessage(message);
@@ -1244,12 +1297,56 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
                 && StringUtils.hasText(task.getStreamingAccountId());
     }
 
+    /**
+     * 长寿命串流任务在新会话活跃期，将上一轮终态（completed/stopped/failed）拉回 running。
+     */
+    private boolean shouldPromoteStreamingTaskToRunning(Task task, String step) {
+        if (!isLongLivedStreamingTask(task)) {
+            return false;
+        }
+        if ("running".equals(task.getStatus()) || "paused".equals(task.getStatus()) || "pending".equals(task.getStatus())) {
+            return false;
+        }
+        String phase = task.getSessionPhase();
+        if (phase != null && phase.startsWith("paused")) {
+            return false;
+        }
+        if (isRunningSessionPhase(phase)) {
+            return true;
+        }
+        return isStreamingPreparationStep(step) || "STEP4".equals(step) || "SESSION".equals(step);
+    }
+
     private boolean isStreamingPreparationStep(String step) {
         return "STEP1".equals(step) || "STEP2".equals(step) || "STEP3".equals(step);
     }
 
     private boolean isRunningSessionPhase(String phase) {
-        return !"closed".equals(phase) && !"failed".equals(phase);
+        if (!StringUtils.hasText(phase)) {
+            return false;
+        }
+        return !TERMINAL_SESSION_PHASES.contains(phase.toLowerCase());
+    }
+
+    /** 任务终态或取消时释放 Redis 租约与 MySQL 主机锁，避免后续串流被误报占用。 */
+    private void releaseTaskHostLease(Task task) {
+        if (task == null || !StringUtils.hasText(task.getXboxHostId())) {
+            return;
+        }
+        try {
+            XboxHost host = xboxHostService.findById(task.getXboxHostId());
+            if (host == null) {
+                return;
+            }
+            releaseStreamLease(
+                    host.getMerchantId(),
+                    host.getXboxId(),
+                    host.getId(),
+                    task.getTargetAgentId(),
+                    task.getId());
+        } catch (Exception e) {
+            log.warn("释放任务主机租约失败 - TaskID: {}", task.getId(), e);
+        }
     }
 
     private String getPayloadSessionId(Map<String, Object> data) {

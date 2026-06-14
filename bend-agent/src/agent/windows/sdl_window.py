@@ -33,6 +33,26 @@ except ImportError:
     PYGAME_AVAILABLE = False
     pygame = None
 
+# Windows 任务栏按进程 AppUserModelID 分组；未设置时会沿用 python.exe 图标。
+_WIN32_APP_USER_MODEL_ID = "com.bend.agent.streamwindow"
+_win32_app_user_model_id_applied = False
+
+
+def ensure_win32_app_user_model_id() -> None:
+    """在创建任何 HWND 之前调用，使任务栏使用窗口自定义图标而非 python.exe。"""
+    global _win32_app_user_model_id_applied
+    if _win32_app_user_model_id_applied or sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            _WIN32_APP_USER_MODEL_ID
+        )
+        _win32_app_user_model_id_applied = True
+    except Exception:
+        pass
+
 
 class SDLWindowState(Enum):
     """SDL窗口状态枚举"""
@@ -134,6 +154,7 @@ class SDLStreamWindow:
                 import os
                 os.environ.setdefault('SDL_VIDEO_VSYNC', '1')
 
+            ensure_win32_app_user_model_id()
             pygame.init()
 
             flags = 0
@@ -373,6 +394,8 @@ class SDLStreamWindow:
         try:
             import ctypes
 
+            ensure_win32_app_user_model_id()
+
             hwnd = self._get_hwnd()
             if not hwnd:
                 return
@@ -382,19 +405,42 @@ class SDLStreamWindow:
             ICON_BIG = 1
             IMAGE_ICON = 1
             LR_LOADFROMFILE = 0x0010
+            LR_DEFAULTSIZE = 0x0040
+            GCLP_HICON = -14
+            GCLP_HICONSM = -34
             user32 = ctypes.windll.user32
+            ico_path_str = str(ico_path)
 
-            for icon_id, width, height in ((ICON_SMALL, 16, 16), (ICON_BIG, 32, 32)):
-                hicon = user32.LoadImageW(
-                    None,
-                    str(ico_path),
-                    IMAGE_ICON,
-                    width,
-                    height,
-                    LR_LOADFROMFILE,
+            hicon_small = user32.LoadImageW(
+                None, ico_path_str, IMAGE_ICON, 16, 16, LR_LOADFROMFILE
+            )
+            # 任务栏/Alt+Tab 使用 ICON_BIG；0×0 + LR_DEFAULTSIZE 取 ICO 内最佳尺寸。
+            hicon_big = user32.LoadImageW(
+                None,
+                ico_path_str,
+                IMAGE_ICON,
+                0,
+                0,
+                LR_LOADFROMFILE | LR_DEFAULTSIZE,
+            )
+            if not hicon_big:
+                hicon_big = user32.LoadImageW(
+                    None, ico_path_str, IMAGE_ICON, 32, 32, LR_LOADFROMFILE
                 )
-                if hicon:
-                    user32.SendMessageW(hwnd, WM_SETICON, icon_id, hicon)
+
+            if hicon_small:
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_small)
+            if hicon_big:
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_big)
+                # 部分 SDL 窗口需同时设置类图标，任务栏才会刷新。
+                if hasattr(user32, "SetClassLongPtrW"):
+                    user32.SetClassLongPtrW(hwnd, GCLP_HICON, hicon_big)
+                    if hicon_small:
+                        user32.SetClassLongPtrW(hwnd, GCLP_HICONSM, hicon_small)
+                else:
+                    user32.SetClassLongW(hwnd, GCLP_HICON, hicon_big)
+                    if hicon_small:
+                        user32.SetClassLongW(hwnd, GCLP_HICONSM, hicon_small)
         except Exception as exc:
             self.logger.debug("win32 window icon failed: %s", exc)
 

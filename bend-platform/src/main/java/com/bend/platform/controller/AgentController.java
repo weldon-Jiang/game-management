@@ -3,12 +3,16 @@ package com.bend.platform.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.bend.platform.dto.AgentInstancePageRequest;
 import com.bend.platform.dto.ApiResponse;
+import com.bend.platform.dto.AgentKeyboardMappingResponse;
+import com.bend.platform.dto.UpdateAgentKeyboardMappingRequest;
 import com.bend.platform.dto.UpdateAgentNameRequest;
+import com.bend.platform.service.AgentKeyboardMappingService;
 import jakarta.validation.Valid;
 import com.bend.platform.entity.AgentInstance;
 import com.bend.platform.entity.MerchantRegistrationCode;
 import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.MerchantRegistrationCodeService;
+import com.bend.platform.service.TaskService;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
 import com.bend.platform.service.MerchantRegistrationCodeService.ActivationResult;
 import com.bend.platform.util.AgentAuthUtils;
@@ -52,6 +56,8 @@ public class AgentController {
 
     private final AgentInstanceService agentInstanceService;
     private final MerchantRegistrationCodeService registrationCodeService;
+    private final TaskService taskService;
+    private final AgentKeyboardMappingService agentKeyboardMappingService;
 
     /**
      * Agent注册接口
@@ -148,8 +154,10 @@ public class AgentController {
                 existing.setLastOnlineTime(LocalDateTime.now());
                 existing.setUninstallReason(null);
                 log.info("Agent已恢复 - AgentID: {}, 商户ID: {}", finalAgentId, merchantId);
-            } else if ("uninstalled".equals(existing.getStatus()) || "offline".equals(existing.getStatus())) {
-                // 重新上线 - 更新状态
+            } else if ("uninstalled".equals(existing.getStatus())
+                    || "offline".equals(existing.getStatus())
+                    || "reconnecting".equals(existing.getStatus())) {
+                // 重新上线 - 更新状态（含 WS 断线宽限中的 reconnecting）
                 existing.setStatus("online");
                 existing.setLastOnlineTime(LocalDateTime.now());
                 existing.setUninstallReason(null);
@@ -157,6 +165,8 @@ public class AgentController {
             }
             
             agentInstanceService.updateByAgentId(existing);
+            // 进程冷启动会丢失内存任务；注册时清理平台上仍标记活跃的孤儿任务
+            taskService.cleanupIncompleteTasksAndRestoreAccounts(finalAgentId);
         } else {
             // 创建新的Agent实例 - 生成新的凭证
             finalAgentId = agentId != null && !agentId.isEmpty() ? agentId : "agent-" + UUID.randomUUID().toString().substring(0, 8);
@@ -191,6 +201,7 @@ public class AgentController {
         response.put("osVersion", osVersion);
         response.put("cpuCount", cpuCount);
         response.put("maxConcurrentTasks", maxConcurrentTasks);
+        response.put("keyboardMapping", agentKeyboardMappingService.getEffectiveBindingsForAgent(finalAgentId));
 
         return ApiResponse.success("注册成功", response);
     }
@@ -212,7 +223,7 @@ public class AgentController {
      * - 接收Agent当前状态和任务信息
      */
     @PostMapping("/heartbeat")
-    public ApiResponse<Void> heartbeat(
+    public ApiResponse<Map<String, Object>> heartbeat(
             @RequestHeader("X-Agent-Id") String agentId,
             @RequestHeader("X-Agent-Secret") String agentSecret,
             @RequestParam(required = false) String status,
@@ -230,7 +241,44 @@ public class AgentController {
         }
 
         agentInstanceService.updateHeartbeat(agentId, status, currentTaskId, currentStreamingId, version);
-        return ApiResponse.success("心跳接收成功", null);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("keyboardMapping", agentKeyboardMappingService.getEffectiveBindingsForAgent(agentId));
+        return ApiResponse.success("心跳接收成功", payload);
+    }
+
+    /**
+     * 平台默认键盘映射模板（未配置 Agent 时使用）。
+     */
+    @GetMapping("/keyboard-mapping/default")
+    public ApiResponse<AgentKeyboardMappingResponse> getDefaultKeyboardMapping() {
+        return ApiResponse.success(agentKeyboardMappingService.buildDefaultResponse());
+    }
+
+    /**
+     * 查询指定 Agent 的键盘映射（含默认/自定义与生效键位）。
+     */
+    @GetMapping("/{agentId}/keyboard-mapping")
+    public ApiResponse<AgentKeyboardMappingResponse> getAgentKeyboardMapping(@PathVariable String agentId) {
+        return ApiResponse.success(agentKeyboardMappingService.getMappingForAgent(agentId));
+    }
+
+    /**
+     * 更新 Agent 键盘映射；resetToDefault=true 或 bindings=null 恢复默认。
+     * 保存后通过 WebSocket 通知在线 Agent 热更新。
+     */
+    @PutMapping("/{agentId}/keyboard-mapping")
+    public ApiResponse<AgentKeyboardMappingResponse> updateAgentKeyboardMapping(
+            @PathVariable String agentId,
+            @RequestBody UpdateAgentKeyboardMappingRequest request) {
+        AgentKeyboardMappingResponse response = agentKeyboardMappingService.updateMapping(agentId, request);
+        Map<String, Object> command = new HashMap<>();
+        command.put("command", "update_keyboard_mapping");
+        command.put("params", Map.of(
+                "bindings", response.getEffectiveBindings(),
+                "usingDefault", response.isUsingDefault()
+        ));
+        AgentWebSocketEndpoint.sendMessageToAgent(agentId, "command", command);
+        return ApiResponse.success("键盘映射已更新", response);
     }
 
     /**

@@ -170,6 +170,45 @@ class GssvWebRtcSession:
     def is_input_ready(self) -> bool:
         return self._input_ready
 
+    def get_input_channel_ready_state(self) -> Optional[str]:
+        """返回 input DataChannel readyState；无 channel 时 None。"""
+        channel = self._input_channel
+        if channel is None:
+            return None
+        return getattr(channel, "readyState", None)
+
+    def is_input_channel_open(self) -> bool:
+        return self.get_input_channel_ready_state() == "open"
+
+    async def try_restore_input(self) -> bool:
+        """
+        message/control 仍 open 且 input channel 物理 open 时，重发授权与 ClientMetadata。
+        用于 _input_ready 标志与 channel 状态不同步时的轻量恢复（无需整段重连）。
+        """
+        if self._input_ready and self.is_input_channel_open():
+            return True
+        if not self.is_input_channel_open():
+            return False
+        msg_state = getattr(self._message_channel, "readyState", "")
+        if msg_state != "open" or not self._control_channel:
+            return False
+        self._send_control_json(_authorization_request())
+        self._send_control_json(_gamepad_changed(0))
+        self._send_input_bytes(self._input_sender.client_metadata_packet())
+        self._input_ready = True
+        self.logger.info("GSSV input 通道 handshake 已重发")
+        return True
+
+    async def wait_for_input_channel(self, timeout: float = 5.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if await self.try_restore_input():
+                return True
+            if self._input_ready and self.is_input_channel_open():
+                return True
+            await asyncio.sleep(0.15)
+        return self._input_ready and self.is_input_channel_open()
+
     @property
     def session_path(self) -> str:
         return self._play_ctx.session_path
@@ -722,9 +761,17 @@ class GssvWebRtcSession:
         return None
 
     async def send_gamepad(self, gamepad_data: Dict[str, Any]) -> bool:
-        if not self._input_ready or not self._input_channel:
+        if not self._input_ready and self.is_input_channel_open():
+            await self.try_restore_input()
+        if not self._input_channel:
             return False
         if getattr(self._input_channel, "readyState", "") != "open":
+            return False
+        if not self._input_ready:
+            self.logger.debug(
+                "send_gamepad 跳过: input_ready=False state=%s",
+                self.get_input_channel_ready_state(),
+            )
             return False
         try:
             packet = self._input_sender.next_gamepad_packet(gamepad_data)
@@ -735,17 +782,19 @@ class GssvWebRtcSession:
             return False
 
     async def send_keepalive(self) -> bool:
-        return await self.send_gamepad(
-            {
-                "buttons": 0,
-                "left_trigger": 0,
-                "right_trigger": 0,
-                "left_thumb_x": 0,
-                "left_thumb_y": 0,
-                "right_thumb_x": 0,
-                "right_thumb_y": 0,
-            }
-        )
+        """GSSV 空闲保活：DPadUp / Nexus 交替脉冲。"""
+        pulse_sec = float(config.get("gssv.xsrp_idle_pulse_sec", 0.05))
+        from ..xbox.controller_write import NEUTRAL_GAMEPAD, XSRP_DPAD_UP, XSRP_NEXUS
+
+        tick = getattr(self, "_keepalive_pulse_tick", 0)
+        self._keepalive_pulse_tick = tick + 1
+        mask = XSRP_DPAD_UP if tick % 2 == 0 else XSRP_NEXUS
+
+        ok = await self.send_gamepad({**NEUTRAL_GAMEPAD, "buttons": mask})
+        if not ok:
+            return False
+        await asyncio.sleep(pulse_sec)
+        return await self.send_gamepad(dict(NEUTRAL_GAMEPAD))
 
     async def close(self) -> None:
         if self._video_task and not self._video_task.done():

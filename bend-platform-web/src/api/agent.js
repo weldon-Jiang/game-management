@@ -13,5 +13,8 @@ export const agentApi = {
   delete: (agentId) => request.delete(`/api/agents/${agentId}`),
   batchDelete: (agentIds) => request.delete('/api/agents/batch', { data: agentIds }),
   cleanupUninstalled: () => request.delete('/api/agents/cleanup/uninstalled'),
-  cleanupOffline: (offlineMinutes) => request.delete('/api/agents/cleanup/offline', { params: { offlineMinutes } })
+  cleanupOffline: (offlineMinutes) => request.delete('/api/agents/cleanup/offline', { params: { offlineMinutes } }),
+  getKeyboardMapping: (agentId) => request.get(`/api/agents/${agentId}/keyboard-mapping`),
+  getDefaultKeyboardMapping: () => request.get('/api/agents/keyboard-mapping/default'),
+  updateKeyboardMapping: (agentId, data) => request.put(`/api/agents/${agentId}/keyboard-mapping`, data)
 }

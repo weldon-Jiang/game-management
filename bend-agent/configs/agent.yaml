@@ -75,10 +75,8 @@ input:
   click_delay: 0.1
   key_press_delay: 0.05
   move_duration: 0.2
-  pump_focus_hz: 125       # InputPump 焦点任务频率
-  pump_background_hz: 8    # 背景任务 keepalive 频率
-  pump_focus_hz: 125          # InputPump 焦点任务 DC 发送频率
-  pump_background_hz: 8       # 背景任务 keepalive 频率
+  pump_focus_hz: 125       # InputPump 人工输入采样（void 保活由 xsrp access 环 30Hz 负责）
+  pump_background_hz: 10   # 非焦点任务轮询间隔
 
 # ----------------------------------------------
 # 自动化任务配置
@@ -87,6 +85,20 @@ automation:
   max_retries: 3
   retry_delay: 2
   action_cooldown: 1
+
+# Step4：false=走 switch_to（内含主页 OCR 匹配则自动跳过切换）；true=强制跳过切换（仅调试）
+step4:
+  skip_account_switch: false
+
+# 调试：场景顺序截图 + 手柄输入日志（输出 logs/scene_capture/{task_id}/）
+debug:
+  scene_capture_enabled: true
+  input_trace_enabled: true
+  # 串流窗口人工调试（须先点击 Xbox 窗口获得焦点）
+  manual_input_enabled: true       # Step4 期间保留键盘；false=与旧行为一致停键盘
+  manual_takeover_hotkey: f8       # 切换人工接管（拦截自动化按键）
+  manual_screenshot_hotkey: f9     # 保存 960×540 → logs/manual_capture/{task_id}/
+  manual_help_hotkey: f10
 
 # ----------------------------------------------
 # 认证配置
@@ -120,9 +132,15 @@ gssv:
   cloud_first_frame_timeout_sec: 20
   cloud_post_provision_delay_sec: 2
   cloud_ice_exchange_timeout_sec: 20
-  # xsrp 栈（对齐 streaming/xsrp.py 帧率 + 空闲保活）
+  cloud_reconnect_timeout_sec: 45
+  # GSSV input ~35s idle 断开：须持续发 neutral gamepad（对齐 xsrpd 每帧 WriteControllerData）
+  gssv_keepalive_interval_sec: 3
+  input_reconnect_wait_sec: 8
   xsrp_capture_fps: 30
-  xsrp_idle_keepalive_sec: 60
+  xsrp_streaming_idle_pulse_sec: 25   # 对齐 xsrpd idle>60s 发 Nexus（GSSV 略短）
+  input_metadata_refresh_sec: 30      # 周期性重发 gamepadChanged + ClientMetadata
+  xsrp_idle_keepalive_sec: 3          # legacy idle keepalive（已由 access 环取代）
+  xsrp_idle_pulse_every_sec: 15
   xsrp_idle_pulse_sec: 0.05
   # 留空则自动从 xHome 响应解析；仅当自动解析/探测失败时手动指定，例如：
   # base_uri: "https://uks.core.gssv-play-prodxhome.xboxlive.com"

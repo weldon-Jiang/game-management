@@ -60,9 +60,7 @@ class GameAccountInfo:
     gamertag: str
     email: str = ""
     password: str = ""
-    position_index: int = -1
     is_new_user: bool = False
-    profile_bound: bool = False
     is_primary: bool = False
     target_matches: int = 3
     today_match_count: int = 0

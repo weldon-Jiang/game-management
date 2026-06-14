@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS `agent_instance` (
     `os_type` VARCHAR(50) DEFAULT NULL COMMENT '操作系统类型',
     `os_version` VARCHAR(100) DEFAULT NULL COMMENT '操作系统版本',
     `cpu_count` INT DEFAULT NULL COMMENT 'CPU核心数',
+    `keyboard_mapping_json` TEXT DEFAULT NULL COMMENT '自定义键盘映射 JSON（key→action）；NULL=默认模板',
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',

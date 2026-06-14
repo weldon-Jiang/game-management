@@ -14,12 +14,19 @@
 """
 
 import asyncio
+import re
 from typing import Optional, Dict, List, Any, Callable, Awaitable, Tuple
 from dataclasses import dataclass
 from enum import Enum
 import time
 
 from ..core.logger import get_logger
+from ..core.paths import get_logs_dir_fallback
+from ..debug.automation_trace import (
+    capture_entry_scene_survey,
+    get_scene_capture_session,
+    log_gamepad_input,
+)
 
 
 class AccountStatus(Enum):
@@ -43,7 +50,7 @@ class GameAccount:
     xuid: Optional[str] = None
     position_index: int = 0
     is_new_user: bool = False
-    profile_bound: bool = False
+    host_display_name: Optional[str] = None
     status: AccountStatus = AccountStatus.UNKNOWN
     last_login: Optional[float] = None
     matches_today: int = 0
@@ -53,12 +60,10 @@ class GameAccount:
         return self.matches_today < self.max_matches_per_day
 
     def needs_credential_login(self) -> bool:
-        """新号或未完成主机绑定时才走凭据登录。"""
-        if not (self.email and self.password):
-            return False
-        if self.is_new_user:
-            return True
-        return not self.profile_bound
+        """新用户且已配置凭据时走微软登录页。"""
+        return bool(
+            self.is_new_user and self.email and self.password
+        )
 
     def mark_login(self):
         self.status = AccountStatus.LOGGED_IN
@@ -155,7 +160,7 @@ class AccountSwitcher:
         self._stream_session = None
         self._reconnect_callback: Optional[Callable[[], Awaitable[bool]]] = None
         self._profile_bound_callback: Optional[
-            Callable[[str, int, Optional[str]], Awaitable[None]]
+            Callable[[str, Optional[str]], Awaitable[None]]
         ] = None
         self._input_gate = None
 
@@ -167,30 +172,23 @@ class AccountSwitcher:
         """加载游戏账号列表（替换现有账号集合）。"""
         self._accounts.clear()
         for idx, acc_data in enumerate(accounts):
-            raw_index = acc_data.get('position_index', idx)
-            position_index = idx if raw_index is None or raw_index < 0 else raw_index
             account = GameAccount(
                 account_id=acc_data.get('account_id', ''),
                 gamertag=acc_data.get('gamertag', ''),
                 email=acc_data.get('email'),
                 password=acc_data.get('password'),
                 xuid=acc_data.get('xuid'),
-                position_index=position_index,
+                position_index=idx,
                 is_new_user=bool(acc_data.get('is_new_user', False)),
-                profile_bound=bool(acc_data.get('profile_bound', False)),
+                host_display_name=acc_data.get('host_display_name'),
                 max_matches_per_day=acc_data.get('max_matches_per_day', 3),
             )
             self._accounts[account.account_id] = account
 
         self.logger.info(f"已加载 {len(self._accounts)} 个游戏账号")
         for acc in self._accounts.values():
-            if acc.is_new_user:
-                kind = "新用户"
-            elif acc.profile_bound:
-                kind = "已绑定档案"
-            else:
-                kind = "已有档案"
-            self.logger.info(f"  - {acc.gamertag} ({kind}, 位置: {acc.position_index})")
+            kind = "新用户" if acc.is_new_user else "已有账号"
+            self.logger.info(f"  - {acc.gamertag} ({kind})")
 
     def set_action_executor(self, executor):
         self._action_executor = executor
@@ -217,41 +215,80 @@ class AccountSwitcher:
         """绑定任务上下文，用于重连后清除 input dirty 标记。"""
         self._task_context = context
 
-    def set_profile_bound_callback(
+    def _trace_task_id(self) -> Optional[str]:
+        ctx = getattr(self, "_task_context", None)
+        if ctx is None:
+            return None
+        return getattr(ctx, "task_id", None) or getattr(ctx, "taskId", None)
+
+    async def _capture_detected_scene(
         self,
-        callback: Optional[Callable[[str, int, Optional[str]], Awaitable[None]]],
+        scene_id: int,
+        image: Any,
+        confidence: Optional[float] = None,
+        *,
+        note: str = "",
     ) -> None:
-        """登录/切换成功后回写平台 profile_bound / 主机 Gamertag。"""
+        """场景识别命中时按序号保存截图。"""
+        try:
+            from configs.scene_schemas import SCENE_NAMES
+        except ImportError:
+            SCENE_NAMES = {}
+        label = SCENE_NAMES.get(int(scene_id), f"scene{scene_id}")
+        session = get_scene_capture_session(self._trace_task_id())
+        session.capture_frame(
+            image,
+            scene_id=int(scene_id),
+            scene_label=label,
+            confidence=confidence,
+            note=note,
+        )
+
+    async def capture_automation_entry_snapshot(self) -> None:
+        """Step4/切换开始前保存首帧并扫描模板场景置信度。"""
+        from ..vision.template_manager import STEP4_REQUIRED_SCENE_IDS
+
+        extra = [2, 3, 5, 6, 10, 203, 1, 24]
+        scene_ids = sorted(set(STEP4_REQUIRED_SCENE_IDS + extra))
+        await capture_entry_scene_survey(
+            task_id=self._trace_task_id(),
+            frame_getter=self._frame_getter,
+            scene_detector=self._scene_detector,
+            scene_ids=scene_ids,
+        )
+
+    def _stream_keepalive_loop(self, interval: float = 8.0):
+        from ..xbox.stream_keepalive import StreamKeepaliveLoop
+
+        return StreamKeepaliveLoop(
+            lambda: self._stream_session,
+            interval=interval,
+            context=getattr(self, "_task_context", None),
+        )
+
+    def set_gamertag_sync_callback(
+        self,
+        callback: Optional[Callable[[str, Optional[str]], Awaitable[None]]],
+    ) -> None:
+        """切换/登录成功后可选回写主机 Gamertag 到平台 gameName。"""
         self._profile_bound_callback = callback
 
-    async def _persist_profile_bound(
+    async def _sync_host_gamertag(
         self,
         account: GameAccount,
         *,
         host_gamertag: Optional[str] = None,
     ) -> None:
-        """切换/登录成功后回写平台：profile_bound=True，position_index=0，可选 gameName。"""
-        newly_bound = not account.profile_bound
-        account.profile_bound = True
-        account.position_index = 0
+        """同步 OCR 到的主机显示名到本地 host_display_name，并可选回写平台 gameName。"""
         resolved_name = (host_gamertag or "").strip() or None
         if resolved_name:
-            account.gamertag = resolved_name
-        if newly_bound:
-            self.logger.info(
-                "已标记档案 %s 为主机已绑定 (profile_bound=True)",
-                account.gamertag or account.account_id,
-            )
-        if not self._profile_bound_callback:
+            account.host_display_name = resolved_name
+        if not self._profile_bound_callback or not resolved_name:
             return
         try:
-            await self._profile_bound_callback(
-                account.account_id,
-                0,
-                resolved_name,
-            )
+            await self._profile_bound_callback(account.account_id, resolved_name)
         except Exception as exc:
-            self.logger.warning("profile_bound 平台回写失败: %s", exc)
+            self.logger.warning("主机 Gamertag 平台回写失败: %s", exc)
 
     @property
     def current_account(self) -> Optional[GameAccount]:
@@ -266,12 +303,52 @@ class AccountSwitcher:
     def get_account(self, account_id: str) -> Optional[GameAccount]:
         return self._accounts.get(account_id)
 
+    async def prepare_without_switch(self, target_account_id: str) -> AccountSwitchResult:
+        """
+        跳过 Xbox 引导/档案切换（step4.skip_account_switch），假定当前主机档案已正确。
+
+        仅确保 input 通道可用并标记当前游戏账号，后续由 launch_fc_to_ut_menu 接管。
+        """
+        start_time = time.time()
+        from_account = self._current_account_id
+        target_account = self._accounts.get(target_account_id)
+        if not target_account:
+            return AccountSwitchResult(
+                success=False,
+                from_account=from_account,
+                error_message=f"账号不存在: {target_account_id}",
+                time_taken=time.time() - start_time,
+            )
+
+        self.logger.info(
+            "跳过账号切换，直接进入 FC/UT 流程 (%s)",
+            target_account.gamertag,
+        )
+        if not await self._ensure_input_ready():
+            return AccountSwitchResult(
+                success=False,
+                from_account=from_account,
+                to_account=target_account_id,
+                error_message="input DataChannel 不可用，无法继续自动化",
+                time_taken=time.time() - start_time,
+            )
+
+        self._current_account_id = target_account_id
+        target_account.mark_login()
+        time_taken = time.time() - start_time
+        return AccountSwitchResult(
+            success=True,
+            from_account=from_account,
+            to_account=target_account_id,
+            time_taken=time_taken,
+        )
+
     async def switch_to(self, target_account_id: str) -> AccountSwitchResult:
         """
         切换至目标游戏账号（Step4 账号轮询主入口）。
 
         流程：StreamKeepaliveLoop 保活 → 确保 input 通道 → 引导菜单/主页导航
-        → 按 profile_bound / is_new_user 分支（OCR 选档或新用户登录）→ 回写 profile_bound。
+        → 按 is_new_user 分支（OCR 选档或新用户登录）→ 可选回写主机 Gamertag。
         退出：成功更新 _current_account_id；失败返回 AccountSwitchResult(success=False)。
         """
         start_time = time.time()
@@ -296,25 +373,54 @@ class AccountSwitcher:
 
         self.logger.info(
             f"切换账号: {from_account} -> {target_account_id} "
-            f"({target_account.gamertag}, 位置: {target_account.position_index}, "
-            f"新用户: {target_account.is_new_user})"
+            f"({target_account.gamertag}, 新用户: {target_account.is_new_user})"
         )
 
         try:
-            from ..xbox.stream_keepalive import StreamKeepaliveLoop
+            async with self._stream_keepalive_loop():
+                if not await self._ensure_input_ready():
+                    return AccountSwitchResult(
+                        success=False,
+                        from_account=from_account,
+                        to_account=target_account_id,
+                        error_message="input DataChannel 不可用，无法切换账号",
+                        time_taken=time.time() - start_time,
+                    )
 
-            async with StreamKeepaliveLoop(lambda: self._stream_session):
-                await self._ensure_input_ready()
-                on_home = await self._detect_any_scene([203, 1, 24], strict=False)
-                if not await self._open_guide_menu():
-                    self.logger.warning("未能打开西瓜引导页（场景2），继续尝试导航")
-                    if on_home in XBOX_HOME_SCENES or on_home is None:
-                        await self._navigate_to_accounts_from_home()
-                    else:
-                        await self._navigate_to_accounts_system()
-                elif not await self._run_scene_transition(2, 2):
-                    self.logger.warning("场景转移 2->3 未确认，回退到手动导航")
-                    await self._navigate_to_accounts_system()
+                await self.capture_automation_entry_snapshot()
+
+                if await self._is_already_signed_in_as(target_account):
+                    self._current_account_id = target_account_id
+                    target_account.mark_login()
+                    time_taken = time.time() - start_time
+                    self.logger.info(
+                        "主页档案已是 %s，跳过切换 (耗时: %.2fs)",
+                        target_account.gamertag,
+                        time_taken,
+                    )
+                    return AccountSwitchResult(
+                        success=True,
+                        from_account=from_account,
+                        to_account=target_account_id,
+                        time_taken=time_taken,
+                    )
+
+                if await self._wait_for_scene(3, timeout=2.0):
+                    self.logger.info("已在场景3（档案和系统），跳过引导页")
+                else:
+                    on_home = await self._detect_any_scene([203, 1, 24], strict=False)
+                    guide_ok = await self._open_guide_menu()
+                    if not guide_ok:
+                        self.logger.warning("未能打开引导页，尝试备用导航")
+                        if on_home in XBOX_HOME_SCENES or on_home is None:
+                            if not await self._wait_for_scene(3, timeout=3.0):
+                                await self._navigate_to_accounts_from_home()
+                        else:
+                            await self._navigate_to_accounts_system()
+                    elif not await self._wait_for_scene(3, timeout=2.0):
+                        if not await self._run_scene_transition(2, 2):
+                            self.logger.warning("场景转移 2->3 未确认，回退到手动导航")
+                            await self._navigate_to_accounts_system()
 
                 if not await self._wait_for_scene(3):
                     await self._log_scene_probe([2, 3, 5])
@@ -330,7 +436,7 @@ class AccountSwitcher:
                         target_account.email, target_account.password
                     )
                     host_tag = await self._read_host_gamertag_from_profile_list()
-                    await self._persist_profile_bound(
+                    await self._sync_host_gamertag(
                         target_account, host_gamertag=host_tag
                     )
                 else:
@@ -339,43 +445,61 @@ class AccountSwitcher:
                         raise RuntimeError("未进入添加和切换页面（场景5）")
 
                     await self._enter_account_selection()
-                    if not await self._wait_for_scene(6):
-                        raise RuntimeError("未进入账号选择页面（场景6）")
-
-                    found_index = await self._select_account_by_gamertag(
-                        target_account.gamertag
+                    scene6_ready = await self._wait_for_scene(
+                        6, timeout=12.0, strict=True
                     )
-                    target_account.position_index = found_index
-                    await self._confirm_account_selection()
-
-                    if await self._wait_for_scene(10, timeout=10.0):
-                        if target_account.email and target_account.password:
+                    scene6_layout_ok = (
+                        scene6_ready and await self._verify_scene6_layout()
+                    )
+                    if not scene6_layout_ok:
+                        if await self._is_already_signed_in_as(target_account):
                             self.logger.info(
-                                "切换后出现登录页，使用凭据登录 (%s)",
+                                "场景6未确认但主页已是目标账号 (%s)，跳过档案列表选择",
                                 target_account.gamertag,
                             )
-                            await self._login_with_credentials(
-                                target_account.email, target_account.password
-                            )
-                            host_tag = await self._read_host_gamertag_from_profile_list()
-                            await self._persist_profile_bound(
-                                target_account, host_gamertag=host_tag
-                            )
+                        elif not scene6_ready:
+                            raise RuntimeError("未进入账号选择页面（场景6）")
                         else:
+                            await self._save_debug_frame(6)
                             raise RuntimeError(
-                                f"档案 {target_account.gamertag} 需重新登录，"
-                                "但未配置邮箱/密码凭据"
+                                "场景6模板误匹配：当前帧不具备档案列表布局"
                             )
                     else:
-                        self.logger.info(
-                            "档案切换完成，未出现登录页 (%s, profile_bound=%s)",
+                        found_index = await self._select_account_by_gamertag(
                             target_account.gamertag,
-                            target_account.profile_bound,
+                            email=target_account.email,
+                            host_display_name=target_account.host_display_name,
                         )
-                        host_tag = await self._read_host_gamertag_from_profile_list()
-                        await self._persist_profile_bound(
-                            target_account, host_gamertag=host_tag
-                        )
+                        target_account.position_index = found_index
+                        await self._confirm_account_selection()
+
+                        if await self._wait_for_scene(10, timeout=10.0):
+                            if target_account.email and target_account.password:
+                                self.logger.info(
+                                    "切换后出现登录页，使用凭据登录 (%s)",
+                                    target_account.gamertag,
+                                )
+                                await self._login_with_credentials(
+                                    target_account.email, target_account.password
+                                )
+                                host_tag = await self._read_host_gamertag_from_profile_list()
+                                await self._sync_host_gamertag(
+                                    target_account, host_gamertag=host_tag
+                                )
+                            else:
+                                raise RuntimeError(
+                                    f"档案 {target_account.gamertag} 需重新登录，"
+                                    "但未配置邮箱/密码凭据"
+                                )
+                        else:
+                            self.logger.info(
+                                "档案切换完成，未出现登录页 (%s)",
+                                target_account.gamertag,
+                            )
+                            host_tag = await self._read_host_gamertag_from_profile_list()
+                            await self._sync_host_gamertag(
+                                target_account, host_gamertag=host_tag
+                            )
 
             self._current_account_id = target_account_id
             target_account.mark_login()
@@ -409,14 +533,12 @@ class AccountSwitcher:
 
     async def launch_fc_to_ut_menu(self, timeout: float = 90.0) -> bool:
         """切换账号后从 Xbox 主页启动 FC 并进入 UT 相关界面。"""
-        from ..xbox.stream_keepalive import StreamKeepaliveLoop
-
         self.logger.info("开始启动 FC 并导航至 UT 界面")
         if not await self._ensure_input_ready():
             self.logger.error("进游戏前 input DataChannel 不可用，中止启动 FC")
             return False
 
-        async with StreamKeepaliveLoop(lambda: self._stream_session):
+        async with self._stream_keepalive_loop():
             return await self._launch_fc_to_ut_menu_inner(timeout)
 
     async def _launch_fc_to_ut_menu_inner(self, timeout: float) -> bool:
@@ -432,7 +554,10 @@ class AccountSwitcher:
 
         home_state = await self._detect_any_scene([203, 1, 24], strict=False)
         if home_state in XBOX_HOME_SCENES or home_state is None:
-            await self._navigate_to_fc_tile_on_home()
+            if not await self._is_fc_tile_focused():
+                await self._navigate_to_fc_tile_on_home()
+            else:
+                self.logger.info("203 主页 FC 磁贴已获焦，直接进入启动链")
             chain = [(203, 1), (101, 1), (126, 1)]
         elif home_state == 101:
             chain = [(101, 1), (126, 1)]
@@ -490,8 +615,198 @@ class AccountSwitcher:
             return True
         return False
 
+    async def _is_already_signed_in_as(self, target_account: GameAccount) -> bool:
+        """
+        主页左上角 OCR 显示名/邮箱，与 gamertag、host_display_name、邮箱本地段比对。
+
+        匹配则跳过引导切换；OCR 失败时保存裁剪 debug 图便于调区域。
+        """
+        current_ut = await self._detect_any_scene(list(FC_UT_TARGET_SCENES), strict=False)
+        if current_ut in FC_UT_TARGET_SCENES:
+            return False
+
+        norm = await self._get_normalized_frame()
+        if norm is None:
+            self.logger.debug("主页档案 OCR 跳过：无法截帧")
+            return False
+
+        from ..vision.profile_name_reader import (
+            profile_matches_game_account,
+            read_home_profile_identity,
+        )
+
+        identity = read_home_profile_identity(norm)
+        if not identity.display_name and not identity.email_text:
+            on_home = await self._detect_any_scene([203, 1, 24], strict=False)
+            self.logger.info(
+                "主页左上角 OCR 未识别档案 (scene=%s)，继续账号切换流程",
+                on_home,
+            )
+            await self._save_home_ocr_debug(norm, identity, target_account.gamertag)
+            return False
+
+        matched, reason = profile_matches_game_account(
+            identity.display_name,
+            target_account.gamertag,
+            target_account.email,
+            detected_email=identity.email_text,
+            host_display_name=target_account.host_display_name,
+            combined_text=identity.combined,
+        )
+        if not matched:
+            self.logger.info(
+                "主页 OCR name=%r email=%r 与目标 gamertag=%s host=%s email=%s 不一致，需切换",
+                identity.display_name,
+                identity.email_text,
+                target_account.gamertag,
+                target_account.host_display_name or "(none)",
+                self._mask_email(target_account.email),
+            )
+            await self._save_home_ocr_debug(norm, identity, target_account.gamertag)
+            return False
+
+        on_home = await self._detect_any_scene([203, 1, 24], strict=False)
+        home_like = on_home in XBOX_HOME_SCENES or await self._is_home_203_dominant()
+        if home_like:
+            self.logger.info(
+                "主页 OCR 匹配目标 (name=%r, email=%r, by=%s)，跳过账号切换",
+                identity.display_name,
+                identity.email_text,
+                reason,
+            )
+        else:
+            self.logger.info(
+                "主页 OCR 匹配目标 (name=%r, by=%s, scene=%s)，跳过账号切换",
+                identity.display_name,
+                reason,
+                on_home,
+            )
+        return True
+
+    async def _verify_scene6_layout(self) -> bool:
+        """场景 6 除模板外，要求左侧档案列表布局（绿框或列表 OCR）。"""
+        if not self._frame_getter:
+            return False
+        frame = await self._frame_getter()
+        if frame is None:
+            return False
+        image = frame.data if hasattr(frame, "data") else frame
+        if self._scene_detector and hasattr(self._scene_detector, "_normalize_frame"):
+            image = self._scene_detector._normalize_frame(image, 6)
+        from ..vision.profile_name_reader import scene6_list_layout_present
+
+        if scene6_list_layout_present(image):
+            return True
+        self.logger.warning("场景6模板命中但档案列表布局未确认")
+        return False
+
+    async def _save_home_ocr_debug(
+        self,
+        norm_image: Any,
+        identity: Any,
+        gamertag: str,
+    ) -> None:
+        """主页 OCR 失败或不匹配时保存裁剪区域，便于调整坐标。"""
+        try:
+            import os
+            import cv2
+            from ..vision.profile_name_reader import (
+                HOME203_EMAIL_BOTTOM,
+                HOME203_EMAIL_LEFT,
+                HOME203_EMAIL_RIGHT,
+                HOME203_EMAIL_TOP,
+                HOME203_NAME_BOTTOM,
+                HOME203_NAME_LEFT,
+                HOME203_NAME_RIGHT,
+                HOME203_NAME_TOP,
+            )
+
+            log_dir = get_logs_dir_fallback()
+            os.makedirs(log_dir, exist_ok=True)
+            stamp = int(time.time())
+            safe_tag = re.sub(r"[^a-zA-Z0-9_-]", "_", gamertag or "unknown")[:32]
+
+            def _save_crop(left, top, right, bottom, suffix: str) -> None:
+                h, w = norm_image.shape[:2]
+                sx, sy = w / 960.0, h / 540.0
+                x1, x2 = int(left * sx), min(w, int(right * sx))
+                y1, y2 = int(top * sy), min(h, int(bottom * sy))
+                if x2 <= x1 or y2 <= y1:
+                    return
+                path = os.path.join(
+                    log_dir, f"debug_home_ocr_{suffix}_{safe_tag}_{stamp}.png"
+                )
+                cv2.imwrite(path, norm_image[y1:y2, x1:x2])
+
+            _save_crop(
+                HOME203_NAME_LEFT,
+                HOME203_NAME_TOP,
+                HOME203_NAME_RIGHT,
+                HOME203_NAME_BOTTOM,
+                "name",
+            )
+            _save_crop(
+                HOME203_EMAIL_LEFT,
+                HOME203_EMAIL_TOP,
+                HOME203_EMAIL_RIGHT,
+                HOME203_EMAIL_BOTTOM,
+                "email",
+            )
+
+            overlay = norm_image.copy()
+            h, w = overlay.shape[:2]
+            sx, sy = w / 960.0, h / 540.0
+
+            def _draw_box(left, top, right, bottom, color, label):
+                x1, x2 = int(left * sx), int(right * sx)
+                y1, y2 = int(top * sy), int(bottom * sy)
+                cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(
+                    overlay, label, (x1, max(12, y1 - 4)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA,
+                )
+
+            _draw_box(
+                HOME203_NAME_LEFT, HOME203_NAME_TOP,
+                HOME203_NAME_RIGHT, HOME203_NAME_BOTTOM,
+                (0, 0, 255), "NAME",
+            )
+            _draw_box(
+                HOME203_EMAIL_LEFT, HOME203_EMAIL_TOP,
+                HOME203_EMAIL_RIGHT, HOME203_EMAIL_BOTTOM,
+                (255, 128, 0), "EMAIL",
+            )
+            overlay_path = os.path.join(
+                log_dir, f"debug_home_ocr_overlay_{safe_tag}_{stamp}.png"
+            )
+            cv2.imwrite(overlay_path, overlay)
+
+            self.logger.warning(
+                "主页 OCR debug 已保存: name=%r email=%r -> %s/debug_home_ocr_*_%s.png "
+                "overlay=%s",
+                getattr(identity, "display_name", ""),
+                getattr(identity, "email_text", ""),
+                os.path.abspath(log_dir),
+                stamp,
+                os.path.abspath(overlay_path),
+            )
+        except Exception as exc:
+            self.logger.debug("保存主页 OCR debug 失败: %s", exc)
+
+    @staticmethod
+    def _mask_email(email: Optional[str]) -> str:
+        if not email or "@" not in email:
+            return "(empty)"
+        local, domain = email.split("@", 1)
+        if len(local) <= 2:
+            return f"{local[0]}***@{domain}"
+        return f"{local[:2]}***@{domain}"
+
     async def _navigate_to_fc_tile_on_home(self):
         """从 Xbox 主页（顶栏可能聚焦「设置」）移焦到 FC 游戏磁贴。"""
+        if await self._is_fc_tile_focused():
+            self.logger.info("FC 磁贴已获焦，跳过磁贴导航")
+            return
         self.logger.info("导航至 FC 游戏磁贴（离开顶栏设置焦点）")
         for _ in range(4):
             await self._press_button('B', duration=0.08)
@@ -648,8 +963,16 @@ class AccountSwitcher:
             return 0.90
         return getattr(self._scene_detector, 'default_threshold', 0.8)
 
-    async def _wait_for_scene(self, scene_id: int, timeout: float = 20.0) -> bool:
-        return await self._wait_for_any_scene([scene_id], timeout=timeout)
+    async def _wait_for_scene(
+        self,
+        scene_id: int,
+        timeout: float = 20.0,
+        *,
+        strict: bool = False,
+    ) -> bool:
+        return await self._wait_for_any_scene(
+            [scene_id], timeout=timeout, strict=strict
+        )
 
     async def _wait_for_any_scene(
         self,
@@ -681,6 +1004,17 @@ class AccountSwitcher:
             )
             if matched is not None:
                 self.logger.info(f"场景{matched}校验通过")
+                frame = await self._frame_getter()
+                if frame is not None:
+                    image = frame.data if hasattr(frame, "data") else frame
+                    scores = await self._score_scenes([matched], image)
+                    conf = scores.get(matched)
+                    await self._capture_detected_scene(
+                        matched,
+                        image,
+                        confidence=conf,
+                        note="wait_for_scene",
+                    )
                 return True
             now = time.time()
             if fc_wait and now - last_skip_press >= 5.0:
@@ -807,10 +1141,13 @@ class AccountSwitcher:
             if frame is None:
                 return
             image = frame.data if hasattr(frame, 'data') else frame
-            os.makedirs("logs", exist_ok=True)
-            path = os.path.join("logs", f"debug_scene{scene_id}_{int(time.time())}.png")
-            cv2.imwrite(path, image)
-            self.logger.warning(f"已保存场景{scene_id}调试帧: {path}")
+            log_dir = get_logs_dir_fallback()
+            os.makedirs(log_dir, exist_ok=True)
+            path = os.path.join(log_dir, f"debug_scene{scene_id}_{int(time.time())}.png")
+            if not cv2.imwrite(path, image):
+                self.logger.warning(f"保存场景{scene_id}调试帧失败: cv2.imwrite 返回 False, path={path}")
+                return
+            self.logger.warning(f"已保存场景{scene_id}调试帧: {os.path.abspath(path)}")
         except Exception as e:
             self.logger.debug(f"保存调试帧失败: {e}")
 
@@ -857,6 +1194,12 @@ class AccountSwitcher:
     async def _press_button(self, button: str, duration: float = 0.08):
         if not self._action_executor:
             return
+        log_gamepad_input(
+            button,
+            duration=duration,
+            source="account_switcher",
+            task_id=self._trace_task_id(),
+        )
         await self._ensure_input_ready()
         await self._execute_press_button(button, duration)
 
@@ -890,27 +1233,33 @@ class AccountSwitcher:
         return False
 
     async def _open_guide_menu(self) -> bool:
-        """打开西瓜引导页（场景2），优先使用 scene_transitions 标准按键。"""
+        """打开西瓜引导页（场景2）；主页 NEXUS 失败则改走设置→账号（场景3）。"""
         if await self._wait_for_guide(timeout=2.0):
+            return True
+        if await self._wait_for_scene(3, timeout=1.5):
+            self.logger.info("已在场景3，无需打开引导页")
             return True
 
         on_home = await self._detect_any_scene([203, 1, 24], strict=False)
-        openers = []
         if on_home in XBOX_HOME_SCENES:
-            openers.append(("NEXUS-from-home", self._press_guide_button))
-        openers.extend(
-            (
-                ("scene_transition 1/1", lambda: self._run_scene_transition(1, 1)),
-                ("NEXUS", self._press_guide_button),
-            )
-        )
-        for label, opener in openers:
-            self.logger.info(f"尝试打开引导页: {label}")
-            await opener()
-            if await self._wait_for_guide(timeout=8.0):
+            self.logger.info("尝试打开引导页: NEXUS-from-home")
+            await self._press_guide_button()
+            if await self._wait_for_guide(timeout=5.0):
                 return True
+            self.logger.info("NEXUS 未打开引导页，改走主页→设置→账号")
+            await self._navigate_to_accounts_from_home()
+            if await self._wait_for_scene(3, timeout=12.0):
+                return True
+            return False
 
-        return False
+        self.logger.info("尝试打开引导页: scene_transition 1/1")
+        await self._run_scene_transition(1, 1)
+        if await self._wait_for_guide(timeout=5.0):
+            return True
+
+        self.logger.info("尝试打开引导页: NEXUS")
+        await self._press_guide_button()
+        return await self._wait_for_guide(timeout=5.0)
 
     async def _navigate_to_accounts_from_home(self):
         """从 Xbox 主页顶栏进入「设置」→ 账号相关页面。"""
@@ -1014,9 +1363,7 @@ class AccountSwitcher:
             if check_cancel and check_cancel():
                 return AccountSwitchResult(success=False, error_message="cancelled")
 
-            from ..xbox.stream_keepalive import StreamKeepaliveLoop
-
-            async with StreamKeepaliveLoop(lambda: self._stream_session):
+            async with self._stream_keepalive_loop():
                 await self._ensure_input_ready()
                 if not await self._open_guide_menu():
                     await self._navigate_to_accounts_system()
@@ -1039,7 +1386,7 @@ class AccountSwitcher:
                         gamertag=host_tag,
                         email=email,
                     )
-                    await self._persist_profile_bound(
+                    await self._sync_host_gamertag(
                         stub, host_gamertag=host_tag
                     )
 
@@ -1086,27 +1433,38 @@ class AccountSwitcher:
         self,
         gamertag: str,
         *,
+        email: Optional[str] = None,
+        host_display_name: Optional[str] = None,
         max_slots: int = MAX_PROFILE_LIST_SLOTS,
     ) -> int:
         """
-        在场景6列表中按 gamertag 查找档案（不依赖静态 position_index）。
+        在场景6列表中按 gamertag / 邮箱 / 主机显示名 查找档案。
 
         返回匹配到的列表索引（0=最上方）。
         """
         from ..vision.profile_name_reader import (
-            gamertag_matches,
+            account_identity_matches,
             read_list_gamertags,
         )
 
-        if not gamertag:
-            raise RuntimeError("目标 gamertag 为空，无法定位档案")
+        if not gamertag and not email:
+            raise RuntimeError("目标 gamertag/email 为空，无法定位档案")
+
+        if not await self._verify_scene6_layout():
+            await self._save_debug_frame(6)
+            raise RuntimeError("场景6列表 OCR 前布局校验失败")
 
         await self._scroll_profile_list_to_top()
         await asyncio.sleep(0.35)
 
         for slot in range(max_slots):
             detected = await self._read_focused_gamertag_from_frame()
-            if gamertag_matches(detected, gamertag):
+            if account_identity_matches(
+                detected,
+                gamertag=gamertag,
+                email=email,
+                host_display_name=host_display_name,
+            ):
                 self.logger.info(
                     "场景6已定位档案 %s（列表索引 %s，OCR=%r）",
                     gamertag,
@@ -1124,7 +1482,12 @@ class AccountSwitcher:
                     ):
                         image = self._scene_detector._normalize_frame(image, 6)
                     for line in read_list_gamertags(image):
-                        if gamertag_matches(line, gamertag):
+                        if account_identity_matches(
+                            line,
+                            gamertag=gamertag,
+                            email=email,
+                            host_display_name=host_display_name,
+                        ):
                             self.logger.info(
                                 "场景6列表 OCR 匹配档案 %s（索引 %s，OCR=%r）",
                                 gamertag,
@@ -1147,9 +1510,12 @@ class AccountSwitcher:
         await asyncio.sleep(2.0)
 
     async def _recover_input_if_closed(self) -> bool:
-        """input closed 时触发重连，并等待通道 open 后再继续。"""
+        """input closed 时调度后台重连，短时轮询 open；不阻塞在全量 WebRTC 握手。"""
+        import time
+
+        from ..core.config import config as app_config
+        from ..xbox.controller_write import schedule_input_reconnect
         from ..xbox.stream_keepalive import (
-            ensure_input_channel,
             get_input_channel_state,
             is_input_channel_open,
             send_keepalive,
@@ -1163,35 +1529,35 @@ class AccountSwitcher:
             ctx is not None and getattr(ctx, "_input_channel_dirty", False)
         )
         if not force_reconnect and is_input_channel_open(self._stream_session):
-            await send_keepalive(self._stream_session)
+            await send_keepalive(self._stream_session, context=ctx)
             return True
 
-        if self._reconnect_callback is not None:
-            channel_state = get_input_channel_state(self._stream_session)
-            self.logger.warning(
-                "input DataChannel 不可用 (state=%s)，尝试重连...",
-                channel_state,
-            )
-            if await self._reconnect_callback():
-                ok = await ensure_input_channel(self._stream_session, timeout=8.0)
-                if ok:
-                    await send_keepalive(self._stream_session)
-                    self.logger.info("input 通道重连成功，已恢复 open")
-                    ctx = getattr(self, "_task_context", None)
-                    if ctx is not None:
-                        ctx._input_channel_dirty = False
-                    return True
-                self.logger.error("重连后会话仍未 open")
+        channel_state = get_input_channel_state(self._stream_session)
+        if ctx is not None:
+            ctx._input_channel_dirty = True
 
-        ok = await ensure_input_channel(self._stream_session, timeout=8.0)
-        if not ok:
-            self.logger.warning(
-                "input DataChannel 未就绪: %s",
-                get_input_channel_state(self._stream_session),
-            )
-        elif is_input_channel_open(self._stream_session):
-            await send_keepalive(self._stream_session)
-        return ok
+        self.logger.warning(
+            "input DataChannel 不可用 (state=%s)，调度后台重连",
+            channel_state,
+        )
+        schedule_input_reconnect(ctx)
+
+        wait_sec = float(app_config.get("gssv.input_reconnect_wait_sec", 8))
+        deadline = time.time() + wait_sec
+        while time.time() < deadline:
+            if is_input_channel_open(self._stream_session):
+                await send_keepalive(self._stream_session, context=ctx)
+                self.logger.info("input 通道已恢复 open")
+                if ctx is not None:
+                    ctx._input_channel_dirty = False
+                return True
+            await asyncio.sleep(0.25)
+
+        self.logger.warning(
+            "input 通道 %ss 内未恢复，跳过当前步骤",
+            wait_sec,
+        )
+        return False
 
     async def _ensure_input_ready(self) -> bool:
         return await self._recover_input_if_closed()
@@ -1199,12 +1565,14 @@ class AccountSwitcher:
     async def _send_keepalive(self) -> None:
         from ..xbox.stream_keepalive import send_keepalive
         if self._stream_session is not None:
-            await send_keepalive(self._stream_session)
+            await send_keepalive(
+                self._stream_session,
+                context=getattr(self, "_task_context", None),
+            )
 
     async def _login_with_credentials(self, email: str, password: str):
         """微软账号登录：场景10 + 小键盘输入。"""
         from .on_screen_keyboard import OnScreenKeyboard
-        from ..xbox.stream_keepalive import StreamKeepaliveLoop
 
         self.logger.info("开始微软账号登录流程")
         if not await self._wait_for_scene(10, timeout=45.0):
@@ -1219,7 +1587,7 @@ class AccountSwitcher:
             stream_session=self._stream_session,
         )
 
-        async with StreamKeepaliveLoop(lambda: self._stream_session):
+        async with self._stream_keepalive_loop():
             await self._ensure_input_ready()
             await self._press_button('A', duration=0.1)
             await asyncio.sleep(0.5)
@@ -1346,6 +1714,14 @@ class AccountSwitcher:
         right_thumb_y: int,
         duration_sec: float,
     ):
+        if buttons:
+            log_gamepad_input(
+                f"RAW_MASK",
+                duration=duration_sec,
+                source="account_switcher.raw",
+                raw_buttons=buttons,
+                task_id=self._trace_task_id(),
+            )
         if self._input_gate is not None and not self._input_gate.is_allowed():
             return False
 
@@ -1368,14 +1744,21 @@ class AccountSwitcher:
         release = ControllerSignal()
 
         async def _do_send() -> bool:
+            from ..xbox.controller_write import write_controller_final
+
             active_session = self._resolve_input_session()
+            ctx = getattr(self, "_task_context", None)
             if active_session is None:
                 return False
             try:
                 if hasattr(active_session, 'send_gamepad_state'):
-                    ok_press = await active_session.send_gamepad_state(press.to_dict())
+                    ok_press = await write_controller_final(
+                        active_session, press.to_dict(), context=ctx
+                    )
                     await asyncio.sleep(max(duration_sec, 0.05))
-                    ok_release = await active_session.send_gamepad_state(release.to_dict())
+                    ok_release = await write_controller_final(
+                        active_session, release.to_dict(), context=ctx
+                    )
                     return ok_press and ok_release
                 if hasattr(active_session, 'send_input'):
                     await active_session.send_input('gamepad', press.to_dict())

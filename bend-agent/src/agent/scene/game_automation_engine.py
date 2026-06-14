@@ -150,6 +150,10 @@ class ActionExecutor:
         self._xbox_session = None
         self._controller_protocol = None
         self._input_gate = None
+        self._task_context = None
+
+    def set_task_context(self, context: Any) -> None:
+        self._task_context = context
 
     def set_input_gate(self, gate) -> None:
         self._input_gate = gate
@@ -178,7 +182,13 @@ class ActionExecutor:
         if not self._xbox_session:
             return False
         if hasattr(self._xbox_session, "send_gamepad_state"):
-            return await self._xbox_session.send_gamepad_state(gamepad_data)
+            from ..xbox.controller_write import write_controller_final
+
+            return await write_controller_final(
+                self._xbox_session,
+                gamepad_data,
+                context=self._task_context,
+            )
         if hasattr(self._xbox_session, "send_input"):
             await self._xbox_session.send_input("gamepad", gamepad_data)
             return True
@@ -240,6 +250,19 @@ class ActionExecutor:
         }
 
         flag_name = button_map.get(button.upper(), 'A')
+
+        task_id = None
+        if self._task_context is not None:
+            task_id = getattr(self._task_context, "task_id", None)
+
+        from ..debug.automation_trace import log_gamepad_input
+
+        log_gamepad_input(
+            flag_name,
+            duration=duration,
+            source="action_executor",
+            task_id=task_id,
+        )
 
         if self._xbox_session:
             try:

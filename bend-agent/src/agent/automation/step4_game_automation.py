@@ -679,6 +679,32 @@ async def _report_step4_failure(
     await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
 
 
+async def _ensure_input_for_step4(context: AgentTaskContext, task_logger) -> bool:
+    """
+    Step4 自动化前确认 input DataChannel 为 open；closed 时同步触发重连回调。
+    """
+    from ..xbox.stream_keepalive import is_input_channel_open
+
+    session = getattr(context, "xbox_session", None)
+    if session is not None and is_input_channel_open(session):
+        return True
+
+    callback = getattr(context, "_input_reconnect_callback", None)
+    if callback is None:
+        task_logger.error("input DataChannel 已关闭且无重连回调")
+        return False
+
+    task_logger.warning("Step4 检测到 input DataChannel 已关闭，开始重连")
+    try:
+        ok = await callback()
+    except Exception as exc:
+        task_logger.error("input DataChannel 重连异常: %s", exc)
+        return False
+    if not ok:
+        task_logger.error("input DataChannel 重连失败")
+    return ok
+
+
 async def _report_input_channel_event(
     context: AgentTaskContext,
     report_progress: Callable,
@@ -797,12 +823,21 @@ async def step4_execute_gaming(
     stream_runtime = get_or_create_stream_runtime(context)
 
     try:
-        keyboard_mapper = getattr(context, "_keyboard_mapper", None)
-        if keyboard_mapper and getattr(keyboard_mapper, "_running", False):
-            await keyboard_mapper.stop()
-            task_logger.info("步骤四已停止键盘映射器，避免与自动化输入并发")
-
         from ..core.config import config as agent_config
+
+        keyboard_mapper = getattr(context, "_keyboard_mapper", None)
+        keep_keyboard = bool(agent_config.get("debug.manual_input_enabled", True))
+        if keyboard_mapper and getattr(keyboard_mapper, "_running", False):
+            if keep_keyboard:
+                from ..debug.manual_debug_controls import attach_manual_debug_controls
+
+                attach_manual_debug_controls(context, keyboard_mapper, task_logger)
+                task_logger.info(
+                    "步骤四保留键盘映射（F8 人工接管 / F9 截图 / F10 帮助）"
+                )
+            else:
+                await keyboard_mapper.stop()
+                task_logger.info("步骤四已停止键盘映射器，避免与自动化输入并发")
 
         prefer_remote = agent_config.get("fc_server.prefer_remote_scene", False)
         fc_client = await _ensure_fc_scene_client(context, task_logger) if prefer_remote else None
@@ -852,6 +887,8 @@ async def step4_execute_gaming(
                 platform_client=platform_client,
                 frame_getter=_capture_for_provisioning,
                 stream_session=getattr(context, "xbox_session", None),
+                reconnect_callback=getattr(context, "_input_reconnect_callback", None),
+                task_context=context,
             )
 
         for account_index, game_account in enumerate(context.game_accounts):
@@ -910,89 +947,73 @@ async def step4_execute_gaming(
             # 流媒体账号日志：记录当前处理的游戏账号
             stream_logger.info(f"开始处理游戏账号: {game_account.gamertag} ({account_index+1}/{len(context.game_accounts)})")
 
-            from ..xbox.stream_keepalive import StreamKeepaliveLoop
+            if not await _ensure_input_for_step4(context, task_logger):
+                task_logger.warning(
+                    "账号 %s 跳过：input DataChannel 不可用且重连失败",
+                    game_account.gamertag,
+                )
+                continue
 
             launch_ok = False
-            async with StreamKeepaliveLoop(
-                lambda: getattr(context, "xbox_session", None),
-                interval=4.0,
-            ):
-                # 账号切换和 FC 启动期间持续保活，避免长时间菜单操作导致云串流空闲断开。
-                switch_result = await switcher.switch_to(game_account.id)
-                if switch_result.success:
-                    launch_ok = await _launch_fc_with_manual_pause(
-                        switcher,
-                        context,
-                        game_account,
-                        check_cancel,
-                        report_progress,
-                        set_session_phase,
-                        task_logger,
-                        stream_logger,
-                    )
-                    if not launch_ok:
-                        task_logger.warning(
-                            "进 FC 失败，尝试重连 input DataChannel 后重试一次"
-                        )
-                        from ..xbox.stream_recovery import (
-                            reconnect_input_channel,
-                            rebind_stream_bindings,
-                        )
+            from ..core.config import config as app_config
 
+            # 默认 switch_to：主页左上角 OCR 与 gamertag/邮箱一致时内部自动跳过切换
+            skip_switch = bool(app_config.get("step4.skip_account_switch", False))
+            if skip_switch:
+                switch_result = await switcher.prepare_without_switch(game_account.id)
+            else:
+                switch_result = await switcher.switch_to(game_account.id)
+            if switch_result.success:
+                launch_ok = await _launch_fc_with_manual_pause(
+                    switcher,
+                    context,
+                    game_account,
+                    check_cancel,
+                    report_progress,
+                    set_session_phase,
+                    task_logger,
+                    stream_logger,
+                )
+                if not launch_ok:
+                    task_logger.warning(
+                        "进 FC 失败，尝试重连 input DataChannel 后重试一次"
+                    )
+                    from ..xbox.stream_recovery import (
+                        reconnect_input_channel,
+                        rebind_stream_bindings,
+                    )
+
+                    await _report_input_channel_event(
+                        context,
+                        report_progress,
+                        "RUNNING",
+                        "Input DataChannel 已关闭，正在重连",
+                        "input_reconnecting",
+                        task_logger,
+                    )
+                    if await reconnect_input_channel(context, task_logger):
+                        executor = (
+                            engine._action_executor
+                            if engine
+                            and hasattr(engine, "_action_executor")
+                            else None
+                        )
+                        # DataChannel 重连后，所有持有旧发送器的组件都必须重新绑定。
+                        rebind_stream_bindings(
+                            context,
+                            executor=executor,
+                            switcher=switcher,
+                            engine=engine,
+                        )
                         await _report_input_channel_event(
                             context,
                             report_progress,
                             "RUNNING",
-                            "Input DataChannel 已关闭，正在重连",
-                            "input_reconnecting",
+                            "Input DataChannel 已恢复",
+                            "input_restored",
                             task_logger,
                         )
-                        if await reconnect_input_channel(context, task_logger):
-                            executor = (
-                                engine._action_executor
-                                if engine
-                                and hasattr(engine, "_action_executor")
-                                else None
-                            )
-                            # DataChannel 重连后，所有持有旧发送器的组件都必须重新绑定。
-                            rebind_stream_bindings(
-                                context,
-                                executor=executor,
-                                switcher=switcher,
-                                engine=engine,
-                            )
-                            await _report_input_channel_event(
-                                context,
-                                report_progress,
-                                "RUNNING",
-                                "Input DataChannel 已恢复",
-                                "input_restored",
-                                task_logger,
-                            )
-                            launch_ok = await _launch_fc_with_manual_pause(
-                                switcher,
-                                context,
-                                game_account,
-                                check_cancel,
-                                report_progress,
-                                set_session_phase,
-                                task_logger,
-                                stream_logger,
-                            )
-                        else:
-                            await _report_input_channel_event(
-                                context,
-                                report_progress,
-                                "FAILED",
-                                "Input DataChannel 重连失败",
-                                "input_reconnect_failed",
-                                task_logger,
-                            )
-
-                    if not launch_ok:
-                        # 仍失败：若画面仍停留 Xbox 主页(scene203)，重启 FC 启动链，
-                        # 避免「切换成功 -> MAIN_MENU 盲等 25s -> 跳过」的死循环
-                        launch_ok = await _retry_fc_launch_if_on_home(
+                        launch_ok = await _launch_fc_with_manual_pause(
                             switcher,
                             context,
                             game_account,
@@ -1002,15 +1023,38 @@ async def step4_execute_gaming(
                             task_logger,
                             stream_logger,
                         )
-
-                    if not launch_ok:
-                        launch_msg = (
-                            f"账号 {game_account.gamertag} 切换成功但未能进入 FC/UT，"
-                            "将继续尝试检测主菜单"
+                    else:
+                        await _report_input_channel_event(
+                            context,
+                            report_progress,
+                            "FAILED",
+                            "Input DataChannel 重连失败",
+                            "input_reconnect_failed",
+                            task_logger,
                         )
-                        task_logger.warning(launch_msg)
-                        game_logger.warning(launch_msg)
-                        stream_logger.warning(launch_msg)
+
+                if not launch_ok:
+                    # 仍失败：若画面仍停留 Xbox 主页(scene203)，重启 FC 启动链，
+                    # 避免「切换成功 -> MAIN_MENU 盲等 25s -> 跳过」的死循环
+                    launch_ok = await _retry_fc_launch_if_on_home(
+                        switcher,
+                        context,
+                        game_account,
+                        check_cancel,
+                        report_progress,
+                        set_session_phase,
+                        task_logger,
+                        stream_logger,
+                    )
+
+                if not launch_ok:
+                    launch_msg = (
+                        f"账号 {game_account.gamertag} 切换成功但未能进入 FC/UT，"
+                        "将继续尝试检测主菜单"
+                    )
+                    task_logger.warning(launch_msg)
+                    game_logger.warning(launch_msg)
+                    stream_logger.warning(launch_msg)
 
             if not switch_result.success:
                 switch_msg = (
@@ -1373,6 +1417,7 @@ async def _init_game_automation(
         executor = ActionExecutor()
         if input_gate is not None:
             executor.set_input_gate(input_gate)
+        executor.set_task_context(context)
         if context.xbox_session:
             executor.set_xbox_session(context.xbox_session)
             task_logger.info("动作执行器已绑定Xbox会话")
@@ -1395,11 +1440,7 @@ async def _init_game_automation(
                 'gamertag': ga.gamertag,
                 'email': getattr(ga, 'email', None) or None,
                 'password': getattr(ga, 'password', None) or None,
-                'position_index': (
-                    ga.position_index if getattr(ga, 'position_index', -1) >= 0 else idx
-                ),
                 'is_new_user': bool(getattr(ga, 'is_new_user', False)),
-                'profile_bound': bool(getattr(ga, 'profile_bound', False)),
                 'max_matches_per_day': ga.target_matches,
             }
             for idx, ga in enumerate(context.game_accounts)
@@ -1412,7 +1453,15 @@ async def _init_game_automation(
             switcher.set_stream_session(context.xbox_session)
 
         async def _reconnect_input_and_rebind() -> bool:
-            from ..xbox.stream_recovery import reconnect_input_channel, rebind_stream_bindings
+            from ..xbox.stream_recovery import install_task_input_recovery
+
+            install_task_input_recovery(
+                context,
+                task_logger,
+                executor=executor,
+                switcher=switcher,
+                engine=engine,
+            )
 
             async def _noop_report(*_args, **_kwargs):
                 return None
@@ -1427,14 +1476,9 @@ async def _init_game_automation(
                 "input_reconnecting",
                 task_logger,
             )
-            ok = await reconnect_input_channel(context, task_logger)
+            base_cb = getattr(context, "_input_reconnect_base", None)
+            ok = await base_cb() if base_cb else False
             if ok:
-                rebind_stream_bindings(
-                    context,
-                    executor=executor,
-                    switcher=switcher,
-                    engine=engine,
-                )
                 await _report_input_channel_event(
                     context,
                     rp,
@@ -1457,22 +1501,20 @@ async def _init_game_automation(
         switcher.set_reconnect_callback(_reconnect_input_and_rebind)
         switcher.set_task_context(context)
         context._account_switcher = switcher
+        context._input_reconnect_callback = _reconnect_input_and_rebind
 
         if platform_client and hasattr(platform_client, "update_profile_binding"):
 
-            async def _mark_profile_bound(
+            async def _sync_gamertag_to_platform(
                 ga_id: str,
-                position_index: int,
                 game_name: Optional[str] = None,
             ) -> None:
                 await platform_client.update_profile_binding(
                     ga_id,
-                    profile_bound=True,
-                    position_index=position_index,
                     game_name=game_name,
                 )
 
-            switcher.set_profile_bound_callback(_mark_profile_bound)
+            switcher.set_gamertag_sync_callback(_sync_gamertag_to_platform)
 
         streaming_detector = None
         if context.frame_capture:
@@ -2129,6 +2171,7 @@ async def _init_gamepad_protocol(
 
         controller_protocol = ControllerProtocol()
         controller_protocol.set_stream_controller(context.xbox_session)
+        controller_protocol.set_task_context(context)
         if input_gate is not None:
             controller_protocol.set_input_gate(input_gate)
 

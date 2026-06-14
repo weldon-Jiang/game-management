@@ -124,6 +124,10 @@ async def connect_xsrp_cloud(
         context._cloud_webrtc = webrtc
         await webrtc.connect()
 
+        from .xsrp_access_input_loop import reset_controller_write_stats
+
+        reset_controller_write_stats(context)
+
         first_frame = await webrtc.wait_first_frame()
         connect_details["firstFrame"] = first_frame
         if not first_frame:

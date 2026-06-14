@@ -172,7 +172,18 @@ class PlatformApiClient:
             return False
         if self._progress_interval_sec <= 0:
             return False
-        key = f"{task_id}:{step}"
+        scope = kwargs.get('scope')
+        phase = kwargs.get('phase')
+        # 会话阶段变更须全量落库；同一 (task, SESSION) 键会把 ready 节流掉。
+        critical_session_phases = frozenset({
+            'ready', 'automation_failed', 'failed', 'closed', 'closing',
+        })
+        if step == 'SESSION' or scope == 'session':
+            if phase and str(phase).lower() in critical_session_phases:
+                return False
+            key = f"{task_id}:{step}:{phase or 'none'}"
+        else:
+            key = f"{task_id}:{step}"
         now = time.time()
         last = self._progress_throttle_at.get(key, 0.0)
         if now - last < self._progress_interval_sec:
@@ -353,18 +364,22 @@ class PlatformApiClient:
         self,
         game_account_id: str,
         *,
-        profile_bound: bool = True,
+        profile_bound: Optional[bool] = None,
         position_index: Optional[int] = None,
         game_name: Optional[str] = None,
     ) -> bool:
-        """主机登录后回写 profile_bound / position_index / gameName。"""
+        """可选回写 gameName；profile_bound / position_index 仅管理端维护，自动化默认不回写。"""
         url = self._get_callback_url(f'game-account/{game_account_id}/profile-binding')
         headers = await self._get_headers()
-        payload: Dict[str, Any] = {"profileBound": profile_bound}
+        payload: Dict[str, Any] = {}
+        if profile_bound is not None:
+            payload["profileBound"] = profile_bound
         if position_index is not None:
             payload["positionIndex"] = position_index
         if game_name:
             payload["gameName"] = game_name
+        if not payload:
+            return False
 
         try:
             session = await self._get_session()
@@ -378,7 +393,7 @@ class PlatformApiClient:
                     result = await response.json()
                     if result.get('code') == 200:
                         self.logger.info(
-                            "profile_bound 已回写平台 - gameAccountId=%s",
+                            "gameName 已回写平台 - gameAccountId=%s",
                             game_account_id,
                         )
                         return True

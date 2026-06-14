@@ -2,6 +2,7 @@ import { ref, onUnmounted, unref, watch } from 'vue'
 import { taskApi } from '@/api/task'
 import { subscribeToTopic } from '@/utils/stompClient'
 import { isRequestCanceled } from '@/utils/request'
+import { getEffectiveTaskStatus } from '@/utils/constants'
 
 /**
  * Monitor a task detail page with WebSocket push plus polling fallback.
@@ -70,12 +71,21 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
     // Patch only volatile fields immediately; full detail is reloaded right after to avoid stale derived state.
     if (payload.sessionPhase || payload.phase) {
       detail.value.task.sessionPhase = payload.sessionPhase || payload.phase
+      const effective = getEffectiveTaskStatus(detail.value.task)
+      if (effective && effective !== detail.value.task.status) {
+        detail.value.task.status = effective
+      }
     }
     if (payload.message) {
       detail.value.lastProgressMessage = payload.message
     }
     if (payload.status === 'FAILED') {
       detail.value.task.status = 'failed'
+    } else if (payload.status === 'RUNNING') {
+      const effective = getEffectiveTaskStatus(detail.value.task)
+      if (effective === 'running' && detail.value.task.status !== 'running') {
+        detail.value.task.status = 'running'
+      }
     }
   }
 

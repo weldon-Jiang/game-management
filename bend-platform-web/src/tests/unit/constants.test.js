@@ -6,6 +6,8 @@ import {
   AGENT_STATUS_MAP,
   getTaskStatusText,
   getTaskStatusType,
+  getEffectiveTaskStatus,
+  getSessionPhaseText,
   getTaskTypeText,
   getAgentStatusText,
   getAgentStatusType,
@@ -113,6 +115,48 @@ describe('constants.js - 工具函数', () => {
     it('对于 null 或 undefined 应该返回 "info"', () => {
       expect(getTaskStatusType(null)).toBe('info')
       expect(getTaskStatusType(undefined)).toBe('info')
+    })
+  })
+
+  describe('getEffectiveTaskStatus', () => {
+    it('活跃会话应将残留 completed 修正为 running', () => {
+      expect(getEffectiveTaskStatus({
+        status: 'completed',
+        sessionPhase: 'opening',
+        sessionId: 'sess-1',
+        streamingAccountId: 'sa-1'
+      })).toBe('running')
+    })
+
+    it('会话已关闭时应保留 completed', () => {
+      expect(getEffectiveTaskStatus({
+        status: 'completed',
+        sessionPhase: 'closed',
+        sessionId: 'sess-1'
+      })).toBe('completed')
+    })
+
+    it('暂停会话应展示 paused', () => {
+      expect(getEffectiveTaskStatus({
+        status: 'running',
+        sessionPhase: 'paused_immediate',
+        sessionId: 'sess-1'
+      })).toBe('paused')
+    })
+
+    it('input_reconnecting 子阶段仍应展示 running', () => {
+      expect(getEffectiveTaskStatus({
+        status: 'running',
+        sessionPhase: 'input_reconnecting',
+        sessionId: 'sess-1'
+      })).toBe('running')
+    })
+  })
+
+  describe('getSessionPhaseText', () => {
+    it('应识别 input 通道子阶段', () => {
+      expect(getSessionPhaseText('input_reconnecting')).toBe('输入通道重连中')
+      expect(getSessionPhaseText('input_restored')).toBe('输入通道已恢复')
     })
   })
 

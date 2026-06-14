@@ -59,7 +59,12 @@ class StreamRuntime:
         return self.auto_graph or self.auto_play
 
     def is_manual_input_allowed(self) -> bool:
-        """InputPump 仅在非 graph/play 时发送 manual（对齐 streaming hid_controller）。"""
+        """InputPump 在人工接管、任务暂停或非 graph/play 时发送 manual。"""
+        ctx = self._context
+        if getattr(ctx, "_manual_takeover", False):
+            return True
+        if ctx is not None and hasattr(ctx, "is_paused") and ctx.is_paused():
+            return True
         return not self.is_automation_active
 
     def seed_latest_frame(self, frame: Frame) -> None:

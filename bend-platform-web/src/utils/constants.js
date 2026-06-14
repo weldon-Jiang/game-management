@@ -313,6 +313,45 @@ export const getTaskStatusType = (status) => {
   return TASK_STATUS_MAP[status]?.type || 'info'
 }
 
+/** 会话已结束或失败时，任务 status 可与 sessionPhase 对齐展示 */
+const TERMINAL_SESSION_PHASES = new Set(['closed', 'failed'])
+
+/**
+ * 长寿命串流任务复用新会话时，task.status 可能残留上一轮 completed；
+ * 当前会话仍在进行时应展示 running / paused / pending。
+ *
+ * @param {object|null|undefined} task 含 status、sessionPhase、streamingAccountId、sessionId
+ */
+export const getEffectiveTaskStatus = (task) => {
+  if (!task) return ''
+  const rawStatus = String(task.status || '').toLowerCase()
+  const phase = String(task.sessionPhase || '').toLowerCase()
+
+  if (!phase) return task.status || ''
+
+  if (phase.startsWith('paused') || rawStatus === 'paused') return 'paused'
+
+  if (TERMINAL_SESSION_PHASES.has(phase)) {
+    if (phase === 'failed') return 'failed'
+    // STEP2/3 失败后 session 已 closed 但 task.status 可能残留 running
+    if (phase === 'closed' && String(task.stepStatus || '').toUpperCase() === 'FAILED') {
+      return 'failed'
+    }
+    return phase === 'failed' ? 'failed' : (task.status || rawStatus)
+  }
+
+  const isStreamingTask = Boolean(task.sessionId || task.streamingAccountId)
+  if (isStreamingTask && ['completed', 'stopped', 'failed'].includes(rawStatus)) {
+    return 'running'
+  }
+
+  if (rawStatus === 'pending' && isStreamingTask) {
+    return 'running'
+  }
+
+  return task.status || ''
+}
+
 export const getAccountTaskStatusText = (status) => {
   if (!status) return '-'
   return ACCOUNT_TASK_STATUS_MAP[status]?.text || status
@@ -389,6 +428,9 @@ export const SESSION_PHASE_MAP = {
   ready: { text: '串流就绪（待选模式）', type: 'success' },
   automation_failed: { text: '自动化失败（可重试）', type: 'warning' },
   automating: { text: '自动化执行中', type: 'primary' },
+  input_reconnecting: { text: '输入通道重连中', type: 'warning' },
+  input_restored: { text: '输入通道已恢复', type: 'success' },
+  input_reconnect_failed: { text: '输入通道重连失败', type: 'danger' },
   paused_immediate: { text: '已暂停', type: 'warning' },
   paused_after_match: { text: '本场后暂停', type: 'warning' },
   closing: { text: '关闭中', type: 'info' },
@@ -403,6 +445,8 @@ export const SESSION_PHASE_HINT_MAP = {
   streaming: '正在建立云端串流连接...',
   ready: '账号、主机、LAN 首帧和 SmartGlass 输入通道已通过检查，可选择自动化类型。',
   automation_failed: 'Step4 自动化未完成，但串流会话仍保留，可重新选择模式后重试。',
+  input_reconnecting: 'Input DataChannel 已关闭，Agent 正在自动重连；暂停/终止控制仍可用。',
+  input_reconnect_failed: 'Input DataChannel 重连失败，可尝试「重连串流」或终止后重新启动。',
   initializing_display: '正在建立 LAN 首帧和显示链路；若失败通常与主机画面或网络有关。',
   initializing_input: '正在验证 SmartGlass 输入通道；若失败通常与 LAN 握手或网络有关。',
   failed: '串流准备失败，请结合错误信息区分账号认证、主机匹配、LAN 首帧或输入通道问题。',
@@ -490,6 +534,7 @@ export const TASK_EVENT_MESSAGE_MAP = {
   'input DataChannel keepalive 发送失败': 'SmartGlass 输入保活失败',
   'Cancelled': '已取消',
   'Account skipped': '账号已跳过',
+  '准备完成（跳过添加）': '准备完成（跳过添加）',
   '准备完成（账号已存在）': '准备完成（账号已存在）',
   '添加账号失败': '添加账号失败',
   '账号校验失败': '账号校验失败',

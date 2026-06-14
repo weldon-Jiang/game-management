@@ -513,6 +513,7 @@ class CentralManager:
                     self.logger.info("Agent secret updated from server and saved")
                     
                 self._agent_info.status = 'online'
+                self._apply_keyboard_mapping_from_payload(data)
                 self.logger.info(f"Agent registered successfully: {self.agent_id}")
                 return True
             else:
@@ -521,6 +522,19 @@ class CentralManager:
         except Exception as e:
             self.logger.error(f"Registration error: {e}")
             return False
+
+    def _apply_keyboard_mapping_from_payload(self, payload: Dict) -> None:
+        """从注册/心跳响应同步平台键盘映射。"""
+        if not isinstance(payload, dict):
+            return
+        bindings = payload.get("keyboardMapping")
+        if bindings is None:
+            return
+        try:
+            from ..input.agent_keyboard_config import apply_platform_keyboard_mapping
+            apply_platform_keyboard_mapping(bindings if isinstance(bindings, dict) else None)
+        except Exception as exc:
+            self.logger.warning("同步键盘映射失败: %s", exc)
 
     async def _heartbeat_loop(self):
         """
@@ -551,7 +565,7 @@ class CentralManager:
                 xbox_session_count = task_executor.get_xbox_session_count()
 
                 # 发送心跳
-                await self.api.heartbeat(
+                hb_result = await self.api.heartbeat(
                     status=self._agent_info.status,
                     current_task_id=getattr(self, '_current_task_id', None),
                     current_streaming_id=getattr(self, '_current_streaming_id', None),
@@ -559,6 +573,8 @@ class CentralManager:
                     running_task_count=running_task_count,
                     xbox_session_count=xbox_session_count
                 )
+                if isinstance(hb_result, dict):
+                    self._apply_keyboard_mapping_from_payload(hb_result.get("data") or {})
                 self._agent_info.last_heartbeat = datetime.now()
                 self._heartbeat_logger.debug(
                     "HTTP heartbeat ok (running=%s, xbox_sessions=%s)",
@@ -724,6 +740,11 @@ class CentralManager:
                 # 安装更新
                 success = await self.update_manager.install_update()
                 return {'success': success}
+            elif command == 'update_keyboard_mapping':
+                bindings = params.get('bindings') if isinstance(params, dict) else None
+                from ..input.agent_keyboard_config import apply_platform_keyboard_mapping
+                apply_platform_keyboard_mapping(bindings)
+                return {'success': True}
             return {'success': False, 'error': 'Unknown command'}
 
         except Exception as e:

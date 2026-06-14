@@ -14,8 +14,8 @@
           <div class="overview-grid">
             <div class="overview-item">
               <span class="label">任务状态</span>
-              <el-tag :type="getTaskStatusType(task.status)" size="small">
-                {{ getTaskStatusText(task.status) }}
+              <el-tag :type="getTaskStatusType(displayTaskStatus)" size="small">
+                {{ getTaskStatusText(displayTaskStatus) }}
               </el-tag>
             </div>
             <div class="overview-item">
@@ -93,7 +93,7 @@
           <TaskControlBar
             v-if="isCurrentSession"
             class="control-bar"
-            :task-status="task.status"
+            :task-status="displayTaskStatus"
             :session-phase="task.sessionPhase || session?.phase"
             :game-action-type="displayGameActionType"
             :game-action-pending="task.gameActionPending"
@@ -153,6 +153,7 @@ import { ElMessage } from 'element-plus'
 import { useTaskMonitor } from '@/composables/useTaskMonitor'
 import { taskApi } from '@/api/task'
 import {
+  getEffectiveTaskStatus,
   getTaskStatusText,
   getTaskStatusType,
   getGameActionTypeText,
@@ -178,7 +179,7 @@ const taskId = computed(() => route.params.id)
 const sessions = ref([])
 const selectedSessionId = ref('')
 
-const { detail, events, loading, startMonitor } = useTaskMonitor(taskId, selectedSessionId)
+const { detail, events, loading, startMonitor, refresh } = useTaskMonitor(taskId, selectedSessionId)
 
 const task = computed(() => detail.value?.task)
 const session = computed(() => detail.value?.session)
@@ -200,6 +201,13 @@ const displaySession = computed(() => {
 const displaySessionPhase = computed(() => {
   if (isCurrentSession.value) return task.value?.sessionPhase || session.value?.phase || ''
   return displaySession.value?.phase || ''
+})
+
+/** 当前会话视图下修正复用任务残留的 completed；历史会话只读展示原始 status */
+const displayTaskStatus = computed(() => {
+  if (!task.value) return ''
+  if (!isCurrentSession.value) return task.value.status || ''
+  return getEffectiveTaskStatus(task.value)
 })
 
 const displayGameActionType = computed(() => {
@@ -367,6 +375,14 @@ const handleSkip = async (gameAccountId) => {
 const handleReconnect = async () => {
   await taskApi.reconnectStream(taskId.value)
   ElMessage.success('已发送重连串流指令')
+  // Agent 重启后内存任务丢失时，平台会通过 task_control_ack 将任务标为失败；短延迟刷新以同步 UI
+  setTimeout(async () => {
+    await refresh({ immediate: true })
+    const err = task.value?.errorMessage || ''
+    if (err.includes('Agent重新上线') || err.includes('Agent 重新上线')) {
+      ElMessage.warning('Agent 已重启，原任务已结束，请从串流账号重新启动')
+    }
+  }, 1500)
 }
 </script>
 

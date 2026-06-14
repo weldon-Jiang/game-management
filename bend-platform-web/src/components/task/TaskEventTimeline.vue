@@ -5,9 +5,9 @@
       <span v-if="events.length" class="panel-count">{{ events.length }} 条</span>
     </div>
     <div ref="scrollRef" class="panel-body">
-      <el-timeline v-if="events.length">
+      <el-timeline v-if="sortedEvents.length">
         <el-timeline-item
-          v-for="ev in events"
+          v-for="ev in sortedEvents"
           :key="ev.id"
           :timestamp="formatTime(ev.createdTime)"
           placement="top"
@@ -32,7 +32,7 @@
 /**
  * 任务事件时间线：展示 task_event 流水，scope/phase 映射为中文标签。
  */
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import {
   getSessionPhaseText,
   getTaskStatusText,
@@ -50,6 +50,16 @@ const props = defineProps({
 })
 
 const scrollRef = ref(null)
+
+/** 远→近：最早在上、最新在下（API 默认 desc，此处统一升序展示） */
+const sortedEvents = computed(() =>
+  [...props.events].sort((a, b) => {
+    const ta = a.createdTime ? new Date(a.createdTime).getTime() : 0
+    const tb = b.createdTime ? new Date(b.createdTime).getTime() : 0
+    if (ta !== tb) return ta - tb
+    return String(a.id || '').localeCompare(String(b.id || ''))
+  })
+)
 
 const formatTime = (t) => {
   if (!t) return ''
@@ -74,30 +84,23 @@ const displayMessage = (ev) => {
 
 const hostAttemptsHint = (ev) => formatHostAttemptsSummary(ev.payload)
 
-/** Center the newest event (API returns desc — first item is latest). */
-const scrollNewestToCenter = () => {
+/** 滚动到底部，使最新事件始终出现在可视区域内 */
+const scrollToBottom = () => {
   nextTick(() => {
-    const container = scrollRef.value
-    if (!container) return
-
-    const items = container.querySelectorAll('.el-timeline-item')
-    const newest = items[0]
-    if (!newest) {
-      container.scrollTop = 0
-      return
-    }
-
-    const targetTop = newest.offsetTop - container.clientHeight / 2 + newest.offsetHeight / 2
-    container.scrollTop = Math.max(0, Math.min(targetTop, container.scrollHeight - container.clientHeight))
+    requestAnimationFrame(() => {
+      const container = scrollRef.value
+      if (!container) return
+      container.scrollTop = container.scrollHeight
+    })
   })
 }
 
 watch(
-  () => props.events.map((e) => e.id).join(','),
-  () => scrollNewestToCenter()
+  () => sortedEvents.value.map((e) => e.id).join(','),
+  () => scrollToBottom()
 )
 
-onMounted(() => scrollNewestToCenter())
+onMounted(() => scrollToBottom())
 </script>
 
 <style scoped>

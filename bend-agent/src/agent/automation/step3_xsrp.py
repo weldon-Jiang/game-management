@@ -15,7 +15,12 @@ from ..core.task_logger import get_task_logger
 from ..task.task_context import AgentTaskContext, Step3Result, TaskStepStatus
 from ..xbox.xsrp_frame_capture import XsrpFrameCapture
 from ..xbox.xsrp_pipeline_diagnostic import pipeline_diagnostic_from_context
-from ..xbox.xsrp_stream_keepalive import start_xsrp_idle_keepalive
+from ..xbox.stream_recovery import install_task_input_recovery
+from ..xbox.xsrp_access_input_loop import (
+    reset_controller_write_stats,
+    start_xsrp_access_input_loop,
+)
+from ..xbox.xsrp_stream_keepalive import stop_xsrp_idle_keepalive
 
 # 复用旧 Step3 的窗口/输入/S DL 泵实现，避免重复维护
 from .step3_display_helpers import (
@@ -102,6 +107,7 @@ async def step3_execute_xsrp_init(
         await stream_runtime.start_long_lived(task_logger)
 
         await _ensure_controller_protocol(context, task_logger, stream_logger)
+        install_task_input_recovery(context, task_logger)
         _bind_xsrp_input_close_handler(context, task_logger)
 
         if context.enable_window_display:
@@ -125,7 +131,9 @@ async def step3_execute_xsrp_init(
             await report_progress(context.task_id, "STEP3", "FAILED", msg, streamingStack="xsrp")
             return Step3Result(success=False, error_code="STREAM_NOT_READY", message=msg)
 
-        await start_xsrp_idle_keepalive(context, task_logger)
+        await stop_xsrp_idle_keepalive(context)
+        reset_controller_write_stats(context)
+        await start_xsrp_access_input_loop(context, task_logger)
         await _start_input_pump_if_ready(context, task_logger)
 
         success_msg = "xsrp 串流环境初始化完成"
@@ -166,7 +174,9 @@ def is_xsrp_stream_media_ready(context: AgentTaskContext) -> bool:
 
 
 def _bind_xsrp_input_close_handler(context: AgentTaskContext, task_logger) -> None:
-    """WebRTC input 通道关闭时标记 dirty，供 Step4/重连感知。"""
+    """WebRTC input 通道关闭时标记 dirty 并调度后台重连。"""
+    from ..xbox.controller_write import schedule_input_reconnect
+
     webrtc = getattr(context, "_cloud_webrtc", None)
     if webrtc is None or not hasattr(webrtc, "on_input_channel_close"):
         return
@@ -174,6 +184,7 @@ def _bind_xsrp_input_close_handler(context: AgentTaskContext, task_logger) -> No
     def _on_close():
         context._input_channel_dirty = True
         task_logger.warning("xsrp input 通道 closed，已标记待恢复")
+        schedule_input_reconnect(context)
 
     webrtc.on_input_channel_close(_on_close)
 
@@ -197,13 +208,15 @@ async def _validate_xsrp_stream_readiness(context, task_logger, stream_logger) -
         return True, f"WebRTC 帧稳定 {sizes[0][0]}x{sizes[0][1]}"
 
     async def _check_input() -> tuple:
+        from ..xbox.controller_write import send_stream_keepalive
+
         session = getattr(context, "xbox_session", None)
         if session is None:
             return False, "无 xsrp 会话"
         if not getattr(session, "is_connected", False):
             return False, "WebRTC 未连接"
-        ok1 = await session.send_keepalive()
-        ok2 = await session.send_keepalive()
+        ok1 = await send_stream_keepalive(session, context=context)
+        ok2 = await send_stream_keepalive(session, context=context)
         if not (ok1 and ok2):
             return False, "DataChannel keepalive 失败"
         state = getattr(session, "input_channel_state", None) or "open"

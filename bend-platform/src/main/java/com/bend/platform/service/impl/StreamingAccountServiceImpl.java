@@ -174,6 +174,18 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
     }
 
     @Override
+    public StreamingAccount findByIdForMerchant(String id, String merchantId) {
+        StreamingAccount account = streamingAccountMapper.selectById(id);
+        if (account == null) {
+            return null;
+        }
+        if (StringUtils.isNotBlank(merchantId) && !merchantId.equals(account.getMerchantId())) {
+            throw new BusinessException(403, "串流账号不属于当前商户");
+        }
+        return account;
+    }
+
+    @Override
     public StreamingAccount findByEmail(String email) {
         LambdaQueryWrapper<StreamingAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StreamingAccount::getEmail, email);

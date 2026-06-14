@@ -33,6 +33,9 @@ class CloudStreamController:
 
     @property
     def input_channel_state(self) -> str:
+        state = self._webrtc.get_input_channel_ready_state()
+        if state:
+            return state
         return "open" if self._webrtc.is_input_ready else "closed"
 
     @property
@@ -40,7 +43,10 @@ class CloudStreamController:
         return self._video_mode
 
     def is_input_channel_healthy(self) -> bool:
-        return self._webrtc.is_input_ready
+        return self._webrtc.is_input_ready and self._webrtc.is_input_channel_open()
+
+    async def wait_for_input_channel(self, timeout: float = 5.0) -> bool:
+        return await self._webrtc.wait_for_input_channel(timeout=timeout)
 
     async def send_keepalive(self) -> bool:
         return await self._webrtc.send_keepalive()

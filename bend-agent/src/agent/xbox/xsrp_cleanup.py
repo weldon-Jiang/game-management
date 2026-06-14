@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 from ..core.logger import get_logger
+from .xsrp_access_input_loop import stop_xsrp_access_input_loop
 from .xsrp_stream_keepalive import stop_xsrp_idle_keepalive
 
 
 async def cleanup_xsrp_stream_context(context: Any, task_logger=None) -> None:
     """任务结束或失败时释放 xsrp 云端串流资源。"""
     log = task_logger or get_logger("xsrp_cleanup")
+    await stop_xsrp_access_input_loop(context)
     await stop_xsrp_idle_keepalive(context)
 
     webrtc = getattr(context, "_cloud_webrtc", None)

@@ -44,6 +44,15 @@ public interface StreamingAccountService {
     StreamingAccount findById(String id);
 
     /**
+     * Agent 回调场景：按 ID 查询并校验商户归属（不依赖 JWT UserContext）。
+     *
+     * @param id         账号 ID
+     * @param merchantId 期望所属商户 ID（来自 Agent 实例绑定）
+     * @return 账号实体，不存在返回 null
+     */
+    StreamingAccount findByIdForMerchant(String id, String merchantId);
+
+    /**
      * 根据邮箱查询账号
      *
      * @param email 邮箱

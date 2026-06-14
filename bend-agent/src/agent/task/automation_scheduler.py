@@ -262,9 +262,7 @@ class AutomationScheduler:
                 gamertag=ga.get("gameName", ga.get("gamertag", "")),
                 email=ga.get("email", ""),
                 password=decrypted_game_password or "",
-                position_index=ga.get("positionIndex", ga.get("position_index", -1)),
                 is_new_user=bool(ga.get("isNewUser", ga.get("is_new_user", False))),
-                profile_bound=bool(ga.get("profileBound", ga.get("profile_bound", False))),
                 is_primary=ga.get("isPrimary", False),
                 target_matches=ga.get("dailyMatchLimit", ga.get("targetMatches", 3)),
                 today_match_count=ga.get("todayMatchCount", 0),
@@ -605,12 +603,15 @@ class AutomationScheduler:
         await self._terminate_from_user_window_close(task_id)
 
     async def _terminate_from_user_window_close(self, task_id: str) -> None:
-        """关窗确认后：上报 CANCELLED → 本地终止串流与自动化。"""
+        """关窗确认后：先关闭显示窗口 → 上报 CANCELLED → 本地终止串流与自动化。"""
         context = self._task_contexts.get(task_id)
         if context:
             if getattr(context, "_user_close_terminating", False):
                 return
             context._user_close_terminating = True
+
+        # 用户已确认关窗：立即销毁 SDL 窗口，避免终止串流期间窗口仍停留在屏幕上。
+        await self.close_display_window(task_id)
 
         cancel_message = "用户关闭串流窗口，任务已结束"
         try:

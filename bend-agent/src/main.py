@@ -11,6 +11,17 @@ from agent.core.encoding_bootstrap import ensure_utf8_stdio
 
 ensure_utf8_stdio()
 
+# Windows：尽早设置 AppUserModelID，避免 SDL 串流窗口任务栏仍显示 python.exe 图标。
+if sys.platform == "win32":
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "com.bend.agent.streamwindow"
+        )
+    except Exception:
+        pass
+
 # 添加源代码目录到路径（仅在开发环境）
 if not getattr(sys, 'frozen', False):
     sys.path.insert(0, str(Path(__file__).parent.parent))

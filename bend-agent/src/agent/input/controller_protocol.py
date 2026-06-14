@@ -155,6 +155,18 @@ class ControllerSignal:
             right_thumb_y=data.get('right_thumb_y', 0)
         )
 
+    def is_void(self) -> bool:
+        """是否无任何有效输入（对齐 streaming XsrpController.IsVoid）。"""
+        return (
+            not self.buttons
+            and not self.left_trigger
+            and not self.right_trigger
+            and not self.left_thumb_x
+            and not self.left_thumb_y
+            and not self.right_thumb_x
+            and not self.right_thumb_y
+        )
+
     @classmethod
     def zero(cls) -> 'ControllerSignal':
         """创建零信号（所有值为0）"""
@@ -192,6 +204,11 @@ class ControllerProtocol:
         self.logger = get_logger('controller_protocol')
         self._stream_controller = stream_controller
         self._input_gate = None
+        self._task_context = None
+
+    def set_task_context(self, context: Any) -> None:
+        """绑定任务 context，用于 write_controller_final 时间戳与失败重连。"""
+        self._task_context = context
 
     def set_input_gate(self, gate) -> None:
         """绑定 InputGate：暂停/非自动化期拦截 send_signal。"""
@@ -212,6 +229,8 @@ class ControllerProtocol:
         """
         发送手柄信号到Xbox（Step4 自动化路径，受 InputGate 约束）。
         """
+        if self._task_context and getattr(self._task_context, "_manual_takeover", False):
+            return False
         if self._input_gate is not None and not self._input_gate.is_allowed():
             return False
         return await self._send_signal_ungated(signal)
@@ -228,8 +247,12 @@ class ControllerProtocol:
             return False
 
         try:
-            return await self._stream_controller.send_gamepad_state(
-                signal.to_dict()
+            from ..xbox.controller_write import write_controller_final
+
+            return await write_controller_final(
+                self._stream_controller,
+                signal.to_dict(),
+                context=self._task_context,
             )
         except Exception as e:
             self.logger.error(f"发送手柄信号失败: {e}")

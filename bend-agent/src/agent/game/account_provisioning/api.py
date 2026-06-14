@@ -7,7 +7,7 @@ AccountProvisioningModule — 每次 GameAction 前的被动门禁。
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from ...core.logger import get_logger
 from ...task.task_context import GameAccountInfo
@@ -65,8 +65,10 @@ class AccountProvisioningModule:
         platform_client: Any = None,
         frame_getter: Any = None,
         stream_session: Any = None,
+        reconnect_callback: Optional[Callable[[], Awaitable[bool]]] = None,
+        task_context: Any = None,
     ) -> None:
-        """step3/step4 初始化后延迟绑定检测器/输入。"""
+        """step3/step4 初始化后延迟绑定检测器/输入/重连回调。"""
         if scene_detector is not None:
             self._detector._scene = scene_detector
             self._adder._scene = scene_detector
@@ -78,6 +80,10 @@ class AccountProvisioningModule:
             self._adder._frame_getter = frame_getter
         if stream_session is not None:
             self._adder._stream_session = stream_session
+        if reconnect_callback is not None:
+            self._adder._reconnect_callback = reconnect_callback
+        if task_context is not None:
+            self._adder._task_context = task_context
 
     async def _emit(
         self,
@@ -145,7 +151,7 @@ class AccountProvisioningModule:
         if exists:
             await self._emit(
                 ProvisioningPhase.READY,
-                "准备完成（账号已存在）",
+                "准备完成（跳过添加）",
                 game_account.id,
                 step_index=self.STEP_TOTAL,
                 status="COMPLETED",

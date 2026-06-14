@@ -22,6 +22,7 @@ from enum import Enum
 
 from ..core.logger import get_logger
 from ..core.paths import get_config_path
+from .keyboard_mapping_defaults import DEFAULT_KEYBOARD_BINDINGS
 
 
 class KeyAction(Enum):
@@ -67,8 +68,9 @@ class KeyboardMapper:
     - 调用 stop() 停止监听
     """
 
+    # WASD → 方向键；J/B/X/Y → 手柄面键（A 不与左方向共用 a，pygame 键名为小写单字母）
     DEFAULT_BINDINGS = {
-        'a': KeyAction.TAP_A,
+        'j': KeyAction.TAP_A,
         'b': KeyAction.TAP_B,
         'x': KeyAction.TAP_X,
         'y': KeyAction.TAP_Y,
@@ -78,18 +80,25 @@ class KeyboardMapper:
         'e': KeyAction.TAP_R1,
         'w': KeyAction.MOVE_UP,
         's': KeyAction.MOVE_DOWN,
-        'a_key': KeyAction.MOVE_LEFT,
+        'a': KeyAction.MOVE_LEFT,
         'd': KeyAction.MOVE_RIGHT,
     }
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(
+        self,
+        config_path: Optional[str] = None,
+        bindings: Optional[Dict[str, str]] = None,
+    ):
         self.logger = get_logger('keyboard_mapper')
         self.config_path = config_path
+        self._initial_bindings = bindings
         self._bindings: Dict[str, KeyAction] = {}
         self._pressed_keys: set = set()
         self._action_callbacks: List[Callable[[KeyAction, bool], None]] = []
+        self._hotkey_callbacks: Dict[str, Callable[[], None]] = {}
         self._running = False
         self._input_task: Optional[asyncio.Task] = None
+        self._on_window_close: Optional[Callable[[], None]] = None
         self._holdable_actions: set = {
             KeyAction.MOVE_UP, KeyAction.MOVE_DOWN,
             KeyAction.MOVE_LEFT, KeyAction.MOVE_RIGHT,
@@ -99,7 +108,11 @@ class KeyboardMapper:
         self._load_bindings()
 
     def _load_bindings(self):
-        """加载按键绑定配置"""
+        """加载按键绑定：显式 bindings > YAML 文件 > 平台缓存/默认。"""
+        if self._initial_bindings:
+            self._apply_binding_dict(self._initial_bindings, source="platform/runtime")
+            return
+
         if self.config_path:
             try:
                 import yaml
@@ -107,21 +120,46 @@ class KeyboardMapper:
                     config = yaml.safe_load(f)
 
                 bindings_config = config.get('keyboard_mapping', {}).get('bindings', {})
-                for key, action_str in bindings_config.items():
-                    try:
-                        action = KeyAction(action_str)
-                        self._bindings[key.lower()] = action
-                    except ValueError:
-                        self.logger.warning(f"Unknown action: {action_str}")
-
-                self.logger.info(f"从配置文件加载了 {len(self._bindings)} 个按键绑定")
-                return
+                if bindings_config:
+                    self._apply_binding_dict(bindings_config, source=f"file:{self.config_path}")
+                    return
             except Exception as e:
                 self.logger.warning(f"加载配置文件失败: {e}")
 
-        self._bindings = self.DEFAULT_BINDINGS.copy()
-        self.logger.info("使用默认按键绑定")
-        self._on_window_close: Optional[Callable[[], None]] = None
+        try:
+            from .agent_keyboard_config import get_effective_keyboard_bindings
+            self._apply_binding_dict(get_effective_keyboard_bindings(), source="platform/default")
+        except Exception:
+            self._bindings = self._dict_to_key_actions(self.DEFAULT_BINDINGS)
+            self.logger.info("使用内置默认按键绑定")
+
+    def _dict_to_key_actions(self, raw: Dict) -> Dict[str, KeyAction]:
+        result: Dict[str, KeyAction] = {}
+        for key, action in raw.items():
+            try:
+                if isinstance(action, KeyAction):
+                    result[str(key).lower()] = action
+                else:
+                    result[str(key).lower()] = KeyAction(str(action))
+            except ValueError:
+                self.logger.warning("Unknown action: %s", action)
+        return result
+
+    def _apply_binding_dict(self, raw: Dict[str, str], *, source: str) -> None:
+        parsed = self._dict_to_key_actions(raw)
+        if not parsed:
+            parsed = self._dict_to_key_actions(self.DEFAULT_BINDINGS)
+        self._bindings = parsed
+        self.logger.info("键盘映射已加载 (%s, %d 项)", source, len(self._bindings))
+
+    def apply_bindings(self, raw: Dict[str, str]) -> None:
+        """热更新键位（平台保存或 WS 推送后调用）。"""
+        self._pressed_keys.clear()
+        self._apply_binding_dict(raw or DEFAULT_KEYBOARD_BINDINGS, source="hot-reload")
+
+    def register_hotkey(self, key_name: str, callback: Callable[[], None]) -> None:
+        """注册调试/功能热键（不参与手柄映射，单次 KEYDOWN 触发）。"""
+        self._hotkey_callbacks[key_name.lower()] = callback
 
     def set_window_close_handler(self, handler: Optional[Callable[[], None]]) -> None:
         """用户点击 SDL 窗口关闭按钮时调用（隐藏，非退出进程）。"""
@@ -191,6 +229,14 @@ class KeyboardMapper:
 
     async def _handle_key_press(self, key_name: str):
         """处理按键按下"""
+        hotkey = self._hotkey_callbacks.get(key_name.lower())
+        if hotkey is not None:
+            try:
+                hotkey()
+            except Exception as e:
+                self.logger.error(f"热键回调异常 ({key_name}): {e}")
+            return
+
         action = self._bindings.get(key_name.lower())
         if action:
             self.logger.debug(f"Key pressed: {key_name} -> {action.value}")

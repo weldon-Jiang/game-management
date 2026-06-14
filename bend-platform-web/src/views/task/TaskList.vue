@@ -98,8 +98,8 @@
         <el-table-column prop="name" label="任务名称" min-width="120" show-overflow-tooltip />
         <el-table-column prop="status" label="状态" width="88" align="center">
           <template #default="{ row }">
-            <el-tag :type="getTaskStatusType(row.status)" size="small">
-              {{ getTaskStatusText(row.status) }}
+            <el-tag :type="getTaskStatusType(getEffectiveTaskStatus(row))" size="small">
+              {{ getTaskStatusText(getEffectiveTaskStatus(row)) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -314,6 +314,7 @@ import { taskApi, agentApi, streamingApi, merchantApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import {
   getAgentDisplayName,
+  getEffectiveTaskStatus,
   getTaskStatusText,
   getTaskStatusType,
   getGameActionTypeText,
@@ -558,16 +559,9 @@ const applyDefaultAgentFilter = () => {
     return
   }
   const saved = localStorage.getItem(TASK_LIST_AGENT_KEY)
-  // 记住上次使用的 Agent，便于运维反复观察同一台 Agent 的任务列表。
+  // 仅恢复用户上次手动选择的 Agent；不再默认选中在线 Agent，避免终态任务 targetAgentId 为空时被误过滤。
   if (saved && agentOptions.value.some((agent) => agent.agentId === saved)) {
     filterAgentId.value = saved
-    return
-  }
-  const online = onlineAgents.value.find((agent) => agent.status === 'online')
-  if (online) {
-    filterAgentId.value = online.agentId
-  } else if (agentOptions.value.length) {
-    filterAgentId.value = agentOptions.value[0].agentId
   }
 }
 

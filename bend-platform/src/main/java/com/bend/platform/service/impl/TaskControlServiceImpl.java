@@ -117,6 +117,7 @@ public class TaskControlServiceImpl implements TaskControlService {
             if (!hostBindingService.hasActiveBinding(streamingAccountId, selectedHost.getId())) {
                 throw new BusinessException(400, "所选主机未绑定到该串流账号，请先在主机管理中绑定或留空由 Agent 自动发现");
             }
+            selectedHost = releaseStaleHostLockIfNeeded(selectedHost, merchantId);
             if (Boolean.TRUE.equals(selectedHost.getLocked())) {
                 throw new BusinessException(400, "所选主机已被其他任务占用");
             }
@@ -435,6 +436,7 @@ public class TaskControlServiceImpl implements TaskControlService {
             streamingSessionService.closeSession(session.getId(), "closed");
         }
         restoreStreamingAccountState(task);
+        releaseXboxHostLock(task, merchantId);
 
         final String cancelTaskId = taskId;
         final Task controlTask = task;
@@ -634,12 +636,6 @@ public class TaskControlServiceImpl implements TaskControlService {
             info.put("id", ga.getId());
             info.put("gameName", ga.getGameName());
             info.put("email", ga.getEmail());
-            if (ga.getPositionIndex() != null) {
-                info.put("positionIndex", ga.getPositionIndex());
-            }
-            if (Boolean.TRUE.equals(ga.getProfileBound())) {
-                info.put("profileBound", true);
-            }
             info.put("dailyMatchLimit", ga.getDailyMatchLimit());
             info.put("todayMatchCount", ga.getTodayMatchCount());
             info.put("cooldownHours", ga.getCooldownHours());
@@ -671,6 +667,41 @@ public class TaskControlServiceImpl implements TaskControlService {
             result.add(buildHostInfo(xbox));
         }
         return result;
+    }
+
+    private static final Set<String> TERMINAL_TASK_STATUSES =
+            Set.of("completed", "failed", "cancelled", "stopped");
+
+    /**
+     * 若主机锁来自已终态任务，自动释放陈旧租约，避免取消/失败后无法再次选主机。
+     */
+    private XboxHost releaseStaleHostLockIfNeeded(XboxHost host, String merchantId) {
+        if (host == null || !Boolean.TRUE.equals(host.getLocked())) {
+            return host;
+        }
+        String lockTaskId = host.getLockedByTaskId();
+        if (!StringUtils.hasText(lockTaskId)) {
+            return host;
+        }
+        Task lockTask = taskService.findById(lockTaskId);
+        if (lockTask == null || !TERMINAL_TASK_STATUSES.contains(lockTask.getStatus())) {
+            return host;
+        }
+        xboxHostService.unlock(
+                merchantId, host.getId(), host.getLockedByAgentId(), lockTaskId);
+        return xboxHostService.requireForMerchant(host.getId(), merchantId);
+    }
+
+    /** 终止任务时释放该任务持有的 Xbox 主机锁。 */
+    private void releaseXboxHostLock(Task task, String merchantId) {
+        if (task == null || !StringUtils.hasText(task.getXboxHostId())) {
+            return;
+        }
+        xboxHostService.unlock(
+                merchantId,
+                task.getXboxHostId(),
+                task.getTargetAgentId(),
+                task.getId());
     }
 
     private void sendTaskControl(Task task, String action, Map<String, Object> extra) {

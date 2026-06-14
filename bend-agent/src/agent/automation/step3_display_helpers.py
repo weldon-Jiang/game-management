@@ -328,6 +328,7 @@ async def _ensure_controller_protocol(
     protocol = ControllerProtocol()
     if context.xbox_session:
         protocol.set_stream_controller(context.xbox_session)
+        protocol.set_task_context(context)
         task_logger.info("控制器协议已绑定串流会话")
         stream_logger.info("控制器协议已绑定串流会话")
     else:
@@ -380,6 +381,7 @@ async def _init_keyboard_mapper(
 ) -> Optional[Any]:
     """初始化键盘映射器（overlay 经 InputPump 发送）。"""
     try:
+        from ..input.agent_keyboard_config import get_effective_keyboard_bindings
         from ..input.keyboard_mapper import KeyboardMapper
         from ..input.controller_protocol import ControllerSignal, XboxButtonFlag
         from ..input.keyboard_mapper import KeyAction
@@ -387,8 +389,12 @@ async def _init_keyboard_mapper(
         task_logger.info("正在初始化键盘映射器...")
         stream_logger.info("正在初始化键盘映射器...")
 
-        keyboard = KeyboardMapper()
+        keyboard = KeyboardMapper(bindings=get_effective_keyboard_bindings())
         await keyboard.start()
+
+        from ..debug.manual_debug_controls import attach_manual_debug_controls
+
+        attach_manual_debug_controls(context, keyboard, task_logger)
 
         if hasattr(context, "_controller_protocol") and context._controller_protocol:
             context._keyboard_overlay_signal = ControllerSignal.zero()

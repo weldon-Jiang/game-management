@@ -152,12 +152,9 @@ public class StreamingAccountAuthCacheServiceImpl implements StreamingAccountAut
         if (!StringUtils.hasText(streamingAccountId)) {
             throw new BusinessException(400, "streamingAccountId 不能为空");
         }
-        StreamingAccount account = streamingAccountService.findById(streamingAccountId);
+        StreamingAccount account = streamingAccountService.findByIdForMerchant(streamingAccountId, merchantId);
         if (account == null) {
             throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
-        }
-        if (StringUtils.hasText(merchantId) && !merchantId.equals(account.getMerchantId())) {
-            throw new BusinessException(403, "串流账号不属于当前商户");
         }
         return account;
     }
