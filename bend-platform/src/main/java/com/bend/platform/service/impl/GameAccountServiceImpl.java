@@ -471,9 +471,18 @@ public class GameAccountServiceImpl implements GameAccountService {
             throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
         }
 
-        account.setAgentId(agentId);
-        account.setUpdatedTime(LocalDateTime.now());
-        gameAccountMapper.updateById(account);
+        if (agentId == null) {
+            // MyBatis-Plus updateById 默认跳过 null 字段，须显式 SET agent_id = NULL
+            LambdaUpdateWrapper<GameAccount> wrapper = new LambdaUpdateWrapper<>();
+            wrapper.eq(GameAccount::getId, id)
+                    .set(GameAccount::getAgentId, null)
+                    .set(GameAccount::getUpdatedTime, LocalDateTime.now());
+            gameAccountMapper.update(null, wrapper);
+        } else {
+            account.setAgentId(agentId);
+            account.setUpdatedTime(LocalDateTime.now());
+            gameAccountMapper.updateById(account);
+        }
         log.info("更新游戏账号Agent绑定 - ID: {}, AgentID: {}", id, agentId);
     }
 
@@ -485,16 +494,20 @@ public class GameAccountServiceImpl implements GameAccountService {
             throw new BusinessException(ResultCode.GameAccount.NOT_FOUND);
         }
 
-        account.setStatus(status);
-        
-        // 状态变为空闲时，自动重置运行Agent
+        // 状态变为空闲时同步清空 agent_id；须用 UpdateWrapper 才能持久化 NULL
         if ("idle".equalsIgnoreCase(status) && account.getAgentId() != null) {
-            account.setAgentId(null);
+            LambdaUpdateWrapper<GameAccount> wrapper = new LambdaUpdateWrapper<>();
+            wrapper.eq(GameAccount::getId, id)
+                    .set(GameAccount::getStatus, status)
+                    .set(GameAccount::getAgentId, null)
+                    .set(GameAccount::getUpdatedTime, LocalDateTime.now());
+            gameAccountMapper.update(null, wrapper);
             log.info("游戏账号状态为空闲，自动重置运行Agent - ID: {}", id);
+        } else {
+            account.setStatus(status);
+            account.setUpdatedTime(LocalDateTime.now());
+            gameAccountMapper.updateById(account);
         }
-        
-        account.setUpdatedTime(LocalDateTime.now());
-        gameAccountMapper.updateById(account);
         log.info("更新游戏账号状态 - ID: {}, 状态: {}", id, status);
     }
 
@@ -555,16 +568,31 @@ public class GameAccountServiceImpl implements GameAccountService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void clearAgentIdByStreamingId(String streamingId) {
-        LambdaQueryWrapper<GameAccount> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(GameAccount::getStreamingId, streamingId);
-        List<GameAccount> accounts = gameAccountMapper.selectList(wrapper);
-        
-        for (GameAccount account : accounts) {
-            account.setAgentId(null);
-            account.setUpdatedTime(LocalDateTime.now());
-            gameAccountMapper.updateById(account);
+        if (streamingId == null || streamingId.isBlank()) {
+            return;
         }
-        log.info("清除游戏账号Agent绑定 - StreamingID: {}, 数量: {}", streamingId, accounts.size());
+        LambdaUpdateWrapper<GameAccount> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(GameAccount::getStreamingId, streamingId)
+                .set(GameAccount::getAgentId, null)
+                .set(GameAccount::getStatus, "idle")
+                .set(GameAccount::getUpdatedTime, LocalDateTime.now());
+        int rows = gameAccountMapper.update(null, wrapper);
+        log.info("清除游戏账号 Agent 绑定 - StreamingID: {}, 数量: {}", streamingId, rows);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void clearAgentBindingByAgentId(String agentId) {
+        if (agentId == null || agentId.isBlank()) {
+            return;
+        }
+        LambdaUpdateWrapper<GameAccount> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(GameAccount::getAgentId, agentId)
+                .set(GameAccount::getAgentId, null)
+                .set(GameAccount::getStatus, "idle")
+                .set(GameAccount::getUpdatedTime, LocalDateTime.now());
+        int rows = gameAccountMapper.update(null, wrapper);
+        log.info("清除 Agent 关联的游戏账号绑定 - AgentID: {}, 数量: {}", agentId, rows);
     }
 
     @Override

@@ -17,6 +17,7 @@ import com.bend.platform.service.*;
 import com.bend.platform.util.PlatformTypeUtil;
 import com.bend.platform.util.StreamingTaskConflictMessage;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -152,7 +153,9 @@ public class TaskControlServiceImpl implements TaskControlService {
 
         task.setSessionId(session.getId());
         task.setSessionPhase("opening");
+        task.setProgressMessage(null);
         taskMapper.updateById(task);
+        taskService.clearErrorMessage(task.getId());
 
         markStreamingAccountsBusy(streamingAccountId, agentId, gameAccounts);
 
@@ -256,7 +259,17 @@ public class TaskControlServiceImpl implements TaskControlService {
         fresh.setDescription(task.getDescription());
         fresh.setParams(task.getParams());
         taskMapper.updateById(fresh);
-        return fresh;
+        LambdaUpdateWrapper<Task> clearWrapper = new LambdaUpdateWrapper<>();
+        clearWrapper.eq(Task::getId, fresh.getId())
+                .set(Task::getErrorMessage, null)
+                .set(Task::getGameActionType, null)
+                .set(Task::getProgressMessage, null)
+                .set(Task::getResult, null)
+                .set(Task::getPauseMode, null)
+                .set(Task::getCompletedTime, null)
+                .set(Task::getStartedTime, null);
+        taskMapper.update(null, clearWrapper);
+        return taskMapper.selectById(fresh.getId());
     }
 
     private void markStreamingAccountsBusy(
@@ -305,10 +318,7 @@ public class TaskControlServiceImpl implements TaskControlService {
         }
         streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
         streamingAccountService.updateAgentId(streamingAccountId, null);
-        for (GameAccount ga : gameAccountService.findByStreamingId(streamingAccountId)) {
-            gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
-            gameAccountService.updateAgentId(ga.getId(), null);
-        }
+        gameAccountService.clearAgentIdByStreamingId(streamingAccountId);
     }
 
     /**
@@ -417,6 +427,8 @@ public class TaskControlServiceImpl implements TaskControlService {
         task.setStatus("cancelled");
         task.setSessionPhase("closed");
         task.setWindowVisible(false);
+        task.setErrorMessage("用户终止串流");
+        task.setProgressMessage(null);
         taskMapper.updateById(task);
         StreamingSession session = streamingSessionService.findByTaskId(taskId);
         if (session != null) {
@@ -475,6 +487,7 @@ public class TaskControlServiceImpl implements TaskControlService {
         detail.put("task", task);
         detail.put("session", session);
         detail.put("gameAccountStatuses", statuses);
+        detail.put("lastProgressMessage", task.getProgressMessage());
         detail.put("streamPipelineDiagnostic", loadLatestPipelineDiagnostic(taskId));
         return detail;
     }
@@ -492,6 +505,12 @@ public class TaskControlServiceImpl implements TaskControlService {
             try {
                 Map<String, Object> parsed = objectMapper.readValue(
                         event.getPayload(), Map.class);
+                Object nested = parsed.get("pipelineDiagnostic");
+                if (nested instanceof Map<?, ?> nestedMap) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> diagnostic = (Map<String, Object>) nestedMap;
+                    return diagnostic;
+                }
                 if (parsed.containsKey("auth")
                         || parsed.containsKey("firstFrame")
                         || parsed.containsKey("gssvPlay")

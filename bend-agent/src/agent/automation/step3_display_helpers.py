@@ -163,9 +163,13 @@ def _wire_sdl_close_handler(context: AgentTaskContext) -> None:
     keyboard_mapper = getattr(context, "_keyboard_mapper", None)
     if keyboard_mapper and hasattr(keyboard_mapper, "set_window_close_handler"):
         if close_cb:
-            keyboard_mapper.set_window_close_handler(None)
+            # KeyboardMapper 轮询 pygame 事件比 SDL 显示泵更频繁，须同步关窗回调，
+            # 否则 QUIT 被 keyboard 循环吞掉且 handler 为 None，标题栏 X 无效。
+            keyboard_mapper.set_window_close_handler(close_cb)
         elif hasattr(sdl, "hide"):
             keyboard_mapper.set_window_close_handler(sdl.hide)
+        else:
+            keyboard_mapper.set_window_close_handler(None)
 
 
 async def step3_close_display(context: AgentTaskContext) -> None:

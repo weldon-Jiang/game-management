@@ -469,7 +469,26 @@ class AccountSwitcher:
                 await self._save_debug_frame(scene_id)
             await asyncio.sleep(0.6)
 
-        return await self._wait_for_any_scene(list(FC_UT_TARGET_SCENES), timeout=timeout)
+        ut_ok = await self._wait_for_any_scene(list(FC_UT_TARGET_SCENES), timeout=timeout)
+        if ut_ok:
+            return True
+
+        account = self.current_account
+        ea_email = (account.email if account else None) or ""
+        from .ea_onboarding import run_ea_onboarding
+
+        self.logger.info(
+            "FC 启动后未进入 UT，尝试 EA/FC 首登引导 (email=%s)",
+            ea_email[:3] + "***" if ea_email else "(empty)",
+        )
+        guided = await run_ea_onboarding(
+            self,
+            ea_email=ea_email,
+            timeout=min(max(timeout, 300.0), 900.0),
+        )
+        if guided:
+            return True
+        return False
 
     async def _navigate_to_fc_tile_on_home(self):
         """从 Xbox 主页（顶栏可能聚焦「设置」）移焦到 FC 游戏磁贴。"""

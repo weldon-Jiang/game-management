@@ -10,6 +10,11 @@
 # ----------------------------------------------
 server:
   port: ${SERVER_PORT:8061}
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
 
 # ----------------------------------------------
 # Spring框架配置
@@ -40,7 +45,7 @@ spring:
   # 数据库配置
   # ----------------------------------------------
   datasource:
-    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:bend_platform}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:bend_platform}?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:D$U@GAMECeKfidb}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -66,6 +71,10 @@ spring:
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
   type-aliases-package: com.bend.platform.entity
+  global-config:
+    db-config:
+      # 默认 not_null 会在 updateById 时跳过 null 字段，导致 error_message 等无法清 NULL
+      update-strategy: ignored
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

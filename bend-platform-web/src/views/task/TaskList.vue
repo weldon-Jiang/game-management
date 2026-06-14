@@ -105,7 +105,7 @@
         </el-table-column>
         <el-table-column prop="gameActionType" label="游戏操作" width="96" align="center" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag v-if="row.gameActionType" size="small" type="info">
+            <el-tag v-if="row.gameActionType && !row.gameActionPending" size="small" type="info">
               {{ getGameActionTypeText(row.gameActionType) }}
             </el-tag>
             <span v-else class="text-muted">-</span>
@@ -135,7 +135,10 @@
         </el-table-column>
         <el-table-column prop="errorMessage" label="错误信息" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
-            <span v-if="row.errorMessage" class="text-danger">{{ row.errorMessage }}</span>
+            <span v-if="shouldShowTaskErrorMessage(row)" class="text-danger">{{ row.errorMessage }}</span>
+            <span v-else-if="row.status === 'running' || row.status === 'paused'">
+              {{ row.progressMessage || '-' }}
+            </span>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -315,7 +318,8 @@ import {
   getTaskStatusType,
   getGameActionTypeText,
   getSessionPhaseText,
-  getSessionPhaseType
+  getSessionPhaseType,
+  shouldShowTaskErrorMessage
 } from '@/utils/constants'
 import {
   confirmCancelPendingTask,

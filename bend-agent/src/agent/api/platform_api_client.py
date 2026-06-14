@@ -155,10 +155,20 @@ class PlatformApiClient:
             except Exception as e:
                 self.logger.debug(f"关闭HTTP会话异常: {e}")
 
-    def _should_throttle_progress(self, task_id: str, step: str, status: str) -> bool:
-        """非终态进度按 (taskId, step) 节流，降低平台 DB 写入频率。"""
+    def _should_throttle_progress(
+        self,
+        task_id: str,
+        step: str,
+        status: str,
+        **kwargs,
+    ) -> bool:
+        """非终态进度按 (taskId, step) 节流；STEP2 主机轮询与终态握手必须全量落库。"""
         normalized = (status or '').upper()
         if normalized in self._terminal_progress_statuses:
+            return False
+        if kwargs.get('hostAttempts') is not None or kwargs.get('host_attempts') is not None:
+            return False
+        if kwargs.get('selectedServerId') or kwargs.get('selected_server_id'):
             return False
         if self._progress_interval_sec <= 0:
             return False
@@ -206,7 +216,7 @@ class PlatformApiClient:
         返回：
         - dict: 包含 received, action (CONTINUE|STOP|CANCEL) 等；失败时包含 success=False
         """
-        if self._should_throttle_progress(task_id, step, status):
+        if self._should_throttle_progress(task_id, step, status, **kwargs):
             self.logger.debug(
                 "进度上报节流跳过 - TaskID: %s, Step: %s, Status: %s",
                 task_id, step, status,

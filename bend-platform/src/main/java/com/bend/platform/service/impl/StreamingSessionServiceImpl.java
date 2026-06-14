@@ -2,6 +2,7 @@ package com.bend.platform.service.impl;
 
 import com.bend.platform.entity.StreamingSession;
 import com.bend.platform.entity.Task;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.bend.platform.repository.StreamingSessionMapper;
 import com.bend.platform.service.StreamingSessionService;
 import lombok.RequiredArgsConstructor;
@@ -67,10 +68,37 @@ public class StreamingSessionServiceImpl implements StreamingSessionService {
         if ("ready".equals(phase)) {
             session.setReadyTime(LocalDateTime.now());
         }
-        if (message != null && !message.isBlank()) {
-            session.setErrorMessage(message);
-        }
         streamingSessionMapper.updateById(session);
+
+        // error_message 仅用于失败/关闭；正常进度走 task.progress_message，避免详情页误标为「会话错误」
+        if (message == null || message.isBlank()) {
+            return;
+        }
+        if (isErrorPhase(phase)) {
+            LambdaUpdateWrapper<StreamingSession> wrapper = new LambdaUpdateWrapper<>();
+            wrapper.eq(StreamingSession::getId, sessionId)
+                    .set(StreamingSession::getErrorMessage, message);
+            streamingSessionMapper.update(null, wrapper);
+        } else {
+            clearSessionErrorMessage(sessionId);
+        }
+    }
+
+    private static boolean isErrorPhase(String phase) {
+        if (phase == null) {
+            return false;
+        }
+        String normalized = phase.toLowerCase();
+        return "failed".equals(normalized)
+                || "closed".equals(normalized)
+                || "automation_failed".equals(normalized);
+    }
+
+    private void clearSessionErrorMessage(String sessionId) {
+        LambdaUpdateWrapper<StreamingSession> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(StreamingSession::getId, sessionId)
+                .set(StreamingSession::getErrorMessage, null);
+        streamingSessionMapper.update(null, wrapper);
     }
 
     @Override

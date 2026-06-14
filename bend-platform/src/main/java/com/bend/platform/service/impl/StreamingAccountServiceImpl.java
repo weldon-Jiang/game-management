@@ -12,6 +12,7 @@ import com.bend.platform.enums.PlatformType;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.StreamingAccountMapper;
+import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.util.AesUtil;
@@ -56,6 +57,7 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
 
     private final StreamingAccountMapper streamingAccountMapper;
     private final MerchantService merchantService;
+    private final GameAccountService gameAccountService;
     private final AesUtil aesUtil;
     private final DataSecurityUtil dataSecurityUtil;
 
@@ -460,10 +462,15 @@ public class StreamingAccountServiceImpl implements StreamingAccountService {
                     .set(StreamingAccount::getAgentId, null)
                     .set(StreamingAccount::getStatus, "idle");
             streamingAccountMapper.update(null, wrapper);
-            log.info("清空流媒体账号Agent绑定 - AccountID: {}, Email: {}", account.getId(), account.getEmail());
+            gameAccountService.clearAgentIdByStreamingId(account.getId());
+            log.info("清空流媒体账号 Agent 绑定 - AccountID: {}, Email: {}", account.getId(), account.getEmail());
         }
 
-        log.info("清空Agent关联的流媒体账号绑定完成 - AgentID: {}, 账号数量: {}", agentId, accounts.size());
+        // 兜底：串流账号 agent_id 已清但 game_account 仍残留的历史数据
+        gameAccountService.clearAgentBindingByAgentId(agentId);
+
+        log.info("清空 Agent 关联的流媒体/游戏账号绑定完成 - AgentID: {}, 串流账号数量: {}",
+                agentId, accounts.size());
     }
 
     private boolean isValidStatus(String status) {

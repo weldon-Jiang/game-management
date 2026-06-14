@@ -32,5 +32,5 @@ class TestTaskContextCreation:
             streaming_account_password="secret",
         )
         assert context.session_phase == "opening"
-        assert context.game_action_type == "squad_battle"
+        assert context.game_action_type == ""
         assert context.auto_match_host is True

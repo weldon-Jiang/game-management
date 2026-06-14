@@ -1,6 +1,7 @@
 import { ref, onUnmounted, unref, watch } from 'vue'
 import { taskApi } from '@/api/task'
 import { subscribeToTopic } from '@/utils/stompClient'
+import { isRequestCanceled } from '@/utils/request'
 
 /**
  * Monitor a task detail page with WebSocket push plus polling fallback.
@@ -14,8 +15,9 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
   const loading = ref(false)
   let pollTimer = null
   let wsSubscription = null
+  let refreshTimer = null
 
-  const refresh = async () => {
+  const refreshCore = async () => {
     const id = unref(taskIdRef)
     if (!id) return
     loading.value = true
@@ -30,9 +32,34 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
       ])
       detail.value = detailRes.data
       events.value = eventsRes.data || []
+    } catch (e) {
+      if (!isRequestCanceled(e)) {
+        console.warn('Task detail refresh failed:', e)
+      }
     } finally {
       loading.value = false
     }
+  }
+
+  /**
+   * 刷新详情与事件流。WS 推送与 session 切换会短时间连发，debounce 避免同 URL 去重取消导致首屏永远加载不出。
+   *
+   * @param {{ immediate?: boolean, debounceMs?: number }} [options]
+   */
+  const refresh = (options = {}) => {
+    const { immediate = false, debounceMs = 0 } = options
+    if (immediate || debounceMs <= 0) {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer)
+        refreshTimer = null
+      }
+      return refreshCore()
+    }
+    if (refreshTimer) clearTimeout(refreshTimer)
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null
+      refreshCore()
+    }, debounceMs)
   }
 
   const applyProgressPatch = (payload) => {
@@ -58,7 +85,7 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
         const id = unref(taskIdRef)
         if (payload?.taskId === id) {
           applyProgressPatch(payload)
-          refresh()
+          refresh({ debounceMs: 600 })
         }
       })
     } catch (e) {
@@ -75,14 +102,18 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
 
   const startPolling = (intervalMs = 8000) => {
     // Start with an immediate refresh so the page has data before the first interval tick.
-    refresh()
-    pollTimer = setInterval(refresh, intervalMs)
+    refresh({ immediate: true })
+    pollTimer = setInterval(() => refresh({ immediate: true }), intervalMs)
   }
 
   const stopPolling = () => {
     if (pollTimer) {
       clearInterval(pollTimer)
       pollTimer = null
+    }
+    if (refreshTimer) {
+      clearTimeout(refreshTimer)
+      refreshTimer = null
     }
   }
 
@@ -109,7 +140,7 @@ export function useTaskMonitor(taskIdRef, sessionIdRef = null) {
     watch(
       () => unref(sessionIdRef),
       // Session switch only needs a reload; the WS topic remains task-scoped.
-      () => refresh()
+      () => refresh({ debounceMs: 200 })
     )
   }
 

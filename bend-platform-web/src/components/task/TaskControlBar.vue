@@ -84,13 +84,11 @@ const selectedMode = ref('squad_battle')
 
 const isTerminal = computed(() => isTaskTerminal(props.taskStatus))
 
-// READY 和 AUTOMATION_FAILED 都保留串流窗口，可在不重跑 Step1-3 的情况下启动或重试 Step4。
+// 与后端 startAutomation 一致：仅 ready / automation_failed 允许启动 Step4。
 const canStartAutomation = computed(
   () =>
     !isTerminal.value &&
-    (props.gameActionPending ||
-      props.sessionPhase === 'ready' ||
-      props.sessionPhase === 'automation_failed')
+    (props.sessionPhase === 'ready' || props.sessionPhase === 'automation_failed')
 )
 const isPaused = computed(
   () => !isTerminal.value && (props.sessionPhase?.startsWith('paused') || props.pauseMode)

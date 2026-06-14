@@ -1102,7 +1102,11 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         event.setTaskId(taskId);
         event.setMerchantId(task.getMerchantId());
         event.setScope(scope != null ? scope : "task");
-        event.setPhase((String) data.get("phase"));
+        String phase = (String) data.get("phase");
+        if (!StringUtils.hasText(phase)) {
+            phase = (String) data.get("step");
+        }
+        event.setPhase(phase);
         event.setStatus(status);
         event.setMessage(message);
         event.setGameAccountId((String) data.get("gameAccountId"));
@@ -1114,13 +1118,25 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         } else if (task.getSessionId() != null) {
             event.setSessionId(task.getSessionId());
         }
-        Object pipelineDiagnostic = data.get("pipelineDiagnostic");
-        if (pipelineDiagnostic != null) {
-            try {
-                event.setPayload(OBJECT_MAPPER.writeValueAsString(pipelineDiagnostic));
-            } catch (Exception e) {
-                log.debug("pipelineDiagnostic 序列化失败: {}", e.getMessage());
+        try {
+            Map<String, Object> payloadMap = new LinkedHashMap<>();
+            Object pipelineDiagnostic = data.get("pipelineDiagnostic");
+            if (pipelineDiagnostic != null) {
+                payloadMap.put("pipelineDiagnostic", pipelineDiagnostic);
             }
+            Object hostAttempts = data.get("hostAttempts");
+            if (hostAttempts != null) {
+                payloadMap.put("hostAttempts", hostAttempts);
+            }
+            Object selectedServerId = data.get("selectedServerId");
+            if (selectedServerId != null) {
+                payloadMap.put("selectedServerId", selectedServerId);
+            }
+            if (!payloadMap.isEmpty()) {
+                event.setPayload(OBJECT_MAPPER.writeValueAsString(payloadMap));
+            }
+        } catch (Exception e) {
+            log.debug("TaskEvent payload 序列化失败: {}", e.getMessage());
         }
         taskEventService.record(event);
     }
@@ -1167,6 +1183,9 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             if (isLongLivedStreamingTask(task) && isRunningSessionPhase(phase)) {
                 task.setStatus("running");
                 task.setCompletedTime(null);
+                if (!"automation_failed".equals(phase) && !"failed".equals(phase)) {
+                    task.setErrorMessage(null);
+                }
             }
             if ("ready".equals(phase) || "automation_failed".equals(phase)) {
                 task.setGameActionPending(true);
@@ -1198,6 +1217,14 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
             task.setPauseMode(String.valueOf(pauseMode));
         }
         taskMapper.updateById(task);
+
+        if (phase != null
+                && isLongLivedStreamingTask(task)
+                && isRunningSessionPhase(phase)
+                && !"automation_failed".equals(phase)
+                && !"failed".equals(phase)) {
+            taskService.clearErrorMessage(taskId);
+        }
 
         if (task.getSessionId() != null && phase != null) {
             streamingSessionService.updatePhase(task.getSessionId(), phase, message);

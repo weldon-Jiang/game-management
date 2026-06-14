@@ -294,4 +294,9 @@ public interface TaskService {
      * @return 正在运行的任务列表
      */
     List<Task> findRunningTasksByMerchantId(String merchantId);
+
+    /**
+     * 显式将 task.error_message 置 NULL（MyBatis-Plus 默认 updateById 会跳过 null 字段）。
+     */
+    void clearErrorMessage(String taskId);
 }

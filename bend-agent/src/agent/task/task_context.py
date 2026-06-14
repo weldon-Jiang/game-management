@@ -192,7 +192,7 @@ class AgentTaskContext:
     platform_xbox_hosts: List[Dict[str, Any]] = field(default_factory=list)
     account_platform: str = "xbox"
     auto_match_host: bool = True
-    game_action_type: str = "squad_battle"
+    game_action_type: str = ""  # 两阶段模式下为空，由平台 start_automation 下发后再写入
 
     current_step: str = "PENDING"
     task_status: TaskMainStatus = TaskMainStatus.PENDING

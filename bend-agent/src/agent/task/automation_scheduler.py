@@ -238,6 +238,8 @@ class AutomationScheduler:
             return False
         self.logger.info("流媒体账号密码解密成功")
 
+        # 两阶段：Step3 完成后停在 READY，等平台下发 gameActionType；一步式才回退 squad_battle。
+        resolved_game_action_type = game_action_type or ("" if two_phase else "squad_battle")
         context = AgentTaskContext(
             task_id=task_id,
             streaming_account_id=streaming_account_id,
@@ -245,7 +247,7 @@ class AutomationScheduler:
             streaming_account_password=decrypted_password,
             streaming_account_auto_code=streaming_account_auto_code,
             window_id=f"window_{task_id}",
-            game_action_type=game_action_type or "squad_battle",
+            game_action_type=resolved_game_action_type,
             account_platform=account_platform or "xbox",
             auto_match_host=auto_match_host,
         )
@@ -308,7 +310,7 @@ class AutomationScheduler:
             cancel_event=cancel_event,
             modules={"window_manager": self._window_manager},
         )
-        runtime.on_phase_change = self._make_phase_reporter(task_id)
+        # 会话阶段事件由 StreamingAccountTask._apply_session_phase 统一上报，避免双写时间线。
 
         # 登录间隔控制（防止触发安全验证）
         await self._wait_login_interval(streaming_account_email)
@@ -406,21 +408,6 @@ class AutomationScheduler:
 
         self.logger.error(f"执行失败，已达最大重试次数 {max_retries}")
         raise last_exception
-
-    def _make_phase_reporter(self, task_id: str):
-        async def _report(phase: SessionPhase, message: str):
-            context = self._task_contexts.get(task_id)
-            if context:
-                context.session_phase = phase.value
-            await self._platform_client.report_progress(
-                task_id,
-                "SESSION",
-                "RUNNING",
-                message,
-                scope="session",
-                phase=phase.value,
-            )
-        return _report
 
     @property
     def task_control_handler(self) -> TaskControlHandler:

@@ -4,6 +4,7 @@ import com.bend.platform.service.LanDiscoveryCacheService;
 import com.bend.platform.service.XboxHostService;
 import com.bend.platform.util.LanSegmentUtil;
 import com.bend.platform.util.PlatformTypeUtil;
+import com.bend.platform.util.XboxIdUtil;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -202,8 +203,8 @@ public class LanDiscoveryCacheServiceImpl implements LanDiscoveryCacheService {
             log.warn("忽略非本网段主机 serverId={} ip={} segment={}", serverId, ip, lanSegment);
             return null;
         }
-        if ("xbox".equals(platform) && !serverId.toUpperCase().startsWith("XBOX-")) {
-            serverId = "XBOX-" + serverId.toUpperCase();
+        if ("xbox".equals(platform)) {
+            serverId = XboxIdUtil.normalizeCanonical(serverId);
         }
         Map<String, Object> console = new HashMap<>();
         console.put("serverId", serverId);

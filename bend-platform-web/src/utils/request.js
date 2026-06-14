@@ -38,6 +38,17 @@ const clearAllPendingRequests = () => {
   pendingRequests.clear()
 }
 
+/** 同 URL 去重取消或路由切换 abort 时不应弹网络错误 toast。 */
+export const isRequestCanceled = (error) => {
+  if (!error) return false
+  return (
+    axios.isCancel(error) ||
+    error.code === 'ERR_CANCELED' ||
+    error.name === 'CanceledError' ||
+    error.message === 'canceled'
+  )
+}
+
 let isRefreshing = false
 let refreshSubscribers = []
 
@@ -118,6 +129,10 @@ request.interceptors.response.use(
     const authStore = useAuthStore()
 
     removePendingRequest(error.config || {})
+
+    if (isRequestCanceled(error)) {
+      return Promise.reject(error)
+    }
 
     if (error.response) {
       console.log('Request error with response:', error.response.status, error.response.data)

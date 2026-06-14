@@ -202,7 +202,8 @@ public class StreamingAccountHostBindingServiceImpl implements StreamingAccountH
         if (!StringUtils.hasText(serverId)) {
             throw new BusinessException(400, "hostId 与 serverId 至少提供一个");
         }
-        XboxHost host = xboxHostService.findByMerchantIdAndXboxId(merchantId, serverId);
+        XboxHost host = xboxHostService.findByMerchantIdAndDeviceIdentity(
+                merchantId, serverId, ipAddress, null, null);
         if (host == null) {
             host = xboxHostService.createOrUpdate(
                     merchantId,

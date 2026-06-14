@@ -56,6 +56,10 @@ VALID_TASK_TYPES = frozenset({
     'weekend_league',
 })
 
+# 比赛结束 / 回到 UT 菜单的场景（本地模板 + streaming 对齐）
+MATCH_END_SCENE_IDS = [102, 193]
+UT_MENU_SCENE_IDS = [127, 147, 149]
+SETTLEMENT_SCENE_IDS = [184, 185, 186, 187, 188, 189, 193]
 # expected_screen -> Streaming 场景 ID（Xbox 系统 UI 1-9，足球 UT 菜单 100+）
 EXPECTED_SCREEN_SCENES: Dict[str, list] = {
     'MAIN_MENU': [127, 149, 147, 101],
@@ -773,7 +777,7 @@ async def step4_execute_gaming(
         )
 
     engine, switcher = await _init_game_automation(
-        context, task_logger, platform_client, input_gate=input_gate
+        context, task_logger, platform_client, report_progress, input_gate=input_gate
     )
     if not engine or not switcher:
         error_msg = "游戏自动化引擎初始化失败"
@@ -1317,6 +1321,7 @@ async def _init_game_automation(
     context: AgentTaskContext,
     task_logger,
     platform_client: Optional[Any] = None,
+    report_progress: Optional[Callable[[str, str, str, Optional[Dict]], None]] = None,
     input_gate: Optional[Any] = None,
 ):
     """
@@ -1409,9 +1414,14 @@ async def _init_game_automation(
         async def _reconnect_input_and_rebind() -> bool:
             from ..xbox.stream_recovery import reconnect_input_channel, rebind_stream_bindings
 
+            async def _noop_report(*_args, **_kwargs):
+                return None
+
+            rp = report_progress or _noop_report
+
             await _report_input_channel_event(
                 context,
-                report_progress,
+                rp,
                 "RUNNING",
                 "Input DataChannel 已关闭，正在重连",
                 "input_reconnecting",
@@ -1427,7 +1437,7 @@ async def _init_game_automation(
                 )
                 await _report_input_channel_event(
                     context,
-                    report_progress,
+                    rp,
                     "RUNNING",
                     "Input DataChannel 已恢复",
                     "input_restored",
@@ -1436,7 +1446,7 @@ async def _init_game_automation(
             else:
                 await _report_input_channel_event(
                     context,
-                    report_progress,
+                    rp,
                     "FAILED",
                     "Input DataChannel 重连失败",
                     "input_reconnect_failed",
@@ -1446,6 +1456,7 @@ async def _init_game_automation(
 
         switcher.set_reconnect_callback(_reconnect_input_and_rebind)
         switcher.set_task_context(context)
+        context._account_switcher = switcher
 
         if platform_client and hasattr(platform_client, "update_profile_binding"):
 
@@ -1983,8 +1994,9 @@ async def _play_match(
     - frame_queue: 全局帧队列（可选）
     - scene_queue: 全局场景队列（可选）
     """
-    match_duration = 120
+    match_duration = 1200
     report_interval = 30
+    poll_interval = 10
 
     task_logger.info(f"比赛中，预计时长: {match_duration}秒")
     game_logger.info(f"[场景: IN_GAME] 比赛中，预计时长: {match_duration}秒")
@@ -2005,7 +2017,7 @@ async def _play_match(
     if scene_queue is not None:
         task_logger.info("[比赛进行] 使用 StreamRuntime graph/scene_queue 辅助检测")
 
-    for i in range(match_duration // 10):
+    for i in range(match_duration // poll_interval):
         if check_cancel():
             raise Exception("比赛被取消")
 
@@ -2021,7 +2033,7 @@ async def _play_match(
             except asyncio.TimeoutError:
                 pass
 
-        await asyncio.sleep(10)
+        await asyncio.sleep(poll_interval)
 
         match_ended = await _detect_match_ended(
             context, task_logger, game_logger
@@ -2031,7 +2043,7 @@ async def _play_match(
             game_logger.info("[场景: SETTLEMENT] 检测到比赛结束画面")
             break
 
-        elapsed = (i + 1) * 10
+        elapsed = (i + 1) * poll_interval
         progress_pct = min(100, int(elapsed / match_duration * 100))
 
         if i % 3 == 0 or elapsed == match_duration:
@@ -2253,23 +2265,39 @@ async def _detect_match_ended(
     game_logger
 ) -> bool:
     """
-    检测比赛是否结束
+    检测比赛是否结束（streaming 对齐：场中 102 + UT 193/回到主菜单）。
 
-    参数：
-    - context: 任务上下文
-    - task_logger: 任务日志记录器
-    - game_logger: 游戏账号日志记录器
-
-    返回：
-    - bool: 是否检测到比赛结束
+    返回 True 表示应退出 _play_match 进入结算跳过。
     """
     try:
-        from ..runtime.stream_runtime import capture_task_frame
+        switcher = getattr(context, "_account_switcher", None)
+        if switcher:
+            hit = await switcher._detect_any_scene(
+                MATCH_END_SCENE_IDS + UT_MENU_SCENE_IDS,
+                strict=False,
+            )
+            if hit in MATCH_END_SCENE_IDS or hit in UT_MENU_SCENE_IDS:
+                task_logger.info("比赛结束场景: %s", hit)
+                game_logger.info("[场景: MATCH_END] 检测到场景 %s", hit)
+                return True
 
-        frame = await capture_task_frame(context, timeout=0.5)
-        if frame:
-            return False
+        detector = getattr(context, "_streaming_scene_detector", None)
+        if detector:
+            from ..runtime.stream_runtime import capture_task_frame
 
+            frame = await capture_task_frame(context, timeout=0.5)
+            if frame is not None:
+                image = frame.data if hasattr(frame, "data") else frame
+                for scene_id in MATCH_END_SCENE_IDS:
+                    try:
+                        result = detector.recognize_scene(
+                            image, scene_id=scene_id, threshold=0.78
+                        )
+                        if result.matched:
+                            task_logger.info("模板匹配比赛结束 scene=%s", scene_id)
+                            return True
+                    except Exception:
+                        continue
         return False
 
     except asyncio.TimeoutError as e:
@@ -2292,18 +2320,30 @@ async def _skip_settlement(
     game_logger
 ):
     """
-    跳过结算画面
-
-    参数：
-    - context: 任务上下文
-    - task_logger: 任务日志记录器
-    - game_logger: 游戏账号日志记录器
+    跳过结算：按 A 穿过 UT 赛后弹窗直至回到主菜单（127/147/149）。
     """
     try:
         task_logger.info("跳过结算画面...")
         game_logger.info("跳过结算画面")
 
-        await asyncio.sleep(2)
+        switcher = getattr(context, "_account_switcher", None)
+        deadline = time.monotonic() + 90.0
+        while time.monotonic() < deadline:
+            if not switcher:
+                await asyncio.sleep(2.0)
+                return
+            hit = await switcher._detect_any_scene(
+                UT_MENU_SCENE_IDS,
+                strict=False,
+            )
+            if hit in UT_MENU_SCENE_IDS:
+                task_logger.info("结算完成，已回到 UT 主菜单 scene=%s", hit)
+                game_logger.info("[场景: MAIN_MENU] 结算后 scene=%s", hit)
+                return
+            await switcher._press_button("A", duration=0.12)
+            await asyncio.sleep(0.7)
+
+        task_logger.warning("结算跳过超时，继续后续流程")
 
     except asyncio.TimeoutError as e:
         task_logger.error(f"跳过结算画面超时: {e}")

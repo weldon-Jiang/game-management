@@ -18,6 +18,9 @@
             <span v-if="ev.phase" class="phase">{{ phaseLabel(ev.phase, ev.scope) }}</span>
             <span class="msg">{{ displayMessage(ev) }}</span>
           </div>
+          <div v-if="hostAttemptsHint(ev)" class="host-attempts-hint">
+            {{ hostAttemptsHint(ev) }}
+          </div>
         </el-timeline-item>
       </el-timeline>
       <el-empty v-else description="暂无事件记录" :image-size="40" />
@@ -36,7 +39,8 @@ import {
   getGameAccountRunStatusText,
   getTaskEventScopeText,
   getTaskEventPhaseText,
-  getTaskEventMessageText
+  getTaskEventMessageText,
+  formatHostAttemptsSummary
 } from '@/utils/constants'
 
 const props = defineProps({
@@ -67,6 +71,8 @@ const displayMessage = (ev) => {
   const raw = ev.message || statusLabel(ev.status)
   return getTaskEventMessageText(raw)
 }
+
+const hostAttemptsHint = (ev) => formatHostAttemptsSummary(ev.payload)
 
 /** Center the newest event (API returns desc — first item is latest). */
 const scrollNewestToCenter = () => {
@@ -198,6 +204,14 @@ onMounted(() => scrollNewestToCenter())
 
 .msg {
   font-size: 12px;
+  word-break: break-word;
+}
+
+.host-attempts-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #999;
+  line-height: 1.35;
   word-break: break-word;
 }
 

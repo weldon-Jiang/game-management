@@ -397,11 +397,16 @@ export const SESSION_PHASE_MAP = {
 }
 
 export const SESSION_PHASE_HINT_MAP = {
+  opening: '正在启动串流任务...',
+  authenticating: '正在认证微软/xHome 账号...',
+  discovering: '正在发现 Xbox 主机...',
+  streaming: '正在建立云端串流连接...',
   ready: '账号、主机、LAN 首帧和 SmartGlass 输入通道已通过检查，可选择自动化类型。',
   automation_failed: 'Step4 自动化未完成，但串流会话仍保留，可重新选择模式后重试。',
   initializing_display: '正在建立 LAN 首帧和显示链路；若失败通常与主机画面或网络有关。',
   initializing_input: '正在验证 SmartGlass 输入通道；若失败通常与 LAN 握手或网络有关。',
-  failed: '串流准备失败，请结合错误信息区分账号认证、主机匹配、LAN 首帧或输入通道问题。'
+  failed: '串流准备失败，请结合错误信息区分账号认证、主机匹配、LAN 首帧或输入通道问题。',
+  closed: '串流会话已结束。'
 }
 
 export const GAME_ACCOUNT_RUN_STATUS_MAP = {
@@ -447,6 +452,24 @@ export const TASK_EVENT_SCOPE_MAP = {
   module: '模块'
 }
 
+/** 自动化步骤 phase/step 中文（时间线展示） */
+export const TASK_STEP_PHASE_MAP = {
+  STEP1: '步骤一·登录',
+  STEP2: '步骤二·串流握手',
+  STEP3: '步骤三·串流环境',
+  STEP4: '步骤四·游戏自动化',
+  SESSION: '会话阶段'
+}
+
+const HOST_ATTEMPT_STATUS_MAP = {
+  trying: '尝试中',
+  success: '握手成功',
+  connect_failed: '连接失败',
+  wakeup_failed: '唤醒失败',
+  offline: '未开机',
+  occupied: '已被占用'
+}
+
 /** Agent 上报的英文事件消息 → 中文 */
 export const TASK_EVENT_MESSAGE_MAP = {
   'Session closed': '会话已关闭',
@@ -458,6 +481,7 @@ export const TASK_EVENT_MESSAGE_MAP = {
   'Window + decode ready': '窗口与解码就绪',
   'Authenticating': '正在认证',
   'Discovering console': '正在发现主机',
+  'Starting streaming': '正在启动串流',
   'LAN 首帧未到达，无法确认真实主机画面': 'LAN 首帧失败：无法确认真实主机画面',
   'SmartGlass 输入通道未建立，无法确认真实主机串流': 'SmartGlass 输入通道失败：无法确认真实主机串流',
   'WebRTC 首帧未到达，无法确认真实主机画面': 'LAN 首帧失败：无法确认真实主机画面',
@@ -470,7 +494,54 @@ export const TASK_EVENT_MESSAGE_MAP = {
   '添加账号失败': '添加账号失败',
   '账号校验失败': '账号校验失败',
   'Input mode: virtual': '输入模式：虚拟手柄',
-  'Input mode: physical': '输入模式：实体手柄'
+  'Input mode: physical': '输入模式：实体手柄',
+  '用户终止串流': '用户终止串流',
+  '用户关闭串流窗口，任务已结束': '用户关闭串流窗口，任务已结束',
+  '用户取消执行': '用户取消执行',
+  '用户手动停止': '用户手动停止',
+  '被管理员停止': '被管理员停止',
+  'Agent离线，任务已取消': 'Agent 离线，任务已取消',
+  'Agent重新上线，任务已清理': 'Agent 重新上线，任务已清理',
+  '任务被取消': '任务被取消'
+}
+
+const TERMINAL_TASK_STATUSES = new Set(['failed', 'cancelled', 'stopped'])
+const ERROR_SESSION_PHASES = new Set(['failed', 'closed', 'automation_failed'])
+
+/** 任务级 errorMessage 是否应在 UI 展示（排除 running 时残留的历史错误） */
+export const shouldShowTaskErrorMessage = (task) => {
+  if (!task?.errorMessage) return false
+  const status = String(task.status || '').toLowerCase()
+  const phase = String(task.sessionPhase || '').toLowerCase()
+  if (TERMINAL_TASK_STATUSES.has(status)) return true
+  if (ERROR_SESSION_PHASES.has(phase)) return true
+  return false
+}
+
+/** 会话级 errorMessage 是否应作为错误展示（正常进度文案不算错误） */
+export const shouldShowSessionErrorMessage = (session, task) => {
+  if (!session?.errorMessage) return false
+  const phase = String(session.phase || task?.sessionPhase || '').toLowerCase()
+  if (ERROR_SESSION_PHASES.has(phase)) return true
+  const trimmed = String(session.errorMessage).trim()
+  if (TASK_EVENT_MESSAGE_MAP[trimmed]) return false
+  return false
+}
+
+/**
+ * 修复 UTF-8 中文被误按 Latin-1 解码后的乱码（如 ç"¨æˆ· → 用户）。
+ */
+export const repairUtf8Mojibake = (text) => {
+  if (!text || typeof text !== 'string') return text
+  if (!/[\u00C0-\u00FF]/.test(text)) return text
+  try {
+    const bytes = Uint8Array.from(text, (char) => char.charCodeAt(0) & 0xff)
+    const repaired = new TextDecoder('utf-8').decode(bytes)
+    if (/[\u4e00-\u9fff]/.test(repaired)) return repaired
+  } catch {
+    /* ignore */
+  }
+  return text
 }
 
 export const getSessionPhaseText = (phase) => {
@@ -532,18 +603,38 @@ export const getTaskEventScopeText = (scope) => {
 
 export const getTaskEventPhaseText = (phase, scope) => {
   if (!phase) return ''
-  const key = String(phase).toLowerCase()
+  const key = String(phase).toUpperCase()
+  if (TASK_STEP_PHASE_MAP[key]) return TASK_STEP_PHASE_MAP[key]
+  const lowerKey = String(phase).toLowerCase()
   if (scope === 'module') {
-    return PROVISIONING_PHASE_MAP[key] || phase
+    return PROVISIONING_PHASE_MAP[lowerKey] || phase
   }
-  if (SESSION_PHASE_MAP[key]) return SESSION_PHASE_MAP[key].text
-  if (key.startsWith('paused')) return '已暂停'
-  return PROVISIONING_PHASE_MAP[key] || phase
+  if (SESSION_PHASE_MAP[lowerKey]) return SESSION_PHASE_MAP[lowerKey].text
+  if (lowerKey.startsWith('paused')) return '已暂停'
+  return PROVISIONING_PHASE_MAP[lowerKey] || phase
+}
+
+/** 解析 task_event.payload 中的 hostAttempts 摘要（STEP2 多主机轮询） */
+export const formatHostAttemptsSummary = (payloadRaw) => {
+  if (!payloadRaw) return ''
+  try {
+    const payload = typeof payloadRaw === 'string' ? JSON.parse(payloadRaw) : payloadRaw
+    const attempts = payload?.hostAttempts
+    if (!Array.isArray(attempts) || !attempts.length) return ''
+    const parts = attempts.map((item) => {
+      const name = item.name || item.serverId || `#${item.index || '?'}`
+      const statusText = HOST_ATTEMPT_STATUS_MAP[item.status] || item.status || ''
+      return statusText ? `${name}(${statusText})` : name
+    })
+    return `主机尝试：${parts.join(' → ')}`
+  } catch {
+    return ''
+  }
 }
 
 export const getTaskEventMessageText = (message) => {
   if (!message) return ''
-  const trimmed = String(message).trim()
+  const trimmed = repairUtf8Mojibake(String(message).trim())
   if (TASK_EVENT_MESSAGE_MAP[trimmed]) return TASK_EVENT_MESSAGE_MAP[trimmed]
   const inputModeMatch = trimmed.match(/^Input mode:\s*(\w+)$/i)
   if (inputModeMatch) {

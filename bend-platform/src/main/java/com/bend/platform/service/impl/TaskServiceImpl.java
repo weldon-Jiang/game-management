@@ -1,6 +1,7 @@
 package com.bend.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.TaskPageRequest;
@@ -645,9 +646,9 @@ public class TaskServiceImpl implements TaskService {
         }
 
         task.setStatus("pending");
-        task.setErrorMessage(null);
         task.setRetryCount(0);
         taskMapper.updateById(task);
+        clearErrorMessage(taskId);
 
         log.info("任务已重置为待执行 - TaskID: {}", taskId);
         return task;
@@ -809,6 +810,7 @@ public class TaskServiceImpl implements TaskService {
 
         for (Task task : runningTasks) {
             task.setStatus("cancelled");
+            task.setSessionPhase("closed");
             task.setErrorMessage("被管理员停止");
             task.setCompletedTime(LocalDateTime.now());
             taskMapper.updateById(task);
@@ -816,6 +818,13 @@ public class TaskServiceImpl implements TaskService {
 
             taskGameAccountStatusService.cancelByTaskId(task.getId());
             log.info("取消任务子任务状态 - TaskID: {}", task.getId());
+        }
+
+        if (!runningTasks.isEmpty()) {
+            streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
+            streamingAccountService.updateAgentId(streamingAccountId, null);
+            gameAccountService.clearAgentIdByStreamingId(streamingAccountId);
+            log.info("取消流媒体账号任务后已释放串流/游戏账号占用 - StreamingAccountID: {}", streamingAccountId);
         }
     }
 
@@ -1023,6 +1032,16 @@ public class TaskServiceImpl implements TaskService {
         }
 
         log.info("Agent {} 上线，已清理 {} 个未完成任务并还原账号状态", agentId, incompleteTasks.size());
+    }
+
+    @Override
+    public void clearErrorMessage(String taskId) {
+        if (!StringUtils.hasText(taskId)) {
+            return;
+        }
+        LambdaUpdateWrapper<Task> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(Task::getId, taskId).set(Task::getErrorMessage, null);
+        taskMapper.update(null, wrapper);
     }
 
     @Override

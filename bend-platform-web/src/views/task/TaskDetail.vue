@@ -54,10 +54,13 @@
             <span v-if="lastProgressMessage" class="alert-item info">
               最新进度：{{ getTaskEventMessageText(lastProgressMessage) }}
             </span>
-            <span v-if="task.errorMessage" class="alert-item error">
+            <span v-if="task.errorMessage && shouldShowTaskErrorMessage(task)" class="alert-item error">
               任务错误：{{ task.errorMessage }}
             </span>
-            <span v-if="displaySession?.errorMessage" class="alert-item error">
+            <span
+              v-if="displaySession?.errorMessage && shouldShowSessionErrorMessage(displaySession, task)"
+              class="alert-item error"
+            >
               会话错误：{{ getTaskEventMessageText(displaySession.errorMessage) }}
             </span>
           </div>
@@ -92,7 +95,7 @@
             class="control-bar"
             :task-status="task.status"
             :session-phase="task.sessionPhase || session?.phase"
-            :game-action-type="task.gameActionType"
+            :game-action-type="displayGameActionType"
             :game-action-pending="task.gameActionPending"
             :pause-mode="task.pauseMode"
             @window="handleWindow"
@@ -120,8 +123,6 @@
           :title="sessionPhaseHint"
           class="window-hint"
         />
-
-        <StreamPipelineDiagnostic :diagnostic="streamPipelineDiagnostic" />
 
         <section class="account-section">
           <h3>游戏账号</h3>
@@ -158,7 +159,9 @@ import {
   getSessionPhaseText,
   getSessionPhaseType,
   getSessionPhaseHint,
-  getTaskEventMessageText
+  getTaskEventMessageText,
+  shouldShowTaskErrorMessage,
+  shouldShowSessionErrorMessage
 } from '@/utils/constants'
 import {
   confirmCancelPendingTask,
@@ -169,7 +172,6 @@ import SessionPhaseStepper from '@/components/task/SessionPhaseStepper.vue'
 import TaskControlBar from '@/components/task/TaskControlBar.vue'
 import GameAccountRunTable from '@/components/task/GameAccountRunTable.vue'
 import TaskEventTimeline from '@/components/task/TaskEventTimeline.vue'
-import StreamPipelineDiagnostic from '@/components/task/StreamPipelineDiagnostic.vue'
 
 const route = useRoute()
 const taskId = computed(() => route.params.id)
@@ -182,10 +184,6 @@ const task = computed(() => detail.value?.task)
 const session = computed(() => detail.value?.session)
 const gameAccountStatuses = computed(() => detail.value?.gameAccountStatuses || [])
 const lastProgressMessage = computed(() => detail.value?.lastProgressMessage)
-
-const streamPipelineDiagnostic = computed(
-  () => detail.value?.streamPipelineDiagnostic || null
-)
 
 const currentSessionId = computed(() => task.value?.sessionId || session.value?.id || '')
 
@@ -205,8 +203,14 @@ const displaySessionPhase = computed(() => {
 })
 
 const displayGameActionType = computed(() => {
-  if (isCurrentSession.value) return task.value?.gameActionType
-  return displaySession.value?.gameActionType || ''
+  if (isCurrentSession.value) {
+    if (task.value?.gameActionPending) return ''
+    return task.value?.gameActionType
+  }
+  if (displaySession.value?.gameActionType && displaySession.value?.gameActionLockedAt) {
+    return displaySession.value.gameActionType
+  }
+  return ''
 })
 
 const sessionPhaseHint = computed(() =>
@@ -225,8 +229,9 @@ const sessionPhaseAlertType = computed(() => {
 const hasAlerts = computed(
   () =>
     lastProgressMessage.value ||
-    task.value?.errorMessage ||
-    displaySession.value?.errorMessage
+    (task.value?.errorMessage && shouldShowTaskErrorMessage(task.value)) ||
+    (displaySession.value?.errorMessage
+      && shouldShowSessionErrorMessage(displaySession.value, task.value))
 )
 
 // 会话列表兜底刷新间隔（detail 轮询的约 3 倍，降低 /sessions 请求量）

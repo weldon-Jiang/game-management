@@ -164,6 +164,12 @@ class KeyboardMapper:
                                 self._on_window_close()
                             except Exception as exc:
                                 self.logger.warning("窗口关闭回调失败: %s", exc)
+                        else:
+                            # 未绑定关窗回调时交还给 SDL 窗口 process_events 处理
+                            try:
+                                pygame.event.post(event)
+                            except Exception:
+                                pass
                         continue
                     if event.type == pygame.KEYDOWN:
                         key_name = pygame.key.name(event.key)
