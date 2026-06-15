@@ -18,7 +18,7 @@ SDL2自绘串流窗口
 import asyncio
 import sys
 import time
-from typing import Optional, Tuple, Callable
+from typing import Optional, Tuple, Callable, Any
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
@@ -133,6 +133,7 @@ class SDLStreamWindow:
         self._display_fps_max = 30.0
         self._close_callback: Optional[Callable[[], None]] = None
         self._close_requested = False
+        self._keyboard_event_handler: Optional[Callable[[Any], bool]] = None
 
         if not PYGAME_AVAILABLE:
             self.logger.warning("pygame不可用，SDL窗口功能将不可用")
@@ -260,6 +261,23 @@ class SDLStreamWindow:
             return None
         return None
 
+    def is_foreground(self) -> bool:
+        """当前进程 SDL 串流窗口是否为前台窗口（Win32）。"""
+        if sys.platform != "win32":
+            try:
+                return bool(PYGAME_AVAILABLE and pygame.display.get_active())
+            except Exception:
+                return False
+        try:
+            import ctypes
+
+            hwnd = self._get_hwnd()
+            if not hwnd:
+                return False
+            return int(ctypes.windll.user32.GetForegroundWindow()) == int(hwnd)
+        except Exception:
+            return False
+
     def _bring_to_front(self):
         """尽力将可见 SDL 任务窗口置前。"""
         if sys.platform != 'win32':
@@ -295,6 +313,12 @@ class SDLStreamWindow:
     def set_close_callback(self, callback: Optional[Callable[[], None]]) -> None:
         """用户点击标题栏关闭按钮时调用。"""
         self._close_callback = callback
+
+    def set_keyboard_event_handler(
+        self, handler: Optional[Callable[[Any], bool]]
+    ) -> None:
+        """SDL 显示泵 process_events 将 KEYDOWN/KEYUP 转发给 KeyboardMapper。"""
+        self._keyboard_event_handler = handler
 
     def _apply_window_constraints(self):
         """Windows：固定客户区、标准标题栏（关闭/最小化）、不可缩放。"""
@@ -662,6 +686,16 @@ class SDLStreamWindow:
                         continue
                     self.close()
                     return False
+
+                if self._keyboard_event_handler and event.type in (
+                    pygame.KEYDOWN,
+                    pygame.KEYUP,
+                ):
+                    try:
+                        self._keyboard_event_handler(event)
+                    except Exception as exc:
+                        self.logger.warning("keyboard event handler failed: %s", exc)
+                    continue
 
                 if event.type in self._event_callbacks:
                     self._event_callbacks[event.type](event)

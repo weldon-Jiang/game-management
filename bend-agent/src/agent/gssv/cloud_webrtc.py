@@ -143,6 +143,7 @@ class GssvWebRtcSession:
         self._ready = False
         self._input_ready = False
         self._video_task: Optional[asyncio.Task] = None
+        self._input_reporting_task: Optional[asyncio.Task] = None
         self._latest_frame: Optional[np.ndarray] = None
         self._frame_lock = threading.Lock()
         self._frame_event = asyncio.Event()
@@ -156,6 +157,7 @@ class GssvWebRtcSession:
 
     def _notify_input_closed(self) -> None:
         self._input_ready = False
+        self._stop_input_reporting_worker()
         for cb in list(self._input_close_callbacks):
             try:
                 cb()
@@ -192,12 +194,73 @@ class GssvWebRtcSession:
         msg_state = getattr(self._message_channel, "readyState", "")
         if msg_state != "open" or not self._control_channel:
             return False
+        self._complete_input_handshake()
+        self.logger.info("GSSV input 通道 handshake 已重发")
+        return True
+
+    def _complete_input_handshake(self) -> None:
+        """HandshakeAck 后 control 授权 + ClientMetadata + worker + message 协商（对齐 libxsrp）。"""
         self._send_control_json(_authorization_request())
         self._send_control_json(_gamepad_changed(0))
         self._send_input_bytes(self._input_sender.client_metadata_packet())
+        # libxsrp：ClientMetadata 后立即 startInputReportingWorker，再发 message negotiations
+        self._start_input_reporting_worker()
+        negotiations = (
+            (
+                "/streaming/systemUi/configuration",
+                '"version": "[0, 1, 0]", "systemUis": "[33]"',
+            ),
+            (
+                "/streaming/properties/clientappinstallidchanged",
+                '{"clientAppInstallId": "c11ddb2e-c7e3-4f02-a62b-fd5448e0b851"}',
+            ),
+            (
+                "/streaming/characteristics/orientationchanged",
+                '{"orientation":0}',
+            ),
+            (
+                "/streaming/characteristics/touchinputenabledchanged",
+                '{"touchInputEnabled":false}',
+            ),
+            (
+                "/streaming/characteristics/clientdevicecapabilities",
+                "{}",
+            ),
+            (
+                "/streaming/characteristics/dimensionschanged",
+                '"horizontal":960,"vertical":540,"preferredWidth":960,"preferredHeight":540,'
+                '"safeAreaLeft":0,"safeAreaTop":0,"safeAreaRight":960,"safeAreaBottom":540,'
+                '"supportsCustomResolution":true',
+            ),
+        )
+        for target, content in negotiations:
+            self._send_message_json(_message_negotiation(target, content))
         self._input_ready = True
-        self.logger.info("GSSV input 通道 handshake 已重发")
-        return True
+
+    def _start_input_reporting_worker(self) -> None:
+        """对齐 libxsrp inputReportingWorker（~32ms 推送帧 METADATA，无 gamepad）。"""
+        if self._input_reporting_task and not self._input_reporting_task.done():
+            return
+
+        async def _loop() -> None:
+            # libxsrp worker 仅检查 channel 未关闭，不等待 IsReady/negotiations 完成
+            while self.is_input_channel_open():
+                packet = self._input_sender.next_metadata_only_packet()
+                if packet is not None:
+                    self._send_input_bytes(packet)
+                await asyncio.sleep(0.032)
+
+        try:
+            loop = asyncio.get_running_loop()
+            self._input_reporting_task = loop.create_task(_loop())
+        except RuntimeError:
+            pass
+
+    def _stop_input_reporting_worker(self) -> None:
+        task = self._input_reporting_task
+        if task and not task.done():
+            task.cancel()
+        self._input_reporting_task = None
 
     async def wait_for_input_channel(self, timeout: float = 5.0) -> bool:
         deadline = time.monotonic() + timeout
@@ -326,34 +389,7 @@ class GssvWebRtcSession:
             if str(payload.get("type", "")).lower() != "handshakeack":
                 return
             self.logger.info("收到 HandshakeAck，发送 control 授权与 input ClientMetadata")
-            self._send_control_json(_authorization_request())
-            self._send_control_json(_gamepad_changed(0))
-            self._send_input_bytes(self._input_sender.client_metadata_packet())
-            self._send_message_json(
-                _message_negotiation(
-                    "/streaming/systemUi/configuration",
-                    '"version": "[0, 1, 0]", "systemUis": "[33]"',
-                )
-            )
-            self._send_message_json(
-                _message_negotiation(
-                    "/streaming/properties/clientappinstallidchanged",
-                    '{"clientAppInstallId": "c11ddb2e-c7e3-4f02-a62b-fd5448e0b851"}',
-                )
-            )
-            self._send_message_json(
-                _message_negotiation(
-                    "/streaming/characteristics/orientationchanged",
-                    '{"orientation":0}',
-                )
-            )
-            self._send_message_json(
-                _message_negotiation(
-                    "/streaming/characteristics/touchinputenabledchanged",
-                    '{"touchInputEnabled":false}',
-                )
-            )
-            self._input_ready = True
+            self._complete_input_handshake()
 
     def _bind_input_channel(self) -> None:
         channel = self._input_channel
@@ -737,6 +773,11 @@ class GssvWebRtcSession:
             except Exception as exc:
                 self.logger.debug("video frame 解码失败: %s", exc)
                 continue
+            pts = getattr(frame, "pts", None)
+            if pts is None:
+                frame_time = getattr(frame, "time", None)
+                pts = int(float(frame_time or 0) * 90000)
+            self._input_sender.frame_sync.push_video_frame(int(pts))
             with self._frame_lock:
                 self._latest_frame = img
             self._frame_event.set()
@@ -782,21 +823,13 @@ class GssvWebRtcSession:
             return False
 
     async def send_keepalive(self) -> bool:
-        """GSSV 空闲保活：DPadUp / Nexus 交替脉冲。"""
-        pulse_sec = float(config.get("gssv.xsrp_idle_pulse_sec", 0.05))
-        from ..xbox.controller_write import NEUTRAL_GAMEPAD, XSRP_DPAD_UP, XSRP_NEXUS
+        """GSSV 空闲保活：neutral void（不发 DPadUp，避免系统 UI 焦点乱跳）。"""
+        from ..xbox.controller_write import NEUTRAL_GAMEPAD
 
-        tick = getattr(self, "_keepalive_pulse_tick", 0)
-        self._keepalive_pulse_tick = tick + 1
-        mask = XSRP_DPAD_UP if tick % 2 == 0 else XSRP_NEXUS
-
-        ok = await self.send_gamepad({**NEUTRAL_GAMEPAD, "buttons": mask})
-        if not ok:
-            return False
-        await asyncio.sleep(pulse_sec)
         return await self.send_gamepad(dict(NEUTRAL_GAMEPAD))
 
     async def close(self) -> None:
+        self._stop_input_reporting_worker()
         if self._video_task and not self._video_task.done():
             self._video_task.cancel()
             try:

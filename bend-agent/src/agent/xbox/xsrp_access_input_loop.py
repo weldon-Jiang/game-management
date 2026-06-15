@@ -1,8 +1,12 @@
 """
 xsrp 截图环手柄写入 — 对齐 streaming/xsrpd.py access_stream。
 
-xsrpd 在 capture 循环内每帧 WriteControllerData（含 void）；空闲 >60s 附加 Nexus。
-GSSV 云端无 C++ xsrp，用 WebRTC input DataChannel + 相同节奏（默认 30Hz）。
+xsrpd access_stream 每轮循环：
+  1. WriteControllerData（void 或人工手柄；空闲 >60s 附加 Nexus）
+  2. CaptureStreaming（截图）
+
+GSSV 云端无 C++ xsrp：WriteControllerData 等价 write_controller_final（30Hz）；
+帧 METADATA 由 libxsrp 同款的 inputReportingWorker（cloud_webrtc）独立推送。
 """
 
 from __future__ import annotations
@@ -33,8 +37,8 @@ async def start_xsrp_access_input_loop(context: Any, task_logger=None) -> None:
     log = task_logger or logger
     fps = float(config.get("gssv.xsrp_capture_fps", 30))
     interval = 1.0 / max(1.0, fps)
-    idle_pulse_sec = float(config.get("gssv.xsrp_streaming_idle_pulse_sec", 25))
-    metadata_every_sec = float(config.get("gssv.input_metadata_refresh_sec", 30))
+    # xsrpd access_stream：空闲 60s 发 Nexus 防 idle-off
+    idle_pulse_sec = float(config.get("gssv.xsrp_streaming_idle_pulse_sec", 60))
 
     async def _loop() -> None:
         log.info(
@@ -42,8 +46,7 @@ async def start_xsrp_access_input_loop(context: Any, task_logger=None) -> None:
             fps,
             idle_pulse_sec,
         )
-        last_nexus_pulse = time.time()
-        last_metadata = time.time()
+        idle_timepoint = time.time()
 
         while True:
             session = getattr(context, "xbox_session", None)
@@ -52,25 +55,30 @@ async def start_xsrp_access_input_loop(context: Any, task_logger=None) -> None:
 
             # xsrpd：auto_play/auto_graph 期间不在 access 环写手柄
             runtime = getattr(context, "_stream_runtime", None)
-            if runtime is not None and not runtime.is_manual_input_allowed():
-                await asyncio.sleep(interval)
-                continue
+            if runtime is not None:
+                ctx = runtime._context
+                if not runtime.is_manual_input_allowed():
+                    await asyncio.sleep(interval)
+                    continue
+                # F8 人工接管 / 平台暂停：InputPump 独占 WriteControllerData（对齐 xsrp.py hid_controller）
+                if getattr(ctx, "_manual_takeover", False):
+                    await asyncio.sleep(interval)
+                    continue
+                if ctx is not None and hasattr(ctx, "is_paused") and ctx.is_paused():
+                    await asyncio.sleep(interval)
+                    continue
 
             gamepad = dict(NEUTRAL_GAMEPAD)
             now = time.time()
 
-            # 对齐 xsrpd：持续 void + 空闲超阈值附加 Nexus（不随 neutral 刷新计时）
-            if now - last_nexus_pulse >= idle_pulse_sec:
+            # 对齐 xsrpd access_stream：持续 void；空闲超 60s 附加 Nexus
+            if now - idle_timepoint >= idle_pulse_sec:
                 gamepad["buttons"] = int(XSRP_NEXUS)
-                last_nexus_pulse = now
+                idle_timepoint = now
 
-            await write_controller_final(session, gamepad, context=context)
-
-            if now - last_metadata >= metadata_every_sec:
-                webrtc = getattr(context, "_cloud_webrtc", None)
-                if webrtc is not None and hasattr(webrtc, "try_restore_input"):
-                    await webrtc.try_restore_input()
-                last_metadata = now
+            ok = await write_controller_final(session, gamepad, context=context)
+            if ok:
+                idle_timepoint = now
 
             await asyncio.sleep(interval)
 

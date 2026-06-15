@@ -16,9 +16,9 @@ from ..core.logger import get_logger
 
 logger = get_logger("controller_write")
 
-# xsrp.XSGamepadButtons
-XSRP_DPAD_UP = 4096
-XSRP_NEXUS = 2
+# libxsrp XSGamepadButtons
+XSRP_DPAD_UP = 0x0100
+XSRP_NEXUS = 0x0002
 
 NEUTRAL_GAMEPAD: Dict[str, int] = {
     "buttons": 0,
@@ -146,7 +146,6 @@ async def ensure_channel_writable(
 
     if context is not None:
         context._input_channel_dirty = True
-    schedule_input_reconnect(context)
     _log_channel_closed_throttled(context, session)
     return False
 
@@ -162,7 +161,7 @@ def _log_channel_closed_throttled(context: Optional[Any], session: Any) -> None:
 
     state = get_input_channel_state(session)
     logger.info(
-        "input DataChannel 非 open (state=%s)，跳过写入并已调度重连",
+        "input DataChannel 非 open (state=%s)，跳过写入（对齐 streaming NOT_READY）",
         state,
     )
 
@@ -192,18 +191,26 @@ def _log_reconnect_callback_missing_throttled(context: Optional[Any]) -> None:
     )
 
 
-def schedule_input_reconnect(context: Any) -> None:
-    """调度后台全量重连，不阻塞调用方（AccountSwitcher / keepalive 共用）。"""
+def schedule_input_reconnect(context: Any, *, force: bool = False) -> None:
+    """调度后台全量重连，不阻塞调用方（AccountSwitcher / keepalive / F8 共用）。"""
     if context is None:
         return
 
+    # Step3 未完成：仅轻量 handshake，避免 reconnect 清掉 xbox_session
+    if not getattr(context, "_step3_init_completed", False):
+        from .stream_recovery import request_input_recovery
+
+        request_input_recovery(context, force=False)
+        return
+
     bg = getattr(context, "_input_reconnect_bg_task", None)
+    # 重连任务已在跑时不再叠加（force 亦同，否则 InputPump 125Hz 会刷出数百个 waiter）
     if bg is not None and not bg.done():
         return
 
     now = time.time()
     last_at = float(getattr(context, "_input_reconnect_scheduled_at", 0.0) or 0.0)
-    if now - last_at < _RECONNECT_SCHEDULE_COOLDOWN_SEC:
+    if not force and now - last_at < _RECONNECT_SCHEDULE_COOLDOWN_SEC:
         return
 
     callback = getattr(context, "_input_reconnect_callback", None)
@@ -301,14 +308,11 @@ async def send_gssv_idle_pulse(
     pulse_sec: Optional[float] = None,
 ) -> bool:
     """
-    GSSV 空闲保活：DPadUp / Nexus 交替（xsrp.py hid 用 DPadUp，xsrpd 捕获环用 Nexus）。
+    GSSV 空闲保活：仅 Nexus 脉冲（对齐 xsrpd access_stream 60s idle，不发 DPadUp）。
+
+    DPadUp 会在 Xbox 系统 UI 上移动焦点，周期性脉冲会导致菜单乱跳。
     """
-    tick = 0
-    if context is not None:
-        tick = int(getattr(context, "_gssv_idle_pulse_tick", 0) or 0)
-        context._gssv_idle_pulse_tick = tick + 1
-    mask = XSRP_DPAD_UP if tick % 2 == 0 else XSRP_NEXUS
-    return await send_button_pulse(session, mask, context=context, pulse_sec=pulse_sec)
+    return await send_button_pulse(session, XSRP_NEXUS, context=context, pulse_sec=pulse_sec)
 
 
 def _is_gssv_session(session: Any) -> bool:
@@ -345,7 +349,7 @@ async def send_stream_keepalive(
 
 
 async def handle_write_failure(context: Any, session: Any) -> None:
-    """发送失败：先轻量 restore；通道仍不可用则调度后台重连。"""
+    """发送失败：轻量 restore；通道 closed 时仅标记 dirty（不自动全量重连）。"""
     from .stream_keepalive import is_input_channel_open, try_restore_input_channel
 
     if session is not None and is_input_channel_open(session):
@@ -361,15 +365,5 @@ async def handle_write_failure(context: Any, session: Any) -> None:
         if hasattr(session, "is_input_channel_healthy") and session.is_input_channel_healthy():
             return
 
-    if session is not None:
-        await try_restore_input_channel(session)
-        if is_input_channel_open(session):
-            webrtc = getattr(session, "_webrtc", None)
-            if webrtc is not None and hasattr(webrtc, "try_restore_input"):
-                await webrtc.try_restore_input()
-            if hasattr(session, "is_input_channel_healthy") and session.is_input_channel_healthy():
-                return
-
     if context is not None:
         context._input_channel_dirty = True
-    schedule_input_reconnect(context)

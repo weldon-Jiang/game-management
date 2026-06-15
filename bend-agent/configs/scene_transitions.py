@@ -151,7 +151,7 @@ SCENE_TRANSITIONS = [
         'transition_id': 1,
         'description': '场景147 -> 场景149',
         'controller_options': [
-            [50, 2, 8192, 0, 255, 0, 0, 0, 0],
+            [50, 2, 4, 0, 255, 0, 0, 0, 0],
         ],
         'target_scenes': [149]
     },

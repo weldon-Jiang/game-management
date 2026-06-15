@@ -170,6 +170,8 @@ class PlatformApiClient:
             return False
         if kwargs.get('selectedServerId') or kwargs.get('selected_server_id'):
             return False
+        if kwargs.get('timelineEvent') or kwargs.get('timeline_event'):
+            return False
         if self._progress_interval_sec <= 0:
             return False
         scope = kwargs.get('scope')

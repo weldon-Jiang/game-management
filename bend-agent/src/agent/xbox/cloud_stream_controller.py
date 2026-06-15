@@ -64,13 +64,13 @@ class CloudStreamController:
     async def press_button(self, button: str, duration: float = 0.1) -> None:
         """Step4 兼容：简单按钮映射到 bitmask（仅常用键）。"""
         mapping = {
-            "a": 0x1000,
-            "b": 0x2000,
-            "x": 0x4000,
-            "y": 0x8000,
-            "menu": 0x0010,
-            "view": 0x0020,
-            "nexus": 0x0400,
+            "a": 0x0010,
+            "b": 0x0020,
+            "x": 0x0040,
+            "y": 0x0080,
+            "menu": 0x0004,
+            "view": 0x0008,
+            "nexus": 0x0002,
         }
         mask = mapping.get((button or "").lower(), 0)
         if not mask:

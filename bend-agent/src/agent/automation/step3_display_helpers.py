@@ -150,6 +150,19 @@ async def _stop_sdl_display_pump(context: AgentTaskContext) -> None:
     context._sdl_display_task = None
 
 
+def _wire_sdl_keyboard_events(context: AgentTaskContext) -> None:
+    """SDL 显示泵与 KeyboardMapper 共用 pygame 窗口，键盘事件须由 SDL 转发。"""
+    sdl = context.sdl_window
+    keyboard = getattr(context, "_keyboard_mapper", None)
+    if not sdl or not keyboard:
+        return
+    if hasattr(sdl, "set_keyboard_event_handler") and hasattr(
+        keyboard, "set_external_event_pump"
+    ):
+        sdl.set_keyboard_event_handler(keyboard.feed_pygame_event)
+        keyboard.set_external_event_pump(True)
+
+
 def _wire_sdl_close_handler(context: AgentTaskContext) -> None:
     """将标题栏关闭绑定到 window_close_callback（终止任务或仅隐藏显示）。"""
     sdl = context.sdl_window
@@ -170,6 +183,7 @@ def _wire_sdl_close_handler(context: AgentTaskContext) -> None:
             keyboard_mapper.set_window_close_handler(sdl.hide)
         else:
             keyboard_mapper.set_window_close_handler(None)
+    _wire_sdl_keyboard_events(context)
 
 
 async def step3_close_display(context: AgentTaskContext) -> None:
@@ -366,6 +380,7 @@ async def _init_gamepad_controller(
         task_logger.info("手柄控制器初始化成功（InputPump 负责 DC 发送）")
         stream_logger.info("手柄控制器初始化成功")
 
+        context._gamepad_controller = gamepad
         return gamepad
 
     except Exception as e:
@@ -383,7 +398,7 @@ async def _init_keyboard_mapper(
     try:
         from ..input.agent_keyboard_config import get_effective_keyboard_bindings
         from ..input.keyboard_mapper import KeyboardMapper
-        from ..input.controller_protocol import ControllerSignal, XboxButtonFlag
+        from ..input.controller_protocol import ControllerSignal
         from ..input.keyboard_mapper import KeyAction
 
         task_logger.info("正在初始化键盘映射器...")
@@ -399,28 +414,16 @@ async def _init_keyboard_mapper(
         if hasattr(context, "_controller_protocol") and context._controller_protocol:
             context._keyboard_overlay_signal = ControllerSignal.zero()
 
-            action_map = {
-                KeyAction.TAP_A: XboxButtonFlag.A,
-                KeyAction.TAP_B: XboxButtonFlag.B,
-                KeyAction.TAP_X: XboxButtonFlag.X,
-                KeyAction.TAP_Y: XboxButtonFlag.Y,
-                KeyAction.TAP_START: XboxButtonFlag.START,
-                KeyAction.TAP_SELECT: XboxButtonFlag.SELECT,
-                KeyAction.TAP_L1: XboxButtonFlag.L1,
-                KeyAction.TAP_R1: XboxButtonFlag.R1,
-                KeyAction.MOVE_UP: XboxButtonFlag.DPAD_UP,
-                KeyAction.MOVE_DOWN: XboxButtonFlag.DPAD_DOWN,
-                KeyAction.MOVE_LEFT: XboxButtonFlag.DPAD_LEFT,
-                KeyAction.MOVE_RIGHT: XboxButtonFlag.DPAD_RIGHT,
-            }
+            def refresh_keyboard_overlay() -> None:
+                overlay = ControllerSignal.zero()
+                keyboard.apply_active_keys_to_signal(overlay)
+                context._keyboard_overlay_signal = overlay
+
+            keyboard.set_overlay_refresh(refresh_keyboard_overlay)
 
             def handle_key_action(action: KeyAction, is_pressed: bool):
                 try:
-                    flag = action_map.get(action)
-                    if flag is None:
-                        return
-                    overlay = context._keyboard_overlay_signal
-                    overlay.set_button(flag, is_pressed)
+                    refresh_keyboard_overlay()
                 except Exception as e:
                     task_logger.error(f"处理键盘动作失败: {e}")
 
@@ -431,6 +434,9 @@ async def _init_keyboard_mapper(
 
         task_logger.info("键盘映射器初始化成功")
         stream_logger.info("键盘映射器初始化成功")
+
+        context._keyboard_mapper = keyboard
+        _wire_sdl_keyboard_events(context)
 
         return keyboard
 

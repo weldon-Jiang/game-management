@@ -22,6 +22,23 @@ from logging.handlers import RotatingFileHandler
 from .paths import get_logs_dir_fallback
 
 
+class WindowsSafeRotatingFileHandler(RotatingFileHandler):
+    """
+    Windows 兼容的日志轮转处理器。
+
+    标准 RotatingFileHandler 在 Windows 上轮转时使用 os.rename，若日志文件仍被
+    其他 Handler 或外部进程（IDE、tail）占用会抛出 PermissionError，导致
+    「Logging error」刷屏。此处捕获后跳过本轮轮转并重新打开文件继续写入。
+    """
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except (OSError, PermissionError):
+            if self.stream is None:
+                self.stream = self._open()
+
+
 class CustomJsonFormatter(logging.Formatter):
     """
     自定义JSON日志格式化器
@@ -70,6 +87,24 @@ class AgentLogger:
     """
 
     _loggers = {}  # Logger缓存字典
+    _shared_file_handler: logging.Handler = None  # agent.log 全局唯一文件 Handler
+
+    @classmethod
+    def _get_shared_file_handler(cls, formatter: logging.Formatter) -> logging.Handler:
+        """所有模块 Logger 共享同一 agent.log Handler，避免多 Handler 争抢轮转。"""
+        if cls._shared_file_handler is None:
+            log_dir = get_logs_dir_fallback()
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, 'agent.log')
+            handler = WindowsSafeRotatingFileHandler(
+                log_file,
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+                encoding='utf-8',
+            )
+            handler.setFormatter(formatter)
+            cls._shared_file_handler = handler
+        return cls._shared_file_handler
 
     @classmethod
     def get_logger(cls, name: str, level: str = "INFO") -> logging.Logger:
@@ -106,20 +141,8 @@ class AgentLogger:
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
 
-        # 文件处理器 - 日志轮转
-        log_dir = get_logs_dir_fallback()
-        os.makedirs(log_dir, exist_ok=True)  # 确保日志目录存在
-        log_file = os.path.join(log_dir, 'agent.log')
-
-        # RotatingFileHandler实现日志轮转
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=10 * 1024 * 1024,  # 单文件最大10MB
-            backupCount=5,               # 保留5个备份
-            encoding='utf-8'
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        # 文件处理器 - 所有模块共享同一 agent.log Handler（Windows 轮转安全）
+        logger.addHandler(cls._get_shared_file_handler(formatter))
 
         # 缓存Logger实例
         cls._loggers[name] = logger

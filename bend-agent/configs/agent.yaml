@@ -99,6 +99,11 @@ debug:
   manual_takeover_hotkey: f8       # 切换人工接管（拦截自动化按键）
   manual_screenshot_hotkey: f9     # 保存 960×540 → logs/manual_capture/{task_id}/
   manual_help_hotkey: f10
+  # F8 导航：短按跳一格；长按超过 delay 后按 interval 重复（面键 A/B/X/Y 按住即持续）
+  manual_nav_repeat_delay_sec: 0.45
+  manual_nav_repeat_interval_sec: 0.12
+  # F8 键盘 WASD：stick=比赛左摇杆（默认）；dpad=仅菜单十字键
+  manual_keyboard_movement: stick
 
 # ----------------------------------------------
 # 认证配置

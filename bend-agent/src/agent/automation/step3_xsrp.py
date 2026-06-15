@@ -107,8 +107,6 @@ async def step3_execute_xsrp_init(
         await stream_runtime.start_long_lived(task_logger)
 
         await _ensure_controller_protocol(context, task_logger, stream_logger)
-        install_task_input_recovery(context, task_logger)
-        _bind_xsrp_input_close_handler(context, task_logger)
 
         if context.enable_window_display:
             sdl_window = await _init_sdl_window(context, task_logger, stream_logger)
@@ -116,11 +114,13 @@ async def step3_execute_xsrp_init(
                 context.sdl_window = sdl_window
                 if hasattr(sdl_window, "show"):
                     sdl_window.show()
-                await _start_sdl_display_pump(context, task_logger)
 
         await _init_gamepad_controller(context, task_logger, stream_logger)
         await _init_keyboard_mapper(context, task_logger, stream_logger)
         _wire_sdl_close_handler(context)
+
+        if context.enable_window_display and context.sdl_window:
+            await _start_sdl_display_pump(context, task_logger)
 
         stream_ready, ready_detail = await _validate_xsrp_stream_readiness(
             context, task_logger, stream_logger,
@@ -133,6 +133,8 @@ async def step3_execute_xsrp_init(
 
         await stop_xsrp_idle_keepalive(context)
         reset_controller_write_stats(context)
+        install_task_input_recovery(context, task_logger)
+        _bind_xsrp_input_close_handler(context, task_logger)
         await start_xsrp_access_input_loop(context, task_logger)
         await _start_input_pump_if_ready(context, task_logger)
 
@@ -174,24 +176,16 @@ def is_xsrp_stream_media_ready(context: AgentTaskContext) -> bool:
 
 
 def _bind_xsrp_input_close_handler(context: AgentTaskContext, task_logger) -> None:
-    """WebRTC input 通道关闭时标记 dirty 并调度后台重连。"""
-    from ..xbox.controller_write import schedule_input_reconnect
+    from ..xbox.stream_recovery import bind_input_close_handler
 
-    webrtc = getattr(context, "_cloud_webrtc", None)
-    if webrtc is None or not hasattr(webrtc, "on_input_channel_close"):
-        return
-
-    def _on_close():
-        context._input_channel_dirty = True
-        task_logger.warning("xsrp input 通道 closed，已标记待恢复")
-        schedule_input_reconnect(context)
-
-    webrtc.on_input_channel_close(_on_close)
+    bind_input_close_handler(context, task_logger)
 
 
 async def _validate_xsrp_stream_readiness(context, task_logger, stream_logger) -> tuple:
     """验证 WebRTC 帧与 DataChannel 输入（无 LAN 重连）。"""
     from ..runtime.stream_runtime import capture_task_frame
+    from ..xbox.stream_keepalive import is_input_channel_open
+    from ..xbox.stream_recovery import kick_input_recovery
 
     async def _check_frames() -> tuple:
         if context.frame_capture is None:
@@ -223,7 +217,29 @@ async def _validate_xsrp_stream_readiness(context, task_logger, stream_logger) -
         return True, f"xsrp input ready ({state})"
 
     frames_ok, frames_msg = await _check_frames()
-    input_ok, input_msg = await _check_input()
+
+    input_ok, input_msg = False, "未检查"
+    for attempt in range(4):
+        if getattr(context, "_input_channel_dirty", False):
+            await kick_input_recovery(context, task_logger, force=False)
+            await asyncio.sleep(0.5)
+        input_ok, input_msg = await _check_input()
+        if input_ok:
+            break
+        session = getattr(context, "xbox_session", None)
+        if session is None:
+            break
+        if not is_input_channel_open(session) and attempt < 3:
+            task_logger.info(
+                "xsrp input 未就绪 (attempt %s/4)，轻量恢复后重试: %s",
+                attempt + 1,
+                input_msg,
+            )
+            await kick_input_recovery(context, task_logger, force=False)
+            await asyncio.sleep(1.0)
+        else:
+            break
+
     if frames_ok and input_ok:
         task_logger.info("xsrp STEP3 就绪: %s; %s", frames_msg, input_msg)
         return True, f"{frames_msg}; {input_msg}"

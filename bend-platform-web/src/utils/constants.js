@@ -540,6 +540,12 @@ export const TASK_EVENT_MESSAGE_MAP = {
   '账号校验失败': '账号校验失败',
   'Input mode: virtual': '输入模式：虚拟手柄',
   'Input mode: physical': '输入模式：实体手柄',
+  'Manual takeover ON': '人工接管已开启',
+  'Manual takeover OFF': '人工接管已关闭',
+  'Input channel closed': 'Input 通道已断开',
+  'Input channel reconnecting': 'Input 通道重连中',
+  'Input channel restored': 'Input 通道已恢复',
+  'Manual input detected': '检测到人工按键',
   '用户终止串流': '用户终止串流',
   '用户关闭串流窗口，任务已结束': '用户关闭串流窗口，任务已结束',
   '用户取消执行': '用户取消执行',
@@ -686,6 +692,10 @@ export const getTaskEventMessageText = (message) => {
     const mode = inputModeMatch[1].toLowerCase()
     const modeText = mode === 'physical' ? '实体手柄' : mode === 'virtual' ? '虚拟手柄' : mode
     return `输入模式：${modeText}`
+  }
+  const inputReconnectFail = trimmed.match(/^Input channel reconnect failed:\s*(.+)$/i)
+  if (inputReconnectFail) {
+    return `Input 通道重连失败：${inputReconnectFail[1]}`
   }
   return message
 }

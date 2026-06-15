@@ -15,6 +15,11 @@ from typing import Any, Optional
 
 from ..core.config import config
 from ..core.logger import get_logger
+from ..task.task_timeline_events import (
+    MSG_MANUAL_TAKEOVER_OFF,
+    MSG_MANUAL_TAKEOVER_ON,
+    schedule_task_timeline_event,
+)
 from .manual_capture import save_manual_capture
 
 _logger = get_logger("manual_debug")
@@ -25,7 +30,7 @@ HELP_TEXT = """
   F9  保存调试截图 960×540 → logs/manual_capture/{task_id}/
   F10 显示本帮助
 
-  键盘映射: W/S/A/D=方向  J/B/X/Y=手柄面键  Enter=Start  Esc=View  Q/E=LB/RB
+  键盘映射: W/S/A/D=左摇杆(比赛带球；菜单请改 yaml manual_keyboard_movement: dpad)  方向键=菜单导航  J/B/X/Y=面键  Enter=Start  Esc=View  Q/E=LB/RB
   截图后把 template/search 坐标发开发者，或自行裁 templates/{{scene}}.{{tpl}}.png
 """
 
@@ -46,7 +51,73 @@ def set_manual_takeover(context: Any, enabled: bool, *, reason: str = "") -> Non
         "可用" if enabled else "随自动化/暂停策略",
     )
     if enabled:
-        _logger.info("[人工接管] 请点击串流窗口，用 WASD/ABXY 操作 Xbox")
+        _logger.info(
+            "[人工接管] 请点击串流窗口；键盘建议切英文输入法；"
+            "映射键 W/S/A/D 方向 J/B/X/Y 面键；已插手柄可直接按"
+        )
+        schedule_task_timeline_event(
+            context,
+            MSG_MANUAL_TAKEOVER_ON,
+            event_key="manual_takeover_on",
+        )
+        context._manual_focus_warned = False
+        keyboard = getattr(context, "_keyboard_mapper", None)
+        if keyboard is not None and hasattr(keyboard, "set_manual_face_hold"):
+            keyboard.set_manual_face_hold(True)
+            from ..input.manual_nav import manual_keyboard_uses_stick
+
+            if hasattr(keyboard, "set_manual_wasd_stick"):
+                keyboard.set_manual_wasd_stick(manual_keyboard_uses_stick())
+        sdl = getattr(context, "sdl_window", None)
+        if sdl is not None:
+            try:
+                if hasattr(sdl, "show"):
+                    sdl.show()
+                elif hasattr(sdl, "_bring_to_front"):
+                    sdl._bring_to_front()
+            except Exception as exc:
+                _logger.warning("人工接管前置串流窗口失败: %s", exc)
+        try:
+            from ..xbox.stream_keepalive import is_input_channel_open
+
+            session = getattr(context, "xbox_session", None)
+            if session is not None and is_input_channel_open(session):
+                webrtc = getattr(session, "_webrtc", None) or getattr(context, "_cloud_webrtc", None)
+                if webrtc is not None and getattr(webrtc, "is_input_ready", False):
+                    pass
+                else:
+                    from ..xbox.stream_recovery import request_input_recovery
+
+                    request_input_recovery(context, force=False)
+            else:
+                from ..xbox.stream_recovery import request_input_recovery
+
+                request_input_recovery(context, force=True)
+        except Exception as exc:
+            _logger.warning("人工接管 input 恢复请求失败: %s", exc)
+    else:
+        schedule_task_timeline_event(
+            context,
+            MSG_MANUAL_TAKEOVER_OFF,
+            event_key="manual_takeover_off",
+        )
+        context._manual_input_detected_reported = False
+        context._manual_focus_warned = False
+        keyboard = getattr(context, "_keyboard_mapper", None)
+        if keyboard is not None:
+            keyboard._pressed_keys.clear()
+            if hasattr(keyboard, "set_focused_win32_poll"):
+                keyboard.set_focused_win32_poll(False)
+            if hasattr(keyboard, "set_manual_face_hold"):
+                keyboard.set_manual_face_hold(False)
+            if hasattr(keyboard, "set_manual_wasd_stick"):
+                keyboard.set_manual_wasd_stick(False)
+        pump = getattr(context, "_input_pump", None)
+        if pump is not None and hasattr(pump, "reset_manual_nav_filter"):
+            pump.reset_manual_nav_filter()
+        from ..input.controller_protocol import ControllerSignal
+
+        context._keyboard_overlay_signal = ControllerSignal.zero()
 
 
 def toggle_manual_takeover(context: Any) -> None:

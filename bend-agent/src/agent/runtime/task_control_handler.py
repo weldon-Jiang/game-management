@@ -99,6 +99,17 @@ class TaskControlHandler:
         self._focus.focus(runtime.task_id)
         if self._scheduler:
             await self._scheduler.pause_task(runtime.task_id, mode=mode)
+        if mode == PauseMode.IMMEDIATE:
+            from ..task.task_timeline_events import (
+                MSG_MANUAL_TAKEOVER_ON,
+                emit_task_timeline_event,
+            )
+
+            await emit_task_timeline_event(
+                runtime.context,
+                MSG_MANUAL_TAKEOVER_ON,
+                event_key="platform_pause_on",
+            )
         return {"success": True, "phase": phase.value, "pauseMode": mode.value}
 
     async def _resume(self, runtime, data: Dict) -> Dict:
@@ -116,6 +127,16 @@ class TaskControlHandler:
             phase = runtime.set_phase(SessionPhase.AUTOMATING, "Resumed")
         if self._scheduler:
             await self._scheduler.resume_task(runtime.task_id)
+        from ..task.task_timeline_events import (
+            MSG_MANUAL_TAKEOVER_OFF,
+            emit_task_timeline_event,
+        )
+
+        await emit_task_timeline_event(
+            runtime.context,
+            MSG_MANUAL_TAKEOVER_OFF,
+            event_key="platform_pause_off",
+        )
         return {"success": True, "phase": phase.value}
 
     async def _cancel(self, runtime, data: Dict) -> Dict:
