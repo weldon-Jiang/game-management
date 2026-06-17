@@ -110,10 +110,10 @@ pyinstaller --name "BendAgent" ^
     --hidden-import=pycryptodome ^
     --hidden-import=pythonjsonlogger ^
     --hidden-import=pythonjsonlogger.jsonlogger ^
-    --hidden-import=easyocr ^
+    --hidden-import=paddleocr ^
+    --hidden-import=onnxruntime ^
+    --hidden-import=psutil ^
     --hidden-import=playwright ^
-    --hidden-import=torch ^
-    --hidden-import=torchvision ^
     --hidden-import=pyotp ^
     --hidden-import=compress_pickle ^
     --collect-all=pystray ^

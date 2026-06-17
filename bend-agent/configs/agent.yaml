@@ -90,6 +90,17 @@ automation:
 step4:
   skip_account_switch: false
 
+# Step4 档案 OCR（PaddleOCR PP-OCRv6_tiny + ONNX Runtime）
+ocr:
+  engine: onnxruntime
+  det_model: PP-OCRv6_tiny_det
+  rec_model: PP-OCRv6_tiny_rec
+  enable_mkldnn: true
+  cpu_threads: 0              # 0=自动 max(10, 逻辑核数)
+  min_crop_brightness: 25    # 裁剪区过暗则跳过 OCR
+  min_rec_confidence: 0.12
+  min_line_confidence: 0.12
+
 # 调试：场景顺序截图 + 手柄输入日志（输出 logs/scene_capture/{task_id}/）
 debug:
   scene_capture_enabled: true

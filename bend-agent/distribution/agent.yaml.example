@@ -40,6 +40,15 @@ automation:
   retry_delay: 2
   action_cooldown: 1
 
+# Step4 档案 OCR（PaddleOCR；裁剪区见 profile_name_reader.py）
+ocr:
+  engine: onnxruntime
+  det_model: PP-OCRv6_tiny_det
+  rec_model: PP-OCRv6_tiny_rec
+  enable_mkldnn: true
+  cpu_threads: 0
+  min_crop_brightness: 25
+
 task:
   max_concurrent: 100
   max_xbox_sessions: 100

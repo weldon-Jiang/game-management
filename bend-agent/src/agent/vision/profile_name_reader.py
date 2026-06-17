@@ -1,21 +1,22 @@
 """
 从场景 6 账号选择帧 / Xbox 主页读取档案标识并比对。
 
-- 场景 6：左侧档案列表焦点行 EasyOCR（960×540 坐标）
-- 场景 203：主页左上角显示名 + 邮箱两行 OCR
+- 场景 6：左侧档案列表焦点行 PaddleOCR rec（960×540 坐标）
+- 场景 203：主页左上角显示名 + 邮箱 OCR
+- 裁剪区常量见 HOME203_* / SCENE6_*；自动化卡点时可人工截图后微调
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Any, List, Optional, Tuple
 
 import cv2
 import numpy as np
 
 from ..core.logger import get_logger
+from .ocr_engine import recognize_line, recognize_region, recognize_region_lines
 
 # 场景 6 档案列表在归一化 960×540 串流帧上的区域
 SCENE6_LIST_LEFT = 78
@@ -40,16 +41,6 @@ class HomeProfileIdentity:
     def combined(self) -> str:
         parts = [self.display_name.strip(), self.email_text.strip()]
         return " ".join(part for part in parts if part)
-
-
-@lru_cache(maxsize=1)
-def _get_ocr_reader():
-    import easyocr
-
-    _logger.info("初始化 EasyOCR Reader (en, CPU)...")
-    reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-    _logger.info("EasyOCR Reader 就绪")
-    return reader
 
 
 def normalize_gamertag(name: str) -> str:
@@ -139,9 +130,7 @@ def _green_ratio(hsv_crop: np.ndarray) -> float:
 
 
 def detect_focused_row_y(image: np.ndarray) -> Optional[int]:
-    """
-    检测场景 6 档案列表中绿色焦点条的 Y 轴中心。
-    """
+    """检测场景 6 档案列表中绿色焦点条的 Y 轴中心。"""
     h, w = image.shape[:2]
     scale_x = w / 960.0
     scale_y = h / 540.0
@@ -191,78 +180,30 @@ def _crop_focused_text(image: np.ndarray, row_y: Optional[int]) -> Optional[np.n
     return image[y1:y2, text_left:text_right]
 
 
-def _prepare_ocr_variants(crop: np.ndarray) -> List[np.ndarray]:
-    """
-    串流小字 OCR 预处理：放大 + CLAHE + Otsu 二值化，提升白字 UI 识别率。
-    """
-    if crop.ndim == 3:
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = crop.copy()
-
-    h, w = gray.shape[:2]
-    if h < 4 or w < 4:
-        return []
-
-    scale = 3.0 if max(h, w) < 80 else (2.0 if max(h, w) < 140 else 1.0)
-    if scale > 1.0:
-        base = cv2.resize(
-            gray,
-            None,
-            fx=scale,
-            fy=scale,
-            interpolation=cv2.INTER_CUBIC,
-        )
-    else:
-        base = gray
-
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(base)
-    _, otsu = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    variants: List[np.ndarray] = [enhanced, otsu, base]
-    if scale > 1.0:
-        variants.append(gray)
-    return variants
-
-
-def _ocr_read_best(reader: Any, crop: np.ndarray, *, paragraph: bool = True) -> str:
-    """对多种预处理图跑 EasyOCR，取置信度最高的非空文本。"""
-    best_text = ""
-    best_conf = 0.0
-    for variant in _prepare_ocr_variants(crop):
-        try:
-            results = reader.readtext(variant, detail=1, paragraph=paragraph)
-        except Exception:
-            continue
-        for item in results:
-            if len(item) < 3:
-                continue
-            text = str(item[1]).strip()
-            conf = float(item[2])
-            if text and conf >= best_conf:
-                best_conf = conf
-                best_text = text
-    if best_text and best_conf >= 0.15:
-        return best_text
-    if best_text:
-        _logger.debug("Profile OCR low confidence %.2f: %r", best_conf, best_text)
-        return best_text
-    return ""
-
-
-def _ocr_text(crop: np.ndarray) -> str:
+def _ocr_text_line(crop: Optional[np.ndarray]) -> str:
+    """单行 gamertag / 显示名：Paddle rec-only。"""
     if crop is None or crop.size == 0:
         return ""
-
     try:
-        reader = _get_ocr_reader()
-        text = _ocr_read_best(reader, crop, paragraph=True)
+        text, _ = recognize_line(crop)
+        return text
+    except Exception as exc:
+        _logger.warning("Profile OCR line failed: %s", exc)
+        return ""
+
+
+def _ocr_text_email(crop: Optional[np.ndarray]) -> str:
+    """邮箱行：优先 det+rec（保留 @），失败再 rec-only。"""
+    if crop is None or crop.size == 0:
+        return ""
+    try:
+        text, _ = recognize_region(crop)
         if text:
             return text
-        return _ocr_read_best(reader, crop, paragraph=False)
+        text, _ = recognize_line(crop)
+        return text
     except Exception as exc:
-        _logger.warning("Profile OCR failed: %s", exc)
+        _logger.warning("Profile OCR email failed: %s", exc)
         return ""
 
 
@@ -290,7 +231,7 @@ def _crop_region(image: np.ndarray, left: int, top: int, right: int, bottom: int
     return image[y1:y2, x1:x2]
 
 
-# 场景 203 Xbox 主页左上角（960×540）：显示名 + 邮箱分两行（略放大裁剪区）
+# 场景 203 Xbox 主页左上角（960×540）：显示名 + 邮箱分两行
 HOME203_NAME_LEFT = 32
 HOME203_NAME_TOP = 14
 HOME203_NAME_RIGHT = 280
@@ -299,7 +240,6 @@ HOME203_EMAIL_LEFT = 32
 HOME203_EMAIL_TOP = 44
 HOME203_EMAIL_RIGHT = 400
 HOME203_EMAIL_BOTTOM = 82
-# 兼容旧逻辑的单行区域
 HOME203_PROFILE_LEFT = HOME203_NAME_LEFT
 HOME203_PROFILE_TOP = HOME203_NAME_TOP
 HOME203_PROFILE_RIGHT = HOME203_NAME_RIGHT
@@ -329,8 +269,8 @@ def read_home_profile_identity(image: Any) -> HomeProfileIdentity:
         HOME203_EMAIL_RIGHT,
         HOME203_EMAIL_BOTTOM,
     )
-    display_name = _ocr_text(name_crop)
-    email_text = _ocr_text(email_crop)
+    display_name = _ocr_text_line(name_crop)
+    email_text = _ocr_text_email(email_crop)
 
     if not display_name and not email_text:
         combined_crop = _crop_region(
@@ -340,7 +280,7 @@ def read_home_profile_identity(image: Any) -> HomeProfileIdentity:
             HOME203_EMAIL_RIGHT,
             HOME203_EMAIL_BOTTOM,
         )
-        combined = _ocr_text(combined_crop)
+        combined = _ocr_text_email(combined_crop)
         if "@" in combined:
             local, _, domain = combined.partition("@")
             display_name = local.strip()
@@ -373,11 +313,11 @@ def read_focused_gamertag(image: Any) -> str:
 
     row_y = detect_focused_row_y(image)
     crop = _crop_focused_text(image, row_y)
-    return _ocr_text(crop)
+    return _ocr_text_line(crop)
 
 
 def read_list_gamertags(image: Any) -> List[str]:
-    """OCR 左侧列表全部可见 Gamertag（兜底）。"""
+    """OCR 左侧列表全部可见 Gamertag（det+rec 兜底）。"""
     if image is None:
         return []
     if hasattr(image, "data"):
@@ -396,20 +336,7 @@ def read_list_gamertags(image: Any) -> List[str]:
         return []
 
     try:
-        reader = _get_ocr_reader()
-        lines: List[str] = []
-        for variant in _prepare_ocr_variants(crop):
-            try:
-                results = reader.readtext(variant, detail=1, paragraph=False)
-            except Exception:
-                continue
-            for item in results:
-                if len(item) < 3:
-                    continue
-                text = str(item[1]).strip()
-                conf = float(item[2])
-                if text and conf >= 0.12 and text not in lines:
-                    lines.append(text)
+        lines, _ = recognize_region_lines(crop)
         return lines
     except Exception as exc:
         _logger.warning("Profile list OCR failed: %s", exc)
