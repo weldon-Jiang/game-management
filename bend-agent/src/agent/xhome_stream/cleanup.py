@@ -19,11 +19,21 @@ async def close_media_context(context: Any, logger=None) -> None:
         log.debug("stop input pump: %s", exc)
 
     try:
-        from ..automation.step3_streaming_init import _stop_sdl_display_pump
+        from ..automation.step3_display_helpers import _stop_sdl_display_pump
 
         await _stop_sdl_display_pump(context)
     except Exception as exc:
         log.debug("stop sdl display pump: %s", exc)
+
+    try:
+        from ..runtime.stream_runtime import get_or_create_stream_runtime
+
+        runtime = getattr(context, "_stream_runtime", None)
+        if runtime is not None:
+            await runtime.stop_long_lived()
+            context._stream_runtime = None
+    except Exception as exc:
+        log.debug("stop stream runtime: %s", exc)
 
     sdl = getattr(context, "sdl_window", None)
     if sdl:
@@ -72,6 +82,15 @@ async def close_media_context(context: Any, logger=None) -> None:
         except Exception as exc:
             log.debug("disconnect xbox session: %s", exc)
     context.xbox_session = None
+
+    stack = getattr(context, "_streaming_stack", "")
+    if stack == "xsrp":
+        try:
+            from ..xbox.xsrp_cleanup import cleanup_xsrp_stream_context
+
+            await cleanup_xsrp_stream_context(context, log)
+        except Exception as exc:
+            log.debug("xsrp stream cleanup: %s", exc)
 
     try:
         from ..xbox.console_lease import release_xbox_host

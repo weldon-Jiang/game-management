@@ -1,12 +1,14 @@
 package com.bend.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.TaskPageRequest;
 import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.Task;
 import com.bend.platform.entity.TaskGameAccountStatus;
+import com.bend.platform.entity.XboxHost;
 import com.bend.platform.enums.AccountStatusEnum;
 import com.bend.platform.enums.TaskStatus;
 import com.bend.platform.exception.BusinessException;
@@ -17,6 +19,8 @@ import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.StreamingAccountService;
+import com.bend.platform.service.StreamingSessionService;
+import com.bend.platform.service.StreamLeaseService;
 import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.service.TaskService;
 import com.bend.platform.service.TaskStateMachine;
@@ -31,10 +35,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -65,6 +71,10 @@ public class TaskServiceImpl implements TaskService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    /** 任务列表分页：执行中 → 已暂停 → 待执行 → 其余；同组内 updated_time 倒序（复用任务以最近活跃为准） */
+    private static final String TASK_LIST_STATUS_ORDER =
+            "CASE status WHEN 'running' THEN 0 WHEN 'paused' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END ASC, updated_time DESC";
+
     private final TaskMapper taskMapper;
     private final TaskStateMachine stateMachine;
     private final DataSecurityUtil dataSecurityUtil;
@@ -85,6 +95,12 @@ public class TaskServiceImpl implements TaskService {
 
     @Autowired
     private MerchantService merchantService;
+
+    @Autowired
+    private StreamingSessionService streamingSessionService;
+
+    @Autowired(required = false)
+    private StreamLeaseService streamLeaseService;
 
     /**
      * 创建任务
@@ -131,9 +147,12 @@ public class TaskServiceImpl implements TaskService {
         }
 
         taskMapper.insert(task);
+        // insert 后内存实体未必回填 @Version，后续 updateById 会把 version 写成 null 触发约束错误
+        Task persisted = taskMapper.selectById(task.getId());
+        Task result = persisted != null ? persisted : task;
         log.info("创建任务 - ID: {}, 名称: {}, 类型: {}, 商户: {}, 窗口显示: {}",
-                 task.getId(), task.getName(), task.getType(), merchantId, task.getEnableWindowDisplay());
-        return task;
+                 result.getId(), result.getName(), result.getType(), merchantId, result.getEnableWindowDisplay());
+        return result;
     }
 
     /**
@@ -233,6 +252,8 @@ public class TaskServiceImpl implements TaskService {
      *
      * 返回值：
      * - 分页结果（包含数据列表和分页信息）
+     *
+     * 默认排序：执行中 → 已暂停 → 待执行 → 其余状态；同优先级内按最近更新时间倒序。
      */
     @Override
     public IPage<Task> findPage(TaskPageRequest request) {
@@ -262,7 +283,10 @@ public class TaskServiceImpl implements TaskService {
         if (StringUtils.hasText(request.getStreamingAccountId())) {
             wrapper.eq(Task::getStreamingAccountId, request.getStreamingAccountId());
         }
-        wrapper.orderByDesc(Task::getCreatedTime);
+        if (Boolean.TRUE.equals(request.getActiveToday())) {
+            wrapper.ge(Task::getUpdatedTime, LocalDate.now().atStartOfDay());
+        }
+        wrapper.last("ORDER BY " + TASK_LIST_STATUS_ORDER);
         Page<Task> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         IPage<Task> result = taskMapper.selectPage(page, wrapper);
         populateTaskDisplayFields(result.getRecords());
@@ -583,6 +607,7 @@ public class TaskServiceImpl implements TaskService {
                     gameAccountService.updateAgentId(ga.getId(), null);
                 }
             }
+            releaseTaskHostLease(task);
         } else if ("running".equals(task.getStatus())) {
             String targetAgentId = task.getTargetAgentId();
             if (targetAgentId != null) {
@@ -608,6 +633,7 @@ public class TaskServiceImpl implements TaskService {
                     gameAccountService.updateAgentId(ga.getId(), null);
                 }
             }
+            releaseTaskHostLease(task);
         } else {
             throw new BusinessException(ResultCode.Task.INVALID_STATUS, "当前状态不允许取消");
         }
@@ -641,9 +667,10 @@ public class TaskServiceImpl implements TaskService {
         }
 
         task.setStatus("pending");
-        task.setErrorMessage(null);
         task.setRetryCount(0);
+        task.setErrorMessage(null);
         taskMapper.updateById(task);
+        clearErrorMessage(taskId);
 
         log.info("任务已重置为待执行 - TaskID: {}", taskId);
         return task;
@@ -805,6 +832,7 @@ public class TaskServiceImpl implements TaskService {
 
         for (Task task : runningTasks) {
             task.setStatus("cancelled");
+            task.setSessionPhase("closed");
             task.setErrorMessage("被管理员停止");
             task.setCompletedTime(LocalDateTime.now());
             taskMapper.updateById(task);
@@ -812,6 +840,13 @@ public class TaskServiceImpl implements TaskService {
 
             taskGameAccountStatusService.cancelByTaskId(task.getId());
             log.info("取消任务子任务状态 - TaskID: {}", task.getId());
+        }
+
+        if (!runningTasks.isEmpty()) {
+            streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
+            streamingAccountService.updateAgentId(streamingAccountId, null);
+            gameAccountService.clearAgentIdByStreamingId(streamingAccountId);
+            log.info("取消流媒体账号任务后已释放串流/游戏账号占用 - StreamingAccountID: {}", streamingAccountId);
         }
     }
 
@@ -911,13 +946,18 @@ public class TaskServiceImpl implements TaskService {
         List<Task> runningTasks = taskMapper.selectList(wrapper);
 
         for (Task task : runningTasks) {
-            stateMachine.validateTransition(task, TaskStatus.PENDING);
-            task.setStatus("pending");
-            task.setTargetAgentId(null);
-            task.setAssignedTime(null);
-            task.setErrorMessage("Agent离线，任务自动重置");
+            if (!stateMachine.canTransition(task, TaskStatus.CANCELLED)) {
+                log.warn("Agent离线：任务无法转为 cancelled，跳过 - taskId: {}, status: {}",
+                        task.getId(), task.getStatus());
+                continue;
+            }
+            task.setStatus(TaskStatus.CANCELLED.getCode());
+            task.setSessionPhase("closed");
+            task.setCompletedTime(LocalDateTime.now());
+            // 保留 targetAgentId，任务列表按 Agent 筛选时仍能看到历史终态任务
+            task.setErrorMessage("Agent离线，任务已取消");
             taskMapper.updateById(task);
-            log.warn("任务因Agent离线被重置 - taskId: {}, agentId: {}", task.getId(), agentId);
+            log.warn("任务因Agent离线被取消 - taskId: {}, agentId: {}", task.getId(), agentId);
 
             // 重置流媒体账号状态
             String streamingAccountId = task.getStreamingAccountId();
@@ -953,12 +993,18 @@ public class TaskServiceImpl implements TaskService {
         log.info("更新任务状态 - TaskID: {}, Status: {}", taskId, status);
     }
 
+    /** Agent 离线/重启时需清理的活跃任务状态（不含已终态 cancelled/failed/stopped）。 */
+    private static final Set<String> AGENT_RESTART_ACTIVE_STATUSES = Set.of(
+            TaskStatus.PENDING.getCode(),
+            TaskStatus.RUNNING.getCode()
+    );
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void cleanupIncompleteTasksAndRestoreAccounts(String agentId) {
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Task::getTargetAgentId, agentId)
-               .ne(Task::getStatus, "completed")
+               .in(Task::getStatus, AGENT_RESTART_ACTIVE_STATUSES)
                .eq(Task::getDeleted, false);
         List<Task> incompleteTasks = taskMapper.selectList(wrapper);
 
@@ -970,37 +1016,121 @@ public class TaskServiceImpl implements TaskService {
         log.info("Agent {} 上线，开始清理 {} 个未完成任务", agentId, incompleteTasks.size());
 
         for (Task task : incompleteTasks) {
-            task.setStatus("failed");
-            task.setErrorMessage("Agent重新上线，任务已清理");
-            task.setCompletedTime(LocalDateTime.now());
-            taskMapper.updateById(task);
-            log.info("清理任务 - TaskID: {}, 原状态: {}", task.getId(), task.getStatus());
-
-            LambdaQueryWrapper<TaskGameAccountStatus> statusWrapper = new LambdaQueryWrapper<>();
-            statusWrapper.eq(TaskGameAccountStatus::getTaskId, task.getId());
-            List<TaskGameAccountStatus> taskStatusList = taskGameAccountStatusMapper.selectList(statusWrapper);
-            for (TaskGameAccountStatus taskStatus : taskStatusList) {
-                taskStatus.setStatus("failed");
-                taskStatus.setErrorMessage("Agent重新上线，任务已清理");
-                taskGameAccountStatusMapper.updateById(taskStatus);
-            }
-
-            String streamingAccountId = task.getStreamingAccountId();
-            if (streamingAccountId != null) {
-                streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
-                streamingAccountService.updateAgentId(streamingAccountId, null);
-
-                List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-                for (GameAccount ga : gameAccounts) {
-                    gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
-                    gameAccountService.updateAgentId(ga.getId(), null);
-                }
-
-                log.info("Agent上线 - 已还原流媒体账号和游戏账号状态 - StreamingAccountID: {}", streamingAccountId);
-            }
+            cleanupSingleTaskAsAgentRestart(task);
         }
 
         log.info("Agent {} 上线，已清理 {} 个未完成任务并还原账号状态", agentId, incompleteTasks.size());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void failOrphanTaskOnAgent(String agentId, String taskId) {
+        if (!StringUtils.hasText(agentId) || !StringUtils.hasText(taskId)) {
+            return;
+        }
+        Task task = taskMapper.selectById(taskId);
+        if (task == null || Boolean.TRUE.equals(task.getDeleted())) {
+            return;
+        }
+        if (!agentId.equals(task.getTargetAgentId())) {
+            log.warn("孤儿任务清理跳过：Agent 不匹配 - taskId: {}, agentId: {}", taskId, agentId);
+            return;
+        }
+        if (!AGENT_RESTART_ACTIVE_STATUSES.contains(task.getStatus())) {
+            return;
+        }
+        log.warn("Agent 无内存任务，清理孤儿任务 - AgentID: {}, TaskID: {}", agentId, taskId);
+        cleanupSingleTaskAsAgentRestart(task);
+    }
+
+    /**
+     * 将单条活跃串流任务标记为失败，关闭会话并还原流媒体/游戏账号占用。
+     */
+    private void cleanupSingleTaskAsAgentRestart(Task task) {
+        if (!stateMachine.canTransition(task, TaskStatus.FAILED)) {
+            log.warn("Agent上线清理：任务状态无法转为 failed - taskId: {}, status: {}",
+                    task.getId(), task.getStatus());
+            return;
+        }
+        String originalStatus = task.getStatus();
+        task.setStatus(TaskStatus.FAILED.getCode());
+        task.setSessionPhase("closed");
+        task.setErrorMessage("Agent重新上线，任务已清理");
+        task.setCompletedTime(LocalDateTime.now());
+        taskMapper.updateById(task);
+        log.info("清理任务 - TaskID: {}, 原状态: {}", task.getId(), originalStatus);
+
+        var session = streamingSessionService.findByTaskId(task.getId());
+        if (session != null) {
+            streamingSessionService.closeSession(session.getId(), "agent_reconnect_cleanup");
+        }
+
+        LambdaQueryWrapper<TaskGameAccountStatus> statusWrapper = new LambdaQueryWrapper<>();
+        statusWrapper.eq(TaskGameAccountStatus::getTaskId, task.getId());
+        List<TaskGameAccountStatus> taskStatusList = taskGameAccountStatusMapper.selectList(statusWrapper);
+        for (TaskGameAccountStatus taskStatus : taskStatusList) {
+            taskStatus.setStatus("failed");
+            taskStatus.setErrorMessage("Agent重新上线，任务已清理");
+            taskGameAccountStatusMapper.updateById(taskStatus);
+        }
+
+        String streamingAccountId = task.getStreamingAccountId();
+        if (streamingAccountId != null) {
+            streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
+            streamingAccountService.updateAgentId(streamingAccountId, null);
+
+            List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
+            for (GameAccount ga : gameAccounts) {
+                gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
+                gameAccountService.updateAgentId(ga.getId(), null);
+            }
+
+            log.info("Agent上线 - 已还原流媒体账号和游戏账号状态 - StreamingAccountID: {}", streamingAccountId);
+        }
+        releaseTaskHostLease(task);
+    }
+
+    /** 释放任务持有的 Xbox Redis 租约与 DB 锁（取消/清理/失败时调用）。 */
+    private void releaseTaskHostLease(Task task) {
+        if (task == null || !StringUtils.hasText(task.getXboxHostId())) {
+            return;
+        }
+        try {
+            XboxHost host = xboxHostService.findById(task.getXboxHostId());
+            if (host == null) {
+                return;
+            }
+            if (streamLeaseService != null
+                    && StringUtils.hasText(host.getMerchantId())
+                    && StringUtils.hasText(host.getXboxId())
+                    && StringUtils.hasText(task.getTargetAgentId())) {
+                streamLeaseService.release(
+                        host.getMerchantId(),
+                        host.getXboxId(),
+                        task.getTargetAgentId(),
+                        task.getId());
+            }
+            if (StringUtils.hasText(host.getMerchantId())) {
+                xboxHostService.unlock(
+                        host.getMerchantId(),
+                        host.getId(),
+                        task.getTargetAgentId(),
+                        task.getId());
+            }
+        } catch (Exception e) {
+            log.warn("释放任务主机租约失败 - TaskID: {}", task.getId(), e);
+        }
+    }
+
+    @Override
+    public void clearErrorMessage(String taskId) {
+        if (!StringUtils.hasText(taskId)) {
+            return;
+        }
+        // 使用字符串列名而非 Lambda，避免单测环境缺少 MyBatis-Plus 元数据缓存
+        UpdateWrapper<Task> wrapper = new UpdateWrapper<>();
+        wrapper.eq("id", taskId).set("error_message", null);
+        taskMapper.update(null, wrapper);
     }
 
     @Override

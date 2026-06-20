@@ -5,6 +5,7 @@ import com.bend.platform.dto.XboxHostPageRequest;
 import com.bend.platform.entity.XboxHost;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Xbox主机服务接口
@@ -40,6 +41,26 @@ public interface XboxHostService {
      * 按商户 + GSSV serverId 查询主机（商户隔离）。
      */
     XboxHost findByMerchantIdAndXboxId(String merchantId, String xboxId);
+
+    /**
+     * 按设备身份多键解析主机（xboxId 别名、IP、liveId、MAC）。
+     */
+    XboxHost findByMerchantIdAndDeviceIdentity(
+            String merchantId,
+            String xboxId,
+            String ipAddress,
+            String liveId,
+            String macAddress);
+
+    /**
+     * 将重复主机合并到 canonical，迁移绑定与任务引用后删除 duplicate。
+     */
+    XboxHost mergeDuplicateHost(String canonicalHostId, String duplicateHostId);
+
+    /**
+     * 扫描并合并商户下可识别的重复主机。
+     */
+    List<Map<String, Object>> dedupeForMerchant(String merchantId);
 
     /**
      * 分页查询商户下的Xbox主机

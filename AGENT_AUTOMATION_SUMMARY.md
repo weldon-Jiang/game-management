@@ -1,3 +1,5 @@
+> **架构勘误（2026-06-13）**：生产 Step2–3 为 **xblive/xsrp（GSSV 云端 + WebRTC）**，入口见 `bend-agent/src/agent/automation/step2_xsrp.py`、`step3_xsrp.py`。下文 SmartGlass LAN、`step2_xbox_streaming.py` 等为**历史方案**；SmartGlass UDP 仅作 LAN 发现/唤醒兜底。详见 [00_架构勘误_xsrp_step2.md](.trae/documents/00_架构勘误_xsrp_step2.md)。
+
 # Agent 自动化模块 - 完整成果总结
 
 ## 📋 项目概述
@@ -31,29 +33,21 @@
   - 任务状态查询
   - 任务结果获取
 
-#### 3. 四个自动化步骤
-**文件**: `bend-agent/src/agent/automation/step1_stream_account_login.py`
-- ✅ 步骤一：串流账号自动登录
-  - 复用 MicrosoftAuthenticator
-  - Token 获取和管理
+#### 3. 四个自动化步骤（当前生产路径，2026-06-13）
 
-**文件**: `bend-agent/src/agent/automation/step2_xbox_streaming.py`
-- ✅ 步骤二：Xbox 串流连接
-  - Xbox 发现
-  - 主机匹配
-  - 连接建立
+**Step1** — `bend-agent/src/agent/automation/step1_xblive_login.py`（`auth/step1_router`）
+- xblive 认证 + GSSV/Xbox Token
 
-**文件**: `bend-agent/src/agent/automation/step3_gpu_decode.py`
-- ✅ 步骤三：显卡解码流转
-  - 窗口捕获
-  - 视频流处理
+**Step2** — `bend-agent/src/agent/automation/step2_xsrp.py` → `xbox/step2_xsrp_connect.py`
+- GSSV 云端发现 + play/WebRTC 握手（对齐 streaming OpenStreaming）
 
-**文件**: `bend-agent/src/agent/automation/step4_game_automation.py`
-- ✅ 步骤四：自动游戏比赛
-  - 游戏账号切换
-  - 比赛场次追踪
-  - 实时进度上报
-  - 支持暂停/恢复
+**Step3** — `bend-agent/src/agent/automation/step3_xsrp.py`（`auth/step3_router`）
+- WebRTC 帧捕获 + SDL 窗口 + DataChannel 输入
+
+**Step4** — `bend-agent/src/agent/automation/step4_game_automation.py`
+- 游戏自动化（`game_action_type` 仅 Step4 生效）
+
+> 历史文档中的 `step1_stream_account_login.py`、`step3_gpu_decode.py`、`step2_xbox_streaming.py` 已非热路径。
 
 #### 4. 平台 API 客户端
 **文件**: `bend-agent/src/agent/automation/platform_api_client.py`
@@ -343,9 +337,9 @@ bend-agent/src/agent/automation/
 ├── __init__.py
 ├── task_context.py
 ├── task_window_manager.py
-├── step1_stream_account_login.py
-├── step2_xbox_streaming.py
-├── step3_gpu_decode.py
+├── step1_xblive_login.py
+├── step2_xsrp.py / step2_router.py
+├── step3_xsrp.py
 ├── step4_game_automation.py
 ├── platform_api_client.py
 ├── automation_task.py

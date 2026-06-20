@@ -22,16 +22,9 @@
     <template v-else-if="isPaused">
       <el-button type="primary" @click="$emit('resume')">继续</el-button>
     </template>
-    <template v-else-if="isAutomating">
-      <el-dropdown @command="(cmd) => $emit('pause', cmd)">
-        <el-button type="warning">立即暂停</el-button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="immediate">立即暂停</el-dropdown-item>
-            <el-dropdown-item command="after_match">完成本场后暂停</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
+    <template v-else-if="canPauseAutomation">
+      <el-button type="warning" @click="$emit('pause', 'immediate')">立即暂停</el-button>
+      <el-button type="warning" plain @click="$emit('pause', 'after_match')">完成本场后暂停</el-button>
     </template>
 
     <el-button
@@ -64,7 +57,7 @@
 
 <script setup>
 /**
- * 任务控制条：pause/resume/cancel/terminate、窗口 show/hide/focus、重连串流、启动 Step4。
+ * 任务控制条：pause/resume/cancel（仅 pending）/terminate（running+）、窗口、重连、启动 Step4。
  * 按钮可见性由 taskStatus + sessionPhase 联合判定（见下方 computed 注释）。
  */
 import { computed, ref } from 'vue'
@@ -84,27 +77,31 @@ const selectedMode = ref('squad_battle')
 
 const isTerminal = computed(() => isTaskTerminal(props.taskStatus))
 
-// READY 和 AUTOMATION_FAILED 都保留串流窗口，可在不重跑 Step1-3 的情况下启动或重试 Step4。
+// 与后端 startAutomation 一致：仅 ready / automation_failed 允许启动 Step4。
 const canStartAutomation = computed(
   () =>
     !isTerminal.value &&
-    (props.gameActionPending ||
-      props.sessionPhase === 'ready' ||
-      props.sessionPhase === 'automation_failed')
+    (props.sessionPhase === 'ready' || props.sessionPhase === 'automation_failed')
 )
 const isPaused = computed(
   () => !isTerminal.value && (props.sessionPhase?.startsWith('paused') || props.pauseMode)
 )
-const isAutomating = computed(
-  () => !isTerminal.value && props.sessionPhase === 'automating'
-)
+/**
+ * 模式已锁定且任务运行中即展示暂停控制（不依赖 sessionPhase === 'automating'）。
+ * Agent 上报 input_reconnecting 等子 phase 时会覆盖 automating，但仍应可暂停。
+ */
+const canPauseAutomation = computed(() => {
+  if (isTerminal.value || isPaused.value || canStartAutomation.value) return false
+  if (!props.gameActionType || props.gameActionPending) return false
+  return props.taskStatus === 'running'
+})
 
-// cancel 保留“按任务语义取消”，terminate 是强制终止；终态任务不再显示控制入口。
-const canCancel = computed(
-  () => props.taskStatus === 'pending' || props.taskStatus === 'running'
-)
+// pending 仅「取消」；running 及后续串流阶段仅「终止」，避免两按钮同效造成误解。
+const canCancel = computed(() => props.taskStatus === 'pending')
 
-const canTerminate = computed(() => !isTerminal.value)
+const canTerminate = computed(
+  () => !isTerminal.value && props.taskStatus !== 'pending'
+)
 
 const canShowWindow = computed(() => {
   if (isTerminal.value) return false
@@ -119,7 +116,7 @@ const canReconnect = computed(() => {
   // 只在已有串流或显示初始化上下文时允许重连，避免对未建立会话的任务下发无效控制。
   return ['streaming', 'ready', 'automating', 'automation_failed', 'initializing_display', 'initializing_input'].some(
     (p) => phase.includes(p)
-  ) || phase.startsWith('paused')
+  ) || phase.startsWith('paused') || phase.startsWith('input_')
 })
 
 const gameActionLabel = computed(() => getGameActionTypeText(props.gameActionType))

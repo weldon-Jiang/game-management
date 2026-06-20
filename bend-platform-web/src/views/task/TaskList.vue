@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="header-left">
         <h2>任务管理</h2>
-        <span class="header-desc">查看自动化任务执行情况</span>
+        <span class="header-desc">查看自动化任务执行情况；复用任务以最近活跃时间为准</span>
       </div>
     </div>
 
@@ -73,6 +73,9 @@
           <el-option label="已取消" value="cancelled" />
           <el-option label="已停止" value="stopped" />
         </el-select>
+        <el-checkbox v-model="filterActiveToday" @change="handleSearch">
+          今日活跃
+        </el-checkbox>
         <el-button @click="handleSearch">
           <el-icon><Refresh /></el-icon>
         </el-button>
@@ -98,14 +101,14 @@
         <el-table-column prop="name" label="任务名称" min-width="120" show-overflow-tooltip />
         <el-table-column prop="status" label="状态" width="88" align="center">
           <template #default="{ row }">
-            <el-tag :type="getTaskStatusType(row.status)" size="small">
-              {{ getTaskStatusText(row.status) }}
+            <el-tag :type="getTaskStatusType(getEffectiveTaskStatus(row))" size="small">
+              {{ getTaskStatusText(getEffectiveTaskStatus(row)) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="gameActionType" label="游戏操作" width="96" align="center" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag v-if="row.gameActionType" size="small" type="info">
+            <el-tag v-if="row.gameActionType && !row.gameActionPending" size="small" type="info">
               {{ getGameActionTypeText(row.gameActionType) }}
             </el-tag>
             <span v-else class="text-muted">-</span>
@@ -135,13 +138,27 @@
         </el-table-column>
         <el-table-column prop="errorMessage" label="错误信息" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">
-            <span v-if="row.errorMessage" class="text-danger">{{ row.errorMessage }}</span>
+            <span v-if="shouldShowTaskErrorMessage(row)" class="text-danger">{{ row.errorMessage }}</span>
+            <span v-else-if="row.status === 'running' || row.status === 'paused'">
+              {{ row.progressMessage || '-' }}
+            </span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdTime" label="创建时间" width="168" show-overflow-tooltip>
+        <el-table-column prop="createdTime" label="创建时间" width="148" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.createdTime ? formatDate(row.createdTime) : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="updatedTime" label="最近活跃" width="168" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.updatedTime" class="active-time-cell">
+              <el-tag v-if="isToday(row.updatedTime)" size="small" type="success" class="today-tag">
+                今日
+              </el-tag>
+              {{ formatDate(row.updatedTime) }}
+            </span>
+            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
@@ -168,13 +185,22 @@
               重试
             </el-button>
             <el-button
-              v-if="row.status === 'running' || row.status === 'pending'"
+              v-if="row.status === 'pending'"
               type="danger"
               link
               size="small"
               @click="handleCancel(row)"
             >
               取消
+            </el-button>
+            <el-button
+              v-if="row.status === 'running'"
+              type="danger"
+              link
+              size="small"
+              @click="handleTerminate(row)"
+            >
+              终止
             </el-button>
             <el-button
               v-if="row.status === 'running' && row.targetAgentId"
@@ -302,12 +328,19 @@ import { taskApi, agentApi, streamingApi, merchantApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import {
   getAgentDisplayName,
+  getEffectiveTaskStatus,
   getTaskStatusText,
   getTaskStatusType,
   getGameActionTypeText,
   getSessionPhaseText,
-  getSessionPhaseType
+  getSessionPhaseType,
+  shouldShowTaskErrorMessage
 } from '@/utils/constants'
+import {
+  confirmCancelPendingTask,
+  confirmTerminateStreamingTask,
+  isConfirmDismissed
+} from '@/utils/taskControlConfirm'
 
 const router = useRouter()
 const route = useRoute()
@@ -323,6 +356,7 @@ const filterMerchantId = ref('')
 const filterAgentId = ref('')
 const filterStreamingAccountId = ref('')
 const filterStatus = ref('')
+const filterActiveToday = ref(true)
 const loading = ref(false)
 const tableData = ref([])
 const onlineAgents = ref([])
@@ -361,6 +395,18 @@ const formatDate = (dateStr) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+/** 判断时间戳是否为本地当天（用于「今日活跃」高亮） */
+const isToday = (dateStr) => {
+  if (!dateStr) return false
+  const date = new Date(dateStr)
+  const now = new Date()
+  return (
+    date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate()
+  )
 }
 
 const formatAgentLabel = (agent) => getAgentDisplayName(agent)
@@ -415,6 +461,9 @@ const loadData = async () => {
     }
     if (filterStreamingAccountId.value) {
       params.streamingAccountId = filterStreamingAccountId.value
+    }
+    if (filterActiveToday.value) {
+      params.activeToday = true
     }
     const res = await taskApi.list(params)
     if (res.code === 0 || res.code === 200) {
@@ -540,16 +589,9 @@ const applyDefaultAgentFilter = () => {
     return
   }
   const saved = localStorage.getItem(TASK_LIST_AGENT_KEY)
-  // 记住上次使用的 Agent，便于运维反复观察同一台 Agent 的任务列表。
+  // 仅恢复用户上次手动选择的 Agent；不再默认选中在线 Agent，避免终态任务 targetAgentId 为空时被误过滤。
   if (saved && agentOptions.value.some((agent) => agent.agentId === saved)) {
     filterAgentId.value = saved
-    return
-  }
-  const online = onlineAgents.value.find((agent) => agent.status === 'online')
-  if (online) {
-    filterAgentId.value = online.agentId
-  } else if (agentOptions.value.length) {
-    filterAgentId.value = agentOptions.value[0].agentId
   }
 }
 
@@ -651,10 +693,8 @@ const handleRetry = async (task) => {
 
 const handleCancel = async (task) => {
   try {
-    // 运行中任务走 terminate（TaskControl 控制面）；pending 仍可用 cancel 语义。
-    const res = task.status === 'pending'
-      ? await taskApi.cancel(task.id)
-      : await taskApi.terminate(task.id)
+    await confirmCancelPendingTask()
+    const res = await taskApi.cancel(task.id)
     if (res.code === 0 || res.code === 200) {
       ElMessage.success('任务已取消')
       loadData()
@@ -662,7 +702,26 @@ const handleCancel = async (task) => {
       ElMessage.error(res.message || '取消失败')
     }
   } catch (error) {
-    ElMessage.error('取消失败')
+    if (!isConfirmDismissed(error)) {
+      ElMessage.error('取消失败')
+    }
+  }
+}
+
+const handleTerminate = async (task) => {
+  try {
+    await confirmTerminateStreamingTask()
+    const res = await taskApi.terminate(task.id)
+    if (res.code === 0 || res.code === 200) {
+      ElMessage.success('任务已终止')
+      loadData()
+    } else {
+      ElMessage.error(res.message || '终止失败')
+    }
+  } catch (error) {
+    if (!isConfirmDismissed(error)) {
+      ElMessage.error('终止失败')
+    }
   }
 }
 
@@ -782,6 +841,16 @@ onMounted(async () => {
 :deep(.el-table td.el-table__cell) {
   font-size: 13px;
   padding: 14px 0;
+}
+
+.active-time-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.today-tag {
+  flex-shrink: 0;
 }
 
 .text-muted {

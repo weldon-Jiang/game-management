@@ -1,3 +1,5 @@
+> **架构勘误（2026-06-13）**：生产 Step2–3 为 **xblive/xsrp（GSSV 云端 + WebRTC）**，入口见 `bend-agent/src/agent/automation/step2_xsrp.py`、`step3_xsrp.py`。下文 SmartGlass LAN、`step2_xbox_streaming.py` 等为**历史方案**；SmartGlass UDP 仅作 LAN 发现/唤醒兜底。详见 [00_架构勘误_xsrp_step2.md](./00_架构勘误_xsrp_step2.md)。
+
 # Agent 性能优化计划报告
 
 **版本**: 1.0
@@ -286,7 +288,7 @@ class VideoFrameCapture:
 | 2026-05-30 | 创建GPUDecoder类 | ✅ 完成 | - |
 | 2026-05-30 | 创建GPUFrameCapture类 | ✅ 完成 | - |
 | 2026-05-30 | 更新VideoFrameCapture集成GPU | ✅ 完成 | - |
-| 2026-05-30 | 更新step2_xbox_streaming.py | ✅ 完成 | - |
+| 2026-05-30 | 更新step2_xsrp.py | ✅ 完成 | - |
 | 2026-05-30 | 添加依赖项 | ✅ 完成 | - |
 
 ---
@@ -500,7 +502,7 @@ class StreamWindow:
 | --- | --- | --- | --- |
 | 2026-05-30 | 创建SDLStreamWindow类 | ✅ 完成 | - |
 | 2026-05-30 | 创建SDLFrameCapture类 | ✅ 完成 | - |
-| 2026-05-30 | 更新step3_streaming_init.py | ✅ 完成 | - |
+| 2026-05-30 | 更新step3_xsrp.py | ✅ 完成 | - |
 | 2026-05-30 | 更新windows/__init__.py | ✅ 完成 | - |
 
 ---
@@ -798,7 +800,7 @@ class OptimizedSceneDetector:
 1. 创建 `src/agent/vision/gpu_decoder.py`
 2. 创建 `src/agent/vision/gpu_frame_capture.py`
 3. 更新 `src/agent/vision/frame_capture.py` 集成GPU捕获
-4. 更新 `src/agent/automation/step2_xbox_streaming.py` 使用GPU解码
+4. 更新 `src/agent/automation/step2_xsrp.py` 使用GPU解码
 5. 添加依赖项到 `requirements.txt`
 6. 编写测试用例
 7. 性能基准测试

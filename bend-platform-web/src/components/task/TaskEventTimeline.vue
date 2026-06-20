@@ -5,9 +5,9 @@
       <span v-if="events.length" class="panel-count">{{ events.length }} 条</span>
     </div>
     <div ref="scrollRef" class="panel-body">
-      <el-timeline v-if="events.length">
+      <el-timeline v-if="sortedEvents.length">
         <el-timeline-item
-          v-for="ev in events"
+          v-for="ev in sortedEvents"
           :key="ev.id"
           :timestamp="formatTime(ev.createdTime)"
           placement="top"
@@ -15,8 +15,12 @@
         >
           <div class="entry-row">
             <span class="scope-tag">{{ scopeLabel(ev.scope) }}</span>
+            <span v-if="accountLabel(ev)" class="account-tag">{{ accountLabel(ev) }}</span>
             <span v-if="ev.phase" class="phase">{{ phaseLabel(ev.phase, ev.scope) }}</span>
             <span class="msg">{{ displayMessage(ev) }}</span>
+          </div>
+          <div v-if="hostAttemptsHint(ev)" class="host-attempts-hint">
+            {{ hostAttemptsHint(ev) }}
           </div>
         </el-timeline-item>
       </el-timeline>
@@ -29,23 +33,37 @@
 /**
  * 任务事件时间线：展示 task_event 流水，scope/phase 映射为中文标签。
  */
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import {
   getSessionPhaseText,
   getTaskStatusText,
   getGameAccountRunStatusText,
   getTaskEventScopeText,
   getTaskEventPhaseText,
-  getTaskEventMessageText
+  getTaskEventMessageText,
+  formatHostAttemptsSummary,
+  resolveTaskEventAccountLabel
 } from '@/utils/constants'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
+  /** gameAccountId → gamertag，来自任务详情 gameAccountStatuses */
+  accountNameMap: { type: Object, default: () => ({}) },
   /** 嵌入任务详情侧栏时为 true，取消右下角悬浮 */
   embedded: { type: Boolean, default: false }
 })
 
 const scrollRef = ref(null)
+
+/** 远→近：最早在上、最新在下（API 默认 desc，此处统一升序展示） */
+const sortedEvents = computed(() =>
+  [...props.events].sort((a, b) => {
+    const ta = a.createdTime ? new Date(a.createdTime).getTime() : 0
+    const tb = b.createdTime ? new Date(b.createdTime).getTime() : 0
+    if (ta !== tb) return ta - tb
+    return String(a.id || '').localeCompare(String(b.id || ''))
+  })
+)
 
 const formatTime = (t) => {
   if (!t) return ''
@@ -53,6 +71,8 @@ const formatTime = (t) => {
 }
 
 const scopeLabel = (scope) => getTaskEventScopeText(scope)
+
+const accountLabel = (ev) => resolveTaskEventAccountLabel(ev, props.accountNameMap)
 
 const phaseLabel = (phase, scope) => getTaskEventPhaseText(phase, scope)
 
@@ -68,30 +88,25 @@ const displayMessage = (ev) => {
   return getTaskEventMessageText(raw)
 }
 
-/** Center the newest event (API returns desc — first item is latest). */
-const scrollNewestToCenter = () => {
+const hostAttemptsHint = (ev) => formatHostAttemptsSummary(ev.payload)
+
+/** 滚动到底部，使最新事件始终出现在可视区域内 */
+const scrollToBottom = () => {
   nextTick(() => {
-    const container = scrollRef.value
-    if (!container) return
-
-    const items = container.querySelectorAll('.el-timeline-item')
-    const newest = items[0]
-    if (!newest) {
-      container.scrollTop = 0
-      return
-    }
-
-    const targetTop = newest.offsetTop - container.clientHeight / 2 + newest.offsetHeight / 2
-    container.scrollTop = Math.max(0, Math.min(targetTop, container.scrollHeight - container.clientHeight))
+    requestAnimationFrame(() => {
+      const container = scrollRef.value
+      if (!container) return
+      container.scrollTop = container.scrollHeight
+    })
   })
 }
 
 watch(
-  () => props.events.map((e) => e.id).join(','),
-  () => scrollNewestToCenter()
+  () => sortedEvents.value.map((e) => e.id).join(','),
+  () => scrollToBottom()
 )
 
-onMounted(() => scrollNewestToCenter())
+onMounted(() => scrollToBottom())
 </script>
 
 <style scoped>
@@ -190,6 +205,20 @@ onMounted(() => scrollNewestToCenter())
   flex-shrink: 0;
 }
 
+.account-tag {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--el-color-warning);
+  background: rgba(230, 162, 60, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .phase {
   color: var(--el-color-primary);
   font-size: 12px;
@@ -198,6 +227,14 @@ onMounted(() => scrollNewestToCenter())
 
 .msg {
   font-size: 12px;
+  word-break: break-word;
+}
+
+.host-attempts-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #999;
+  line-height: 1.35;
   word-break: break-word;
 }
 

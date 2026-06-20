@@ -62,7 +62,15 @@ public interface GameAccountService {
      */
     void updateProfileBinding(String id, Boolean profileBound, Integer positionIndex, String gameName);
 
+    /**
+     * 清除串流账号下所有游戏账号的 Agent 绑定，并置为 idle。
+     */
     void clearAgentIdByStreamingId(String streamingId);
+
+    /**
+     * 清除指定 Agent 关联的所有游戏账号绑定（含串流账号 agent_id 已清但游戏账号残留的兜底）。
+     */
+    void clearAgentBindingByAgentId(String agentId);
 
     List<GameAccount> findByStreamingId(String streamingId);
 

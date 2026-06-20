@@ -36,9 +36,22 @@ class Config:
         """
         if key == 'platform.api_url':
             return self._config.platform_api_url
-        keys = key.split('.')
-        value = self._config
 
+        keys = key.split('.')
+        raw = getattr(self._config, 'raw_yaml', None) or {}
+        if raw:
+            cur: Any = raw
+            found = True
+            for k in keys:
+                if isinstance(cur, dict) and k in cur:
+                    cur = cur[k]
+                else:
+                    found = False
+                    break
+            if found:
+                return cur
+
+        value = self._config
         for k in keys:
             if hasattr(value, k):
                 value = getattr(value, k)
@@ -142,9 +155,11 @@ class AuthConfig:
     """
     认证配置
     """
+    PROVIDER: str = "xblive"  # xblive | msal
     TOKEN_REFRESH_THRESHOLD: float = 300.0
     DEVICE_CODE_TIMEOUT: float = 300.0
     MSAL_TIMEOUT: float = 60.0
+    XBLIVE_WEB_HEADLESS: bool = True
 
 
 @dataclass
@@ -171,6 +186,7 @@ class AgentConfig:
 
     log_level: str = 'INFO'
     log_format: str = 'standard'
+    raw_yaml: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> 'AgentConfig':
@@ -204,7 +220,13 @@ class AgentConfig:
                        'MAX_DETECTION_FRAME', 'DIFF_THRESHOLD', 'CACHE_TTL', 'DETECTION_INTERVAL']
         task_fields = ['MAX_CONCURRENT_TASKS', 'TASK_TIMEOUT', 'HEARTBEAT_INTERVAL',
                       'RECONNECT_DELAY', 'MAX_RECONNECT_ATTEMPTS']
-        auth_fields = ['TOKEN_REFRESH_THRESHOLD', 'DEVICE_CODE_TIMEOUT', 'MSAL_TIMEOUT']
+        auth_fields = [
+            'PROVIDER',
+            'TOKEN_REFRESH_THRESHOLD',
+            'DEVICE_CODE_TIMEOUT',
+            'MSAL_TIMEOUT',
+            'XBLIVE_WEB_HEADLESS',
+        ]
 
         network_config = NetworkConfig(**to_config_dict(config.get('network', {}), network_fields))
         stream_config = StreamConfig(**to_config_dict(config.get('stream', {}), stream_fields))
@@ -237,6 +259,7 @@ class AgentConfig:
             platform_api_url=platform_api_url,
             log_level=config.get('log_level', 'INFO'),
             log_format=config.get('log_format', 'standard'),
+            raw_yaml=dict(config or {}),
         )
 
     def validate(self) -> List[str]:
@@ -311,8 +334,10 @@ class AgentConfig:
                 'HEARTBEAT_INTERVAL': self.task.HEARTBEAT_INTERVAL,
             },
             'auth': {
+                'PROVIDER': self.auth.PROVIDER,
                 'TOKEN_REFRESH_THRESHOLD': self.auth.TOKEN_REFRESH_THRESHOLD,
                 'DEVICE_CODE_TIMEOUT': self.auth.DEVICE_CODE_TIMEOUT,
+                'XBLIVE_WEB_HEADLESS': self.auth.XBLIVE_WEB_HEADLESS,
             },
             'aes': self.aes,
             'backend_url': self.backend_url,

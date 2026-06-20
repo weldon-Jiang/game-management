@@ -2,15 +2,13 @@
 Xbox 主机智能匹配器
 ==================
 
-云端 GSSV GET /v6/servers/home + SmartGlass UDP LAN 发现（0xDD01），
-按 serverId/hardware_uuid 求交集；顺序与云端列表一致。
+云端 GSSV GET /v6/servers/home；对齐 streaming/xsrp OpenStreaming 主机列表。
 """
 
 import asyncio
-import base64
-from typing import Awaitable, Callable, List, Optional, Dict, Any, Set, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Awaitable, Callable, List, Optional, Dict, Any, Set, TYPE_CHECKING
 
 import aiohttp
 
@@ -19,13 +17,6 @@ from ..core.logger import get_logger
 from ..gssv.base_uri import normalize_gssv_base_uri
 from ..task.task_context import AgentTaskContext
 from ..gssv.device_info import build_x_ms_device_info
-from ..lan.network_util import (
-    is_blocked_scan_ip,
-    is_private_lan_ip,
-    pick_local_lan_ip,
-    is_same_lan_segment,
-)
-from .smartglass_discovery import SmartGlassConsole, discover_smartglass_consoles, discover_smartglass_at
 
 if TYPE_CHECKING:
     from ..api.platform_api_client import PlatformApiClient
@@ -82,12 +73,12 @@ class XboxWakeupResult:
 
 class XboxHostMatcher:
     """
-    Xbox 主机匹配器：GSSV 云端列表 + SmartGlass UDP LAN 发现，按 serverId 求交集。
+    Xbox 主机匹配器：GSSV 云端授权列表（不要求 LAN 交集）。
 
     使用方式：
     matcher = XboxHostMatcher(gs_token)
-    err = await matcher.discover_cloud_and_lan()
-    intersections = matcher.build_intersection()
+    err = await matcher.discover_cloud_only()
+    candidates = matcher.build_cloud_candidates(context)
     """
 
     WAKUP_MAX_RETRIES = 2
@@ -95,7 +86,6 @@ class XboxHostMatcher:
     WAKUP_CHECK_INTERVAL = 3
     DEFAULT_PLAY_PATH = "v5/sessions/home/play"
     STANDBY_POWER_STATES = frozenset({"Standby", "ConnectedStandby", "Off"})
-    LAN_PLATFORM = "xbox"
 
     def __init__(
         self,
@@ -108,8 +98,6 @@ class XboxHostMatcher:
         self._gssv_base_uri = normalize_gssv_base_uri(gssv_base_uri)
         self._platform_client = platform_client
         self._authorized_xboxes: List[XboxInfo] = []
-        self._local_xboxes: Dict[str, XboxInfo] = {}
-        self._lan_certificates: Dict[str, bytes] = {}
 
     @staticmethod
     def _is_powered_on(power_state: str) -> bool:
@@ -180,231 +168,15 @@ class XboxHostMatcher:
             self.logger.error(f"获取授权 Xbox 列表异常: {e}", exc_info=True)
             return []
 
-    async def discover_local_xboxes(self) -> Dict[str, XboxInfo]:
+    async def discover_cloud_only(self) -> Optional[XboxMatchResult]:
         """
-        SmartGlass UDP 发现局域网 Xbox；优先读平台 Redis 缓存（同商户同 /24）。
-
-        缓存未命中时再发 UDP 广播，成功后回写平台供同 LAN 其他 Agent/账号复用。
-        """
-        self.logger.info("SmartGlass UDP 发现局域网 Xbox...")
-        self._local_xboxes = {}
-        self._lan_certificates = {}
-
-        local_ip = pick_local_lan_ip()
-        if is_blocked_scan_ip(local_ip or ""):
-            self.logger.warning("SmartGlass UDP 跳过：本机不在真实 LAN 网段")
-            return {}
-
-        if local_ip and await self._load_from_platform_lan_cache(local_ip):
-            return self._local_xboxes
-
-        timeout = float(config.get("discovery.smartglass_udp_timeout_sec", 5))
-        subnet_broadcast: Optional[str] = None
-        if local_ip:
-            parts = local_ip.split(".")
-            if len(parts) == 4:
-                subnet_broadcast = f"{parts[0]}.{parts[1]}.{parts[2]}.255"
-
-        consoles: List[SmartGlassConsole] = []
-        try:
-            consoles = await discover_smartglass_consoles(
-                timeout_sec=timeout,
-                subnet_broadcast=subnet_broadcast,
-            )
-        except Exception as exc:
-            self.logger.error("SmartGlass UDP 发现异常: %s", exc, exc_info=True)
-            return {}
-
-        self._ingest_smartglass_consoles(consoles)
-
-        if local_ip and consoles:
-            await self._report_lan_to_platform(local_ip, consoles)
-
-        self.logger.info("✓ SmartGlass UDP 发现 %s 台", len(self._local_xboxes))
-        return self._local_xboxes
-
-    def _ingest_smartglass_consoles(self, consoles: List[SmartGlassConsole]) -> None:
-        for console in consoles:
-            xbox = self._from_smartglass_console(console)
-            if xbox is None:
-                continue
-            self._local_xboxes[xbox.device_id] = xbox
-            if console.certificate:
-                self._lan_certificates[xbox.device_id] = console.certificate
-            self.logger.info(
-                "  - %s @ %s (uuid=%s)",
-                xbox.name,
-                xbox.ip_address,
-                console.hardware_uuid,
-            )
-
-    async def _load_from_platform_lan_cache(self, local_ip: str) -> bool:
-        """读取平台 LAN 缓存；命中且同网段则填充 _local_xboxes。"""
-        if not config.get("discovery.platform_lan_cache_enabled", True):
-            return False
-        if self._platform_client is None:
-            return False
-        if not is_private_lan_ip(local_ip):
-            return False
-
-        cache = await self._platform_client.get_lan_discovery_cache(local_ip, self.LAN_PLATFORM)
-        if not cache or not cache.get("hit"):
-            reason = (cache or {}).get("reason", "MISS")
-            self.logger.info("平台 LAN 缓存未命中 (%s)，将执行 UDP 发现", reason)
-            return False
-
-        consoles = cache.get("consoles") or []
-        if not consoles:
-            return False
-
-        reporter_ip = cache.get("reporterLocalIp") or ""
-        age_sec = cache.get("ageSec")
-        self.logger.info(
-            "平台 LAN 缓存命中 segment=%s consoles=%s ageSec=%s reporter=%s",
-            cache.get("lanSegment"),
-            len(consoles),
-            age_sec,
-            reporter_ip,
-        )
-
-        cert_timeout = float(config.get("discovery.smartglass_udp_timeout_sec", 5))
-        for entry in consoles:
-            ip = entry.get("ipAddress") or entry.get("ip")
-            if not ip or not is_same_lan_segment(local_ip, ip):
-                self.logger.warning("忽略缓存中非本网段主机 ip=%s local=%s", ip, local_ip)
-                continue
-
-            xbox = self._from_cache_entry(entry)
-            if xbox is None:
-                continue
-            self._local_xboxes[xbox.device_id] = xbox
-
-            cert_b64 = entry.get("certificateB64") or entry.get("certificate_b64")
-            if cert_b64:
-                try:
-                    self._lan_certificates[xbox.device_id] = base64.b64decode(cert_b64)
-                except Exception as exc:
-                    self.logger.warning("缓存证书解码失败 %s: %s", xbox.device_id, exc)
-            elif ip:
-                directed = await discover_smartglass_at(ip, timeout_sec=min(3.0, cert_timeout))
-                if directed and directed.certificate:
-                    self._lan_certificates[xbox.device_id] = directed.certificate
-
-            self.logger.info("  [cache] %s @ %s", xbox.name, xbox.ip_address)
-
-        if self._local_xboxes:
-            self.logger.info("✓ 平台 LAN 缓存加载 %s 台（同 /24 网段）", len(self._local_xboxes))
-            return True
-        return False
-
-    @staticmethod
-    def _from_cache_entry(entry: Dict[str, Any]) -> Optional[XboxInfo]:
-        server_id = (
-            entry.get("serverId")
-            or entry.get("deviceId")
-            or entry.get("device_id")
-        )
-        ip = entry.get("ipAddress") or entry.get("ip")
-        if not server_id or not ip:
-            return None
-        device_id = str(server_id).strip().upper()
-        if not device_id.startswith("XBOX-"):
-            device_id = f"XBOX-{device_id}"
-        console_type = entry.get("consoleType") or "Xbox Unknown"
-        return XboxInfo(
-            id=device_id,
-            device_id=device_id,
-            name=entry.get("name") or f"Xbox ({ip})",
-            ip_address=ip,
-            port=int(entry.get("port") or 5050),
-            live_id=device_id,
-            power_state="On",
-            console_type=console_type,
-        )
-
-    async def _report_lan_to_platform(
-        self,
-        local_ip: str,
-        consoles: List[SmartGlassConsole],
-    ) -> None:
-        if self._platform_client is None:
-            return
-        if not config.get("discovery.platform_lan_cache_enabled", True):
-            return
-
-        payload: List[Dict[str, Any]] = []
-        for console in consoles:
-            xbox = self._from_smartglass_console(console)
-            if xbox is None:
-                continue
-            item: Dict[str, Any] = {
-                "serverId": xbox.device_id,
-                "name": xbox.name,
-                "ipAddress": xbox.ip_address,
-                "port": xbox.port,
-                "liveId": xbox.live_id,
-                "consoleType": xbox.console_type,
-            }
-            if console.certificate:
-                item["certificateB64"] = base64.b64encode(console.certificate).decode("ascii")
-            payload.append(item)
-
-        if not payload:
-            return
-
-        ttl = int(config.get("discovery.cache_ttl_sec", 90))
-        result = await self._platform_client.report_lan_discovery(
-            local_ip,
-            payload,
-            ttl_sec=ttl,
-            platform=self.LAN_PLATFORM,
-        )
-        if result and result.get("accepted"):
-            self.logger.info(
-                "LAN 发现已上报平台 segment=%s consoles=%s cached=%s ttl=%s",
-                result.get("lanSegment"),
-                result.get("consoleCount"),
-                result.get("cached"),
-                result.get("ttlSec"),
-            )
-
-    @staticmethod
-    def _from_smartglass_console(console: SmartGlassConsole) -> Optional[XboxInfo]:
-        """将 Discovery Response 转为 XboxInfo；无 hardware_uuid 则丢弃。"""
-        hardware_id = (console.hardware_uuid or "").strip()
-        if not hardware_id or not console.ip_address:
-            return None
-        device_id = hardware_id.upper()
-        if not device_id.startswith("XBOX-"):
-            device_id = f"XBOX-{device_id}"
-        console_type = "Xbox One" if console.console_type == 0x01 else "Xbox Unknown"
-        return XboxInfo(
-            id=device_id,
-            device_id=device_id,
-            name=console.console_name or f"Xbox ({console.ip_address})",
-            ip_address=console.ip_address,
-            port=5050,
-            live_id=device_id,
-            power_state="On",
-            console_type=console_type,
-        )
-
-    def get_smartglass_certificate(self, device_id: str) -> Optional[bytes]:
-        return self._lan_certificates.get(device_id)
-
-    async def discover_cloud_and_lan(self) -> Optional[XboxMatchResult]:
-        """
-        并行云端 + LAN 发现；失败返回 XboxMatchResult，成功返回 None。
+        GSSV 云端主机发现；失败返回 XboxMatchResult，成功返回 None。
         """
         self.logger.info("=" * 60)
-        self.logger.info("Xbox 发现：GSSV 云端 + SmartGlass UDP")
+        self.logger.info("Xbox 发现：GSSV 云端（对齐 streaming/xsrp）")
         self.logger.info("=" * 60)
 
-        await asyncio.gather(
-            self.discover_authorized_xboxes(),
-            self.discover_local_xboxes(),
-        )
-
+        await self.discover_authorized_xboxes()
         if not self._authorized_xboxes:
             return XboxMatchResult(
                 success=False,
@@ -416,54 +188,12 @@ class XboxHostMatcher:
                 },
             )
 
-        if not self._local_xboxes:
-            return XboxMatchResult(
-                success=False,
-                is_authorized=True,
-                match_reason="局域网 SmartGlass UDP 未发现任何 Xbox 主机",
-                error_code="LAN_NO_CONSOLE",
-                error_details={
-                    "cloud_authorized_count": len(self._authorized_xboxes),
-                    "suggestion": "确认 Agent 与 Xbox 同网段、主机已开机且 UDP 5050 可达",
-                },
-            )
-
-        intersections = self.build_intersection()
-        if not intersections:
-            return XboxMatchResult(
-                success=False,
-                is_authorized=True,
-                is_local_online=True,
-                match_reason="云端授权与局域网发现无交集",
-                error_code="NO_INTERSECTION",
-                error_details={
-                    "cloud_authorized_count": len(self._authorized_xboxes),
-                    "lan_discovered_count": len(self._local_xboxes),
-                    "cloud_hosts": [
-                        {"id": x.device_id, "name": x.name} for x in self._authorized_xboxes
-                    ],
-                    "lan_hosts": [
-                        {"id": x.device_id, "name": x.name, "ip": x.ip_address}
-                        for x in self._local_xboxes.values()
-                    ],
-                    "suggestion": "确认授权主机与 Agent 在同一局域网",
-                },
-            )
-
-        self.logger.info("✓ 交集 %s 台（按云端顺序）", len(intersections))
+        self.logger.info("✓ 云端 %s 台主机", len(self._authorized_xboxes))
         return None
 
-    def build_intersection(self) -> List[XboxInfo]:
-        """GSSV 授权 ∩ SmartGlass LAN，顺序与云端列表一致。"""
-        intersections: List[XboxInfo] = []
-        for cloud in self._authorized_xboxes:
-            local = self._find_local_for_cloud(cloud)
-            if local is None:
-                continue
-            merged = self._merge_cloud_local(cloud, local)
-            if merged.ip_address:
-                intersections.append(merged)
-        return intersections
+    async def discover_cloud_and_lan(self) -> Optional[XboxMatchResult]:
+        """兼容旧调用点；已统一为云端发现。"""
+        return await self.discover_cloud_only()
 
     @staticmethod
     def normalize_server_id(server_id: str) -> str:
@@ -476,24 +206,26 @@ class XboxHostMatcher:
         return normalized
 
     def build_candidates(self, context: AgentTaskContext) -> List[XboxInfo]:
-        """
-        在交集基础上按平台下发的主机约束过滤候选。
+        """兼容旧调用点；等价于 build_cloud_candidates。"""
+        return self.build_cloud_candidates(context)
 
-        - assigned_xbox：按 serverId / IP 精确匹配
-        - platform_xbox_hosts：自动匹配时限定商户绑定列表
-        - auto_match_host=False 且无指定：返回空
+    def build_cloud_candidates(self, context: AgentTaskContext) -> List[XboxInfo]:
         """
-        intersections = self.build_intersection()
-        if not intersections:
+        云端模式候选：仅 GSSV 授权列表，不要求 LAN 交集。
+
+        过滤规则与 build_candidates 一致（assigned / bound / auto_match）。
+        """
+        authorized = list(self._authorized_xboxes)
+        if not authorized:
             return []
 
         assigned = context.assigned_xbox
         if assigned and (assigned.id or assigned.ip_address):
-            matched = self._filter_assigned(intersections, assigned)
+            matched = self._filter_assigned(authorized, assigned)
             if matched:
                 return self._attach_platform_host_ids(matched, context.platform_xbox_hosts)
             self.logger.warning(
-                "指定 Xbox 主机未在 GSSV∩LAN 交集: id=%s ip=%s",
+                "指定 Xbox 主机不在 GSSV 云端列表: id=%s ip=%s",
                 assigned.id,
                 assigned.ip_address,
             )
@@ -501,16 +233,16 @@ class XboxHostMatcher:
 
         bound_hosts = context.platform_xbox_hosts or []
         if bound_hosts:
-            filtered = self._filter_bound_hosts(intersections, bound_hosts)
+            filtered = self._filter_bound_hosts(authorized, bound_hosts)
             if filtered:
                 return self._attach_platform_host_ids(filtered, bound_hosts)
-            self.logger.warning("绑定主机列表与 GSSV∩LAN 交集无匹配")
+            self.logger.warning("绑定主机列表与 GSSV 云端列表无匹配")
             return []
 
         if not context.auto_match_host:
             return []
 
-        return intersections
+        return authorized
 
     def _filter_assigned(
         self,
@@ -682,37 +414,6 @@ class XboxHostMatcher:
             elif len(normalized.replace("-", "")) >= 32:
                 keys.add(f"xbox-{normalized}")
         return keys
-
-    def _cloud_matches_local(self, cloud: XboxInfo, local: XboxInfo) -> bool:
-        cloud_keys = self._id_keys(cloud)
-        local_keys = self._id_keys(local)
-        if cloud_keys & local_keys:
-            return True
-        cloud_name = self._normalize_id(cloud.name)
-        local_name = self._normalize_id(local.name)
-        if cloud_name and cloud_name == local_name:
-            return True
-        return False
-
-    def _find_local_for_cloud(self, cloud: XboxInfo) -> Optional[XboxInfo]:
-        for local in self._local_xboxes.values():
-            if self._cloud_matches_local(cloud, local):
-                return local
-        return None
-
-    def _merge_cloud_local(self, cloud: XboxInfo, local: XboxInfo) -> XboxInfo:
-        return XboxInfo(
-            id=cloud.id or cloud.device_id,
-            device_id=cloud.device_id or cloud.id,
-            name=cloud.name or local.name,
-            ip_address=local.ip_address,
-            live_id=cloud.live_id or local.live_id,
-            mac_address=local.mac_address,
-            port=local.port or cloud.port or 5050,
-            power_state=cloud.power_state,
-            console_type=cloud.console_type or local.console_type,
-            play_path=cloud.play_path or self.DEFAULT_PLAY_PATH,
-        )
 
     def _find_authorized_match(self, xbox: XboxInfo) -> Optional[XboxInfo]:
         """在云端授权列表中查找与给定 Xbox 匹配的条目（按 xboxId/liveId，不用平台 UUID）。"""

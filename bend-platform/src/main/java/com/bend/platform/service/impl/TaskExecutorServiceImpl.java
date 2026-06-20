@@ -5,6 +5,7 @@ import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.Task;
 import com.bend.platform.entity.TaskGameAccountStatus;
 import com.bend.platform.repository.TaskMapper;
+import com.bend.platform.service.AgentKeyboardMappingService;
 import com.bend.platform.service.AgentLoadControlService;
 import com.bend.platform.service.GameAccountService;
 import com.bend.platform.service.TaskExecutorService;
@@ -48,6 +49,9 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
 
     @Autowired
     private AgentLoadControlService loadControlService;
+
+    @Autowired
+    private AgentKeyboardMappingService agentKeyboardMappingService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -272,6 +276,13 @@ public class TaskExecutorServiceImpl implements TaskExecutorService {
             gameAccountList.add(gaInfo);
         }
         taskData.set("gameAccounts", gameAccountList);
+
+        if (task.getTargetAgentId() != null && !task.getTargetAgentId().isBlank()) {
+            Map<String, String> keyboardMapping =
+                    agentKeyboardMappingService.getEffectiveBindingsForAgent(task.getTargetAgentId());
+            ObjectNode keyboardNode = objectMapper.valueToTree(keyboardMapping);
+            taskData.set("keyboardMapping", keyboardNode);
+        }
 
         if (task.getParams() != null) {
             try {

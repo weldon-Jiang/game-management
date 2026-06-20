@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bend.platform.entity.Task;
 import com.bend.platform.entity.TaskGameAccountStatus;
 import com.bend.platform.repository.TaskMapper;
+import com.bend.platform.enums.TaskStatus;
 import com.bend.platform.service.AgentLoadControlService;
 import com.bend.platform.service.TaskGameAccountStatusService;
 import com.bend.platform.service.TaskService;
+import com.bend.platform.service.TaskStateMachine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,6 +27,7 @@ public class TaskTimeoutChecker {
     private final TaskService taskService;
     private final TaskGameAccountStatusService statusService;
     private final AgentLoadControlService loadControlService;
+    private final TaskStateMachine stateMachine;
 
     @Value("${task.timeout_check_interval:60000}")
     private long timeoutCheckInterval;
@@ -64,7 +67,13 @@ public class TaskTimeoutChecker {
 
     private void handleTaskTimeout(Task task) {
         try {
-            task.setStatus("cancelled");
+            if (!stateMachine.canTransition(task, TaskStatus.CANCELLED)) {
+                log.warn("Task timeout: invalid transition to cancelled - ID: {}, status: {}",
+                        task.getId(), task.getStatus());
+                return;
+            }
+            task.setStatus(TaskStatus.CANCELLED.getCode());
+            task.setSessionPhase("closed");
             task.setErrorMessage("Task timeout after " + task.getTimeoutSeconds() + " seconds");
             task.setCompletedTime(LocalDateTime.now());
             taskMapper.updateById(task);

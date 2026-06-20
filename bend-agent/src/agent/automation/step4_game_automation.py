@@ -46,9 +46,7 @@ from ..task.task_context import (
     TaskMainStatus,
     GameAccountInfo
 )
-from ..input.football_controller import FootballController
 from ..input.controller_protocol import XboxButtonFlag
-from ..scene.scene_action_mapper import SceneActionMapper
 
 VALID_TASK_TYPES = frozenset({
     'auction_transfer',
@@ -58,6 +56,10 @@ VALID_TASK_TYPES = frozenset({
     'weekend_league',
 })
 
+# 比赛结束 / 回到 UT 菜单的场景（本地模板 + streaming 对齐）
+MATCH_END_SCENE_IDS = [102, 193]
+UT_MENU_SCENE_IDS = [127, 147, 149]
+SETTLEMENT_SCENE_IDS = [184, 185, 186, 187, 188, 189, 193]
 # expected_screen -> Streaming 场景 ID（Xbox 系统 UI 1-9，足球 UT 菜单 100+）
 EXPECTED_SCREEN_SCENES: Dict[str, list] = {
     'MAIN_MENU': [127, 149, 147, 101],
@@ -236,16 +238,89 @@ async def _ensure_fc_scene_client(context: AgentTaskContext, task_logger):
 
     host = agent_config.get('fc_server.host', '127.0.0.1')
     port = int(agent_config.get('fc_server.port', 8080))
+    width = int(agent_config.get('window.default_width', 1280))
+    height = int(agent_config.get('window.default_height', 720))
+    runtime = getattr(context, '_stream_runtime', None)
+    latest = runtime.get_latest_frame() if runtime else None
+    if latest is not None:
+        width = int(getattr(latest, 'width', width) or width)
+        height = int(getattr(latest, 'height', height) or height)
+
     client = FCSceneClient(
         host=host,
         port=port,
         username=context.streaming_account_email,
         session_token=getattr(context, '_fc_session_token', ''),
         gamepad_index=0,
+        frame_width=width,
+        frame_height=height,
     )
     context._fc_scene_client = client
     task_logger.info("FCSceneClient 已就绪 (%s:%s)", host, port)
     return client
+
+
+def _fc_remote_play_enabled() -> bool:
+    from ..core.config import config as agent_config
+    return bool(
+        agent_config.get('fc_server.enabled', False)
+        and agent_config.get('fc_server.use_remote_play', False)
+    )
+
+
+async def _build_fc_play_handler(context: AgentTaskContext, task_logger):
+    """FC PLAY 20Hz handler，供 StreamRuntime play loop 调用。"""
+    from ..scene.fc_scene_client import FC_ERR_NETWORK, FC_ERR_OK
+
+    fc_client = await _ensure_fc_scene_client(context, task_logger)
+    if fc_client is None:
+        return None
+
+    async def _handler(image) -> int:
+        result = await fc_client.play_frame(image)
+        if result.controller_actions:
+            await _apply_fc_controller_actions(
+                context, result.controller_actions, task_logger
+            )
+        return result.errno if result.errno else FC_ERR_NETWORK
+
+    return _handler
+
+
+async def _fc_init_match_session(context: AgentTaskContext, task_logger) -> bool:
+    from ..scene.fc_scene_client import FC_ERR_MATCH_EXISTED, FC_ERR_OK
+
+    if not _fc_remote_play_enabled():
+        return True
+    fc_client = await _ensure_fc_scene_client(context, task_logger)
+    if fc_client is None:
+        return False
+    runtime = getattr(context, '_stream_runtime', None)
+    latest = runtime.get_latest_frame() if runtime else None
+    if latest is not None:
+        fc_client.update_frame_size(
+            int(getattr(latest, 'width', fc_client.frame_width)),
+            int(getattr(latest, 'height', fc_client.frame_height)),
+        )
+    report = await fc_client.init_match()
+    if report.errno in (FC_ERR_OK, FC_ERR_MATCH_EXISTED):
+        context._fc_session_token = report.session or fc_client.session_token
+        task_logger.info("FC 比赛会话已初始化 (errno=%s)", report.errno)
+        return True
+    task_logger.warning("FC init_match 失败: %s", report.errmsg or report.errno)
+    return False
+
+
+async def _fc_terminate_match_session(context: AgentTaskContext, task_logger) -> None:
+    if not _fc_remote_play_enabled():
+        return
+    fc_client = getattr(context, '_fc_scene_client', None)
+    if fc_client is None:
+        return
+    try:
+        await fc_client.terminate_match()
+    except Exception as exc:
+        task_logger.debug("FC terminate_match: %s", exc)
 
 
 async def _match_expected_screen(
@@ -273,7 +348,9 @@ async def _match_expected_screen(
     deadline = time.time() + timeout_sec
 
     while time.time() < deadline:
-        frame = await context.frame_capture.capture_frame()
+        from ..runtime.stream_runtime import capture_task_frame
+
+        frame = await capture_task_frame(context, timeout=0.8)
         if frame is None:
             await asyncio.sleep(0.4)
             continue
@@ -318,32 +395,98 @@ def _normalize_game_action_type(game_action_type: Optional[str]) -> str:
 
 def _apply_task_type(context: AgentTaskContext, game_account: GameAccountInfo, task_logger) -> str:
     """
-    登录确认后应用平台 gameActionType（AGENTS R006/R007）。
+    进入 FC/UT 主菜单后应用平台 gameActionType（AGENTS R006/R007）。
+
+    此后按类型分两阶段（可只执行其一）：
+    - auction_transfer：仅转会，完成后退出 FC（不进 SQB）
+    - squad_battle：仅 SQB 比赛
+    - transfer_sqb_combo：先 1 轮转会，再 SQB 打满 target_matches，全部完成后退出 FC
 
     返回归一化后的 game_action_type 字符串。
     """
     game_action_type = _normalize_game_action_type(context.game_action_type)
     if game_action_type == 'auction_transfer':
-        task_logger.info("游戏操作类型 auction_transfer: 拍卖行转会任务")
+        task_logger.info(
+            "游戏操作类型 auction_transfer: 进入 FC 后执行转会任务（本会话 1 轮）"
+        )
     elif game_action_type == 'squad_battle':
-        task_logger.info("游戏操作类型 squad_battle: SQB模式（与电脑AI对战）")
+        task_logger.info("游戏操作类型 squad_battle: 进入 FC 后直接 SQB 比赛")
     elif game_action_type == 'divisions_rivals':
         task_logger.info("游戏操作类型 divisions_rivals: DR模式（与玩家线上对战）")
     elif game_action_type == 'weekend_league':
         task_logger.info("游戏操作类型 weekend_league: 周赛")
     elif game_action_type == 'transfer_sqb_combo':
-        task_logger.info("游戏操作类型 transfer_sqb_combo: 转会+SQB组合")
+        task_logger.info(
+            "游戏操作类型 transfer_sqb_combo: 进入 FC 后先转会 1 轮，再 SQB %s 场",
+            game_account.target_matches,
+        )
     else:
         task_logger.info(f"游戏操作类型 {game_action_type}: 执行默认SQB模式")
     return game_action_type
 
 
-def _resolve_billing_unit(game_action_type: str, completed_before: int) -> str:
-    """解析当前 Step4 动作的计费单元。"""
-    action_type = _normalize_game_action_type(game_action_type)
-    if action_type == 'auction_transfer':
-        return 'transfer_round'
-    if action_type == 'transfer_sqb_combo' and completed_before % 2 == 0:
+def _requires_transfer_phase(game_action_type: str) -> bool:
+    """进入 FC 后是否需要执行转会阶段。"""
+    return _normalize_game_action_type(game_action_type) in (
+        'auction_transfer',
+        'transfer_sqb_combo',
+    )
+
+
+def _requires_sqb_phase(game_action_type: str) -> bool:
+    """进入 FC 后是否需要执行 SQB 比赛阶段。"""
+    return _normalize_game_action_type(game_action_type) in (
+        'squad_battle',
+        'transfer_sqb_combo',
+    )
+
+
+def _transfer_rounds_target(game_action_type: str, game_account: GameAccountInfo) -> int:
+    """
+    单账号转会阶段目标轮数。
+    - auction_transfer：固定 1 轮（不占 SQB 今日上限）
+    - transfer_sqb_combo：固定 1 轮，完成后自动接 SQB
+    """
+    action = _normalize_game_action_type(game_action_type)
+    if action in ('auction_transfer', 'transfer_sqb_combo'):
+        return 1
+    return 0
+
+
+def _account_exit_fc_reason(game_action_type: str) -> str:
+    """单账号 FC 内任务全部完成后，退出回 Xbox 主页的日志说明。"""
+    action = _normalize_game_action_type(game_action_type)
+    if action == 'auction_transfer':
+        return '转会任务已完成（未进入 SQB）'
+    if action == 'transfer_sqb_combo':
+        return '转会 + SQB 已全部完成'
+    if action == 'squad_battle':
+        return 'SQB 比赛已全部完成'
+    return '账号自动化已完成'
+
+
+def _account_needs_transfer_phase(
+    context: AgentTaskContext,
+    game_account: GameAccountInfo,
+    game_action_type: str,
+) -> bool:
+    """
+    当前账号是否仍需转会阶段（本会话每账号 1 轮；恢复重锚后跳过已完成）。
+    """
+    action = _normalize_game_action_type(game_action_type)
+    if action in ("auction_transfer", "transfer_sqb_combo"):
+        done_ids = getattr(context, "_transfer_phase_done_account_ids", set())
+        return game_account.id not in done_ids
+    return False
+
+
+def _resolve_billing_unit(game_action_type: str, *, phase: str) -> str:
+    """
+    解析计费单元。
+
+    phase: 'transfer' | 'match'
+    """
+    if phase == 'transfer':
         return 'transfer_round'
     return 'match_completed'
 
@@ -413,7 +556,9 @@ async def _pause_for_manual_fc_launch(
     仅在等待期间任务被取消时返回 False。
     """
     from ..runtime.phase_fsm import SessionPhase
+    from ..runtime.pause_input_control import release_automation_input
 
+    await release_automation_input(context, task_logger)
     context.pause()
     context.update_task_status(TaskMainStatus.PAUSED)
 
@@ -454,6 +599,10 @@ async def _pause_for_manual_fc_launch(
             return False
         await asyncio.sleep(0.3)
 
+    from ..runtime.pause_input_control import raise_if_resume_reanchor
+
+    raise_if_resume_reanchor(context)
+
     context.update_task_status(TaskMainStatus.RUNNING)
     if set_session_phase:
         await set_session_phase(
@@ -483,10 +632,13 @@ async def _launch_fc_with_manual_pause(
     correct the screen before Step4 retries.
     """
     from ..game.account_switcher import ManualInterventionRequired
+    from ..runtime.pause_input_control import ResumeReanchor
 
     while True:
         try:
             return await switcher.launch_fc_to_ut_menu()
+        except ResumeReanchor:
+            raise
         except ManualInterventionRequired as exc:
             reason = f"账号 {game_account.gamertag}：{exc.reason}"
             resumed = await _pause_for_manual_fc_launch(
@@ -597,9 +749,84 @@ async def _report_step4_failure(
                 "windowState": window_state,
             },
         )
+        from ..xbox.stream_session_survival import (
+            schedule_ensure_stream_subsystems_alive,
+        )
+
+        schedule_ensure_stream_subsystems_alive(
+            context, reason="automation_failed"
+        )
         return
     task_logger.error(error_msg)
     await report_progress(context.task_id, "STEP4", "FAILED", error_msg)
+
+
+async def _ensure_input_for_step4(context: AgentTaskContext, task_logger) -> bool:
+    """
+    Step4 自动化前确认 input DataChannel 为 open；closed 时同步触发重连回调。
+    """
+    from ..xbox.stream_keepalive import is_input_channel_open
+
+    session = getattr(context, "xbox_session", None)
+    if session is not None and is_input_channel_open(session):
+        return True
+
+    callback = getattr(context, "_input_reconnect_callback", None)
+    if callback is None:
+        task_logger.error("input DataChannel 已关闭且无重连回调")
+        return False
+
+    task_logger.warning("Step4 检测到 input DataChannel 已关闭，开始重连")
+    try:
+        ok = await callback()
+    except Exception as exc:
+        task_logger.error("input DataChannel 重连异常: %s", exc)
+        return False
+    if not ok:
+        task_logger.error("input DataChannel 重连失败")
+    return ok
+
+
+async def _switch_to_next_game_account_on_skip(
+    context: AgentTaskContext,
+    switcher,
+    account_index: int,
+    task_logger,
+) -> bool:
+    """
+    预检判定当前账号无剩余进度时，若有下一账号则走 Xbox switch_to 切档（不进 FC）。
+    """
+    next_index = account_index + 1
+    if next_index >= len(context.game_accounts):
+        return True
+
+    if not await _ensure_input_for_step4(context, task_logger):
+        task_logger.warning("预检跳过：切下一账号前 input 不可用")
+        return False
+
+    next_ga = context.game_accounts[next_index]
+    from ..core.config import config as app_config
+
+    skip_switch = bool(app_config.get("step4.skip_account_switch", False))
+    if skip_switch:
+        result = await switcher.prepare_without_switch(next_ga.id)
+    else:
+        result = await switcher.ensure_target_game_account(next_ga.id)
+
+    if result.success:
+        task_logger.info(
+            "账号 %s 无剩余进度，已切至下一账号 %s",
+            context.game_accounts[account_index].gamertag,
+            next_ga.gamertag,
+        )
+    else:
+        task_logger.warning(
+            "账号 %s 无剩余进度，切至 %s 失败: %s",
+            context.game_accounts[account_index].gamertag,
+            next_ga.gamertag,
+            result.error_message,
+        )
+    return result.success
 
 
 async def _report_input_channel_event(
@@ -700,7 +927,7 @@ async def step4_execute_gaming(
         )
 
     engine, switcher = await _init_game_automation(
-        context, task_logger, platform_client, input_gate=input_gate
+        context, task_logger, platform_client, report_progress, input_gate=input_gate
     )
     if not engine or not switcher:
         error_msg = "游戏自动化引擎初始化失败"
@@ -715,68 +942,62 @@ async def step4_execute_gaming(
     context._automation_engine = engine
     context._account_switcher = switcher
 
-    global_frame_queue = None
-    global_scene_queue = None
-    global_cancel_event = None
-    global_async_tasks = []
-    football_controller = None
-    scene_action_mapper = None
+    from ..runtime.stream_runtime import get_or_create_stream_runtime
 
-    async def _send_controller_signal(signal):
-        """发送手柄信号到Xbox"""
-        if engine and hasattr(engine, 'send_controller_signal'):
-            try:
-                await engine.send_controller_signal(signal)
-                task_logger.debug(f"[手柄信号] 发送: {signal}")
-            except Exception as e:
-                task_logger.error(f"[手柄信号] 发送失败: {e}")
-        else:
-            task_logger.warning("[手柄信号] 引擎不支持信号发送")
+    stream_runtime = get_or_create_stream_runtime(context)
 
     try:
+        from ..core.config import config as agent_config
+
         keyboard_mapper = getattr(context, "_keyboard_mapper", None)
+        keep_keyboard = bool(agent_config.get("debug.manual_input_enabled", True))
         if keyboard_mapper and getattr(keyboard_mapper, "_running", False):
-            await keyboard_mapper.stop()
-            task_logger.info("步骤四已停止键盘映射器，避免与 SDL 显示循环并发访问 pygame")
+            if keep_keyboard:
+                from ..debug.manual_debug_controls import attach_manual_debug_controls
 
-        if context.enable_window_display and context.sdl_window is not None:
-            task_logger.info("[全局异步] 启动帧捕获、显示和场景检测任务")
-            global_frame_queue = asyncio.Queue(maxsize=5)
-            global_scene_queue = asyncio.Queue(maxsize=5)
-            global_cancel_event = asyncio.Event()
+                attach_manual_debug_controls(context, keyboard_mapper, task_logger)
+                task_logger.info(
+                    "步骤四保留键盘映射（F8 人工接管 / F9 截图 / F10 帮助）"
+                )
+            else:
+                await keyboard_mapper.stop()
+                task_logger.info("步骤四已停止键盘映射器，避免与自动化输入并发")
 
-            # Step4 自动化期间独占这些循环；finally 须停止三者，避免孤儿帧读取协程。
-            capture_task = asyncio.create_task(
-                _capture_loop(context, global_frame_queue, global_cancel_event, task_logger)
-            )
-            display_task = asyncio.create_task(
-                _display_loop(context, global_frame_queue, global_cancel_event, task_logger)
-            )
-            detect_task = asyncio.create_task(
-                _detect_loop(context, global_frame_queue, global_scene_queue, global_cancel_event, task_logger)
-            )
+        prefer_remote = agent_config.get("fc_server.prefer_remote_scene", False)
+        fc_client = await _ensure_fc_scene_client(context, task_logger) if prefer_remote else None
+        scene_detector = None if prefer_remote and fc_client else await _ensure_streaming_scene_detector(
+            context, task_logger
+        )
+        play_handler = None
+        if _fc_remote_play_enabled():
+            play_handler = await _build_fc_play_handler(context, task_logger)
+            context._fc_remote_play = play_handler is not None
+        else:
+            context._fc_remote_play = False
 
-            global_async_tasks = [capture_task, display_task, detect_task]
-            task_logger.info("[全局异步] 帧捕获、显示和场景检测任务已启动")
-
-            task_logger.info("[比赛控制] 初始化比赛控制器和场景动作映射器")
-            football_controller = FootballController()
-            football_controller.set_signal_sender(_send_controller_signal)
-
-            scene_action_mapper = SceneActionMapper(
-                scene_detector=None,
-                football_controller=football_controller
-            )
-            task_logger.info("[比赛控制] 比赛控制器和场景动作映射器已初始化")
-
-        context.matches_completed_today = {}
+        await stream_runtime.start_automation(
+            task_logger,
+            scene_detector=scene_detector,
+            fc_client=fc_client,
+            apply_fc_actions=_apply_fc_controller_actions,
+            play_handler=play_handler,
+        )
         for ga in context.game_accounts:
             context.matches_completed_today[ga.id] = ga.today_match_count or 0
 
-        total_matches = sum(
-            max(0, ga.target_matches - (ga.today_match_count or 0))
-            for ga in context.game_accounts
-        )
+        if not hasattr(context, "_transfer_phase_done_account_ids"):
+            context._transfer_phase_done_account_ids = set()
+
+        precheck_action = _normalize_game_action_type(context.game_action_type)
+        if precheck_action == 'auction_transfer':
+            total_matches = sum(
+                1 for ga in context.game_accounts if ga.id not in (skipped_accounts or set())
+            )
+        else:
+            total_matches = sum(
+                max(0, ga.target_matches - (ga.today_match_count or 0))
+                for ga in context.game_accounts
+            )
 
         completed_matches = 0
 
@@ -789,9 +1010,9 @@ async def step4_execute_gaming(
             detector = await _ensure_streaming_scene_detector(context, task_logger)
 
             async def _capture_for_provisioning():
-                if context.frame_capture is None:
-                    return None
-                return await context.frame_capture.capture_frame()
+                from ..runtime.stream_runtime import capture_task_frame
+
+                return await capture_task_frame(context, timeout=0.8)
 
             provisioning_module.refresh_dependencies(
                 detector,
@@ -799,73 +1020,166 @@ async def step4_execute_gaming(
                 platform_client=platform_client,
                 frame_getter=_capture_for_provisioning,
                 stream_session=getattr(context, "xbox_session", None),
+                reconnect_callback=getattr(context, "_input_reconnect_callback", None),
+                task_context=context,
             )
 
-        for account_index, game_account in enumerate(context.game_accounts):
-            if check_cancel():
-                task_logger.info("任务被取消，步骤四终止")
-                context.update_step_status("step4", TaskStepStatus.SKIPPED, "任务被取消")
-                return Step4Result(success=False, error_code="CANCELLED",
-                                 message="任务被取消")
+        from ..runtime.pause_input_control import (
+            ResumeReanchor,
+            account_has_remaining_work,
+            checkpoint_resume_reanchor,
+            raise_if_resume_reanchor,
+            resume_reanchor_pending,
+        )
 
-            await context.wait_if_paused()
-
-            if game_account.id in skipped:
-                task_logger.info("跳过游戏账号: %s", game_account.gamertag)
+        account_index = 0
+        while account_index < len(context.game_accounts):
+            restart_idx = await checkpoint_resume_reanchor(
+                context, switcher, task_logger, skipped
+            )
+            if restart_idx is not None:
+                account_index = restart_idx
+                if account_index >= len(context.game_accounts):
+                    break
                 continue
 
-            if provisioning_module is not None:
-                # 开通/档案绑定必须在账号切换前完成，失败只跳过当前账号，不关闭整条串流。
-                prov = await provisioning_module.ensure(
-                    game_account,
-                    check_cancel=check_cancel,
-                    skipped=False,
-                )
-                if not prov.success:
-                    task_logger.warning(
-                        "账号 %s 准备失败: %s",
-                        game_account.gamertag,
-                        prov.message,
-                    )
+            game_account = context.game_accounts[account_index]
+            try:
+                if check_cancel():
+                    task_logger.info("任务被取消，步骤四终止")
+                    context.update_step_status("step4", TaskStepStatus.SKIPPED, "任务被取消")
+                    return Step4Result(success=False, error_code="CANCELLED",
+                                     message="任务被取消")
+
+                await context.wait_if_paused()
+                raise_if_resume_reanchor(context)
+
+                if game_account.id in skipped:
+                    task_logger.info("跳过游戏账号: %s", game_account.gamertag)
+                    account_index += 1
                     continue
 
-            current_completed = context.matches_completed_today[game_account.id]
+                if account_index > 0:
+                    home_scene = await switcher._detect_any_scene(
+                        [203, 1, 24], strict=False
+                    )
+                    if home_scene not in (203, 1, 24):
+                        task_logger.info(
+                            "切换下一账号前未在 Xbox 主页 (scene=%s)，尝试退出 FC",
+                            home_scene,
+                        )
+                        await switcher.exit_fc_to_xbox_home()
 
-            if current_completed >= game_account.target_matches:
-                completed_msg = f"账号 {game_account.gamertag} 今日已完成 {current_completed}/{game_account.target_matches} 场比赛"
-                task_logger.info(completed_msg)
+                if provisioning_module is not None:
+                    # 开通/档案绑定必须在账号切换前完成，失败只跳过当前账号，不关闭整条串流。
+                    prov = await provisioning_module.ensure(
+                        game_account,
+                        check_cancel=check_cancel,
+                        skipped=False,
+                    )
+                    if not prov.success:
+                        task_logger.warning(
+                            "账号 %s 准备失败: %s",
+                            game_account.gamertag,
+                            prov.message,
+                        )
+                        account_index += 1
+                        continue
 
-                await report_progress(
-                    context.task_id, "STEP4", "COMPLETED", completed_msg,
-                    {
-                        "gameAccountId": game_account.id,
-                        "gameAccountName": game_account.gamertag,
-                        "todayCompleted": current_completed,
-                        "dailyLimit": game_account.target_matches,
-                        "matchStatus": "COMPLETED"
-                    }
-                )
-                continue
+                current_completed = context.matches_completed_today[game_account.id]
+                precheck_action = _normalize_game_action_type(context.game_action_type)
 
-            context.current_game_account_index = account_index
+                if not account_has_remaining_work(context, game_account, skipped):
+                    if precheck_action == 'auction_transfer':
+                        completed_msg = (
+                            f"账号 {game_account.gamertag} 本会话转会已完成，跳过"
+                        )
+                        progress_payload = {
+                            "gameAccountId": game_account.id,
+                            "gameAccountName": game_account.gamertag,
+                            "matchStatus": "COMPLETED",
+                            "transferSessionDone": True,
+                        }
+                    else:
+                        completed_msg = (
+                            f"账号 {game_account.gamertag} 今日 SQB 已完成 "
+                            f"{current_completed}/{game_account.target_matches} 场"
+                        )
+                        progress_payload = {
+                            "gameAccountId": game_account.id,
+                            "gameAccountName": game_account.gamertag,
+                            "todayCompleted": current_completed,
+                            "dailyLimit": game_account.target_matches,
+                            "matchStatus": "COMPLETED",
+                        }
+                    task_logger.info(completed_msg)
+                    await report_progress(
+                        context.task_id, "STEP4", "COMPLETED", completed_msg,
+                        progress_payload,
+                    )
+                    await _switch_to_next_game_account_on_skip(
+                        context, switcher, account_index, task_logger
+                    )
+                    account_index += 1
+                    continue
 
-            game_logger = get_game_logger(game_account.gamertag)
-            task_logger.info(f"开始处理游戏账号: {game_account.gamertag} "
-                       f"({account_index+1}/{len(context.game_accounts)})")
-            game_logger.info(f"=== 开始处理游戏账号 ===")
+                context.current_game_account_index = account_index
+                # 供 F8 / Input 等 session 时间线事件附带当前游戏账号
+                context._timeline_game_account_id = game_account.id
+                context._timeline_game_account_name = game_account.gamertag
 
-            # 流媒体账号日志：记录当前处理的游戏账号
-            stream_logger.info(f"开始处理游戏账号: {game_account.gamertag} ({account_index+1}/{len(context.game_accounts)})")
+                game_logger = get_game_logger(game_account.gamertag)
+                task_logger.info(f"开始处理游戏账号: {game_account.gamertag} "
+                           f"({account_index+1}/{len(context.game_accounts)})")
+                game_logger.info(f"=== 开始处理游戏账号 ===")
 
-            from ..xbox.stream_keepalive import StreamKeepaliveLoop
+                # 流媒体账号日志：记录当前处理的游戏账号
+                stream_logger.info(f"开始处理游戏账号: {game_account.gamertag} ({account_index+1}/{len(context.game_accounts)})")
 
-            launch_ok = False
-            async with StreamKeepaliveLoop(
-                lambda: getattr(context, "xbox_session", None),
-                interval=4.0,
-            ):
-                # 账号切换和 FC 启动期间持续保活，避免长时间菜单操作导致云串流空闲断开。
-                switch_result = await switcher.switch_to(game_account.id)
+                if not await _ensure_input_for_step4(context, task_logger):
+                    task_logger.warning(
+                        "账号 %s 跳过：input DataChannel 不可用且重连失败",
+                        game_account.gamertag,
+                    )
+                    account_index += 1
+                    continue
+
+                launch_ok = False
+                from ..core.config import config as app_config
+
+                # Step4 账号门禁：先回 Xbox 主页，再 OCR 判断是否已是目标游戏账号
+                skip_switch = bool(app_config.get("step4.skip_account_switch", False))
+                if skip_switch:
+                    switch_result = await switcher.prepare_without_switch(game_account.id)
+                else:
+                    switch_result = await switcher.ensure_target_game_account(
+                        game_account.id
+                    )
+                if switch_result.success and not skip_switch:
+                    if switch_result.skipped_switch:
+                        gate_msg = (
+                            f"账号门禁：主页已是目标游戏账号 {game_account.gamertag}，"
+                            "跳过切档"
+                        )
+                    else:
+                        gate_msg = (
+                            f"账号门禁：已切换至目标游戏账号 {game_account.gamertag}"
+                        )
+                    task_logger.info(gate_msg)
+                    stream_logger.info(gate_msg)
+                    await report_progress(
+                        context.task_id,
+                        "STEP4",
+                        "RUNNING",
+                        gate_msg,
+                        {
+                            "gameAccountId": game_account.id,
+                            "gameAccountName": game_account.gamertag,
+                            "accountGate": "matched_skip"
+                            if switch_result.skipped_switch
+                            else "switched",
+                        },
+                    )
                 if switch_result.success:
                     launch_ok = await _launch_fc_with_manual_pause(
                         switcher,
@@ -959,197 +1273,170 @@ async def step4_execute_gaming(
                         game_logger.warning(launch_msg)
                         stream_logger.warning(launch_msg)
 
-            if not switch_result.success:
-                switch_msg = (
-                    f"账号 {game_account.gamertag} 切换失败: "
-                    f"{switch_result.error_message}"
-                )
-                task_logger.warning(switch_msg)
-                game_logger.warning(switch_msg)
-                stream_logger.warning(switch_msg)
-                await report_progress(
-                    context.task_id,
-                    "STEP4",
-                    "RUNNING",
-                    switch_msg,
-                    {
-                        "gameAccountId": game_account.id,
-                        "gameAccountName": game_account.gamertag,
-                        "matchStatus": "SWITCH_FAILED",
-                        "accountStatus": "failed",
-                        "errorCode": "ACCOUNT_SWITCH_FAILED",
-                    },
-                )
-                continue
-
-            if launch_ok:
-                login_confirmed = True
-                confirm_msg = (
-                    f"账号 {game_account.gamertag} 已进入 FC/UT 界面（场景链确认）"
-                )
-                task_logger.info(confirm_msg)
-                game_logger.info(confirm_msg)
-                stream_logger.info(confirm_msg)
-            else:
-                login_confirmed = await _detect_screen_state(
-                    context, "MAIN_MENU", task_logger, game_logger
-                )
-            if not login_confirmed:
-                msg = f"账号 {game_account.gamertag} 登录未确认，跳过该账号"
-                task_logger.warning(msg)
-                game_logger.warning(msg)
-                stream_logger.warning(msg)
-                await report_progress(
-                    context.task_id, "STEP4", "RUNNING", msg,
-                    {
-                        "gameAccountId": game_account.id,
-                        "gameAccountName": game_account.gamertag,
-                        "matchStatus": "LOGIN_UNCONFIRMED",
-                        "accountStatus": "failed",
-                        "errorCode": "LOGIN_UNCONFIRMED",
-                    }
-                )
-                continue
-
-            game_action_type = _apply_task_type(context, game_account, task_logger)
-            stream_logger.info(
-                f"账号 {game_account.gamertag} 登录已确认，应用游戏操作类型: "
-                f"{game_action_type}"
-            )
-
-            await asyncio.sleep(2.0)
-
-            consecutive_failures = 0
-            max_match_failures = 3
-            while context.matches_completed_today[game_account.id] < game_account.target_matches:
-                if check_cancel():
-                    return Step4Result(success=False, error_code="CANCELLED",
-                                     message="任务被取消")
-
-                current_count = context.matches_completed_today[game_account.id] + 1
-                current_total = context.matches_completed_today[game_account.id]
-                target = game_account.target_matches
-
-                await report_progress(
-                    context.task_id, "STEP4", "RUNNING",
-                    f"账号 {game_account.gamertag} 准备进行第{current_count}场比赛 "
-                    f"(今日已完成: {current_total}/{target})",
-                    {
-                        "gameAccountId": game_account.id,
-                        "gameAccountName": game_account.gamertag,
-                        "currentMatch": current_count,
-                        "todayCompleted": current_total,
-                        "dailyLimit": target,
-                        "matchStatus": "PREPARING"
-                    }
-                )
-
-                game_logger.info(f"进行第{current_count}场比赛 (今日已完成: {current_total}/{target})")
-
-                match_success = False
-                cleanup_needed = True
-                try:
-                    match_success, match_error_code, match_error_msg = await _execute_match_for_account(
-                    context, game_account, task_logger, game_logger, check_cancel, report_progress
-                )
-                    cleanup_needed = False
-                finally:
-                    if cleanup_needed:
-                        await _cleanup_account_resources(context, game_account, task_logger, game_logger)
-
-                if pause_after_match and pause_after_match():
-                    context.pause()
-                    await report_progress(
-                        context.task_id, "STEP4", "RUNNING",
-                        "本场完成后暂停",
-                        {"matchStatus": "PAUSE_AFTER_MATCH"},
+                if not switch_result.success:
+                    switch_msg = (
+                        f"账号 {game_account.gamertag} 切换失败: "
+                        f"{switch_result.error_message}"
                     )
-                    await context.wait_if_paused()
+                    task_logger.warning(switch_msg)
+                    game_logger.warning(switch_msg)
+                    stream_logger.warning(switch_msg)
+                    await report_progress(
+                        context.task_id,
+                        "STEP4",
+                        "RUNNING",
+                        switch_msg,
+                        {
+                            "gameAccountId": game_account.id,
+                            "gameAccountName": game_account.gamertag,
+                            "matchStatus": "SWITCH_FAILED",
+                            "accountStatus": "failed",
+                            "errorCode": "ACCOUNT_SWITCH_FAILED",
+                        },
+                    )
+                    account_index += 1
+                    continue
 
-                if match_success:
-                    consecutive_failures = 0
-                    context.matches_completed_today[game_account.id] += 1
-                    completed_matches += 1
-                    new_completed = context.matches_completed_today[game_account.id]
+                if launch_ok:
+                    login_confirmed = True
+                    confirm_msg = (
+                        f"账号 {game_account.gamertag} 已进入 FC/UT 界面（场景链确认）"
+                    )
+                    task_logger.info(confirm_msg)
+                    game_logger.info(confirm_msg)
+                    stream_logger.info(confirm_msg)
+                else:
+                    login_confirmed = await _detect_screen_state(
+                        context, "MAIN_MENU", task_logger, game_logger
+                    )
+                if not login_confirmed:
+                    msg = f"账号 {game_account.gamertag} 登录未确认，跳过该账号"
+                    task_logger.warning(msg)
+                    game_logger.warning(msg)
+                    stream_logger.warning(msg)
+                    await report_progress(
+                        context.task_id, "STEP4", "RUNNING", msg,
+                        {
+                            "gameAccountId": game_account.id,
+                            "gameAccountName": game_account.gamertag,
+                            "matchStatus": "LOGIN_UNCONFIRMED",
+                            "accountStatus": "failed",
+                            "errorCode": "LOGIN_UNCONFIRMED",
+                        }
+                    )
+                    account_index += 1
+                    continue
 
-                    task_logger.info(f"账号 {game_account.gamertag} 完成第{current_count}场比赛, "
-                               f"今日: {new_completed}/{target}")
-                    game_logger.info(f"完成第{current_count}场比赛, 今日: {new_completed}/{target}")
-                    stream_logger.info(f"游戏账号 {game_account.gamertag} 完成第{current_count}场比赛 (今日: {new_completed}/{target})")
+                game_action_type = _apply_task_type(context, game_account, task_logger)
+                stream_logger.info(
+                    f"账号 {game_account.gamertag} 登录已确认，应用游戏操作类型: "
+                    f"{game_action_type}"
+                )
 
-                    is_account_completed = new_completed >= target
-                    billing_unit = _resolve_billing_unit(game_action_type, current_total)
+                await asyncio.sleep(2.0)
 
-                    await _report_billable_event(
+                if _account_needs_transfer_phase(context, game_account, game_action_type):
+                    transfer_fatal, transfer_delta = await _run_transfer_phase_for_account(
                         context,
-                        platform_client,
                         game_account,
                         game_action_type,
-                        billing_unit,
-                        current_count,
                         task_logger,
+                        game_logger,
+                        check_cancel,
+                        report_progress,
+                        platform_client,
+                        target_rounds=_transfer_rounds_target(
+                            game_action_type, game_account
+                        ),
                     )
-
-                    await report_progress(
-                        context.task_id, "STEP4", "COMPLETED" if is_account_completed else "RUNNING",
-                        f"账号 {game_account.gamertag} 完成第{current_count}场比赛, "
-                        f"今日: {new_completed}/{target}",
-                        {
-                            "gameAccountId": game_account.id,
-                            "gameAccountName": game_account.gamertag,
-                            "currentMatch": current_count,
-                            "todayCompleted": new_completed,
-                            "dailyLimit": target,
-                            "matchStatus": "COMPLETED",
-                            "accountCompleted": is_account_completed
-                        }
-                    )
-                else:
-                    consecutive_failures += 1
-                    task_logger.warning(f"账号 {game_account.gamertag} 第{current_count}场比赛失败: {match_error_msg}")
-                    game_logger.warning(f"第{current_count}场比赛失败: {match_error_msg}")
-                    stream_logger.warning(f"游戏账号 {game_account.gamertag} 第{current_count}场比赛失败: {match_error_msg}")
-
-                    await report_progress(
-                        context.task_id, "STEP4", "RUNNING",
-                        f"账号 {game_account.gamertag} 第{current_count}场比赛失败，将继续下一场",
-                        {
-                            "gameAccountId": game_account.id,
-                            "gameAccountName": game_account.gamertag,
-                            "currentMatch": current_count,
-                            "todayCompleted": current_total,
-                            "dailyLimit": target,
-                            "matchStatus": "FAILED",
-                            "matchErrorCode": match_error_code,
-                            "matchErrorMessage": match_error_msg
-                        }
-                    )
-                    if consecutive_failures >= max_match_failures:
-                        error_msg = (
-                            f"账号 {game_account.gamertag} 连续 {consecutive_failures} 次比赛失败，"
-                            "停止该轮自动化以保留串流供重试"
-                        )
-                        task_logger.error(error_msg)
-                        game_logger.error(error_msg)
-                        stream_logger.error(error_msg)
-                        context.update_step_status("step4", TaskStepStatus.FAILED, error_msg)
-                        await _report_step4_failure(
-                            context, report_progress, error_msg, keep_session_alive, task_logger
-                        )
-                        if not keep_session_alive:
-                            await _close_task_window(window_manager, context.task_id, "match_fail_bound", task_logger)
+                    completed_matches += transfer_delta
+                    if transfer_fatal is not None:
+                        return transfer_fatal
+                    if check_cancel():
                         return Step4Result(
                             success=False,
-                            error_code="NO_MATCHES_COMPLETED",
-                            message=error_msg,
-                            total_matches=completed_matches,
+                            error_code="CANCELLED",
+                            message="任务被取消",
                         )
-                    await asyncio.sleep(5)
 
-            task_logger.info(f"游戏账号 {game_account.gamertag} 今日已完成 "
-                       f"{game_account.target_matches} 场比赛")
-            game_logger.info(f"今日已完成 {game_account.target_matches} 场比赛")
-            stream_logger.info(f"游戏账号 {game_account.gamertag} 今日已完成 {game_account.target_matches} 场比赛")
+                if _requires_sqb_phase(game_action_type):
+                    sqb_fatal, sqb_completed_delta = await _run_sqb_phase_for_account(
+                        context,
+                        game_account,
+                        game_action_type,
+                        task_logger,
+                        game_logger,
+                        check_cancel,
+                        report_progress,
+                        platform_client,
+                        stream_runtime,
+                        pause_after_match,
+                        keep_session_alive,
+                        window_manager,
+                        completed_matches,
+                    )
+                    completed_matches += sqb_completed_delta
+                    if sqb_fatal is not None:
+                        return sqb_fatal
+
+                if _requires_sqb_phase(game_action_type):
+                    final_sqb = context.matches_completed_today[game_account.id]
+                    task_logger.info(
+                        "游戏账号 %s 今日 SQB 已完成 %s/%s 场",
+                        game_account.gamertag,
+                        final_sqb,
+                        game_account.target_matches,
+                    )
+                    game_logger.info(
+                        f"今日 SQB 已完成 {final_sqb}/{game_account.target_matches} 场"
+                    )
+                elif game_action_type == 'auction_transfer':
+                    task_logger.info(
+                        "游戏账号 %s 本会话转会已完成",
+                        game_account.gamertag,
+                    )
+                    game_logger.info("本会话转会已完成")
+
+                exit_reason = _account_exit_fc_reason(game_action_type)
+                task_logger.info(
+                    "账号 %s %s，退出 FC 回 Xbox 主页",
+                    game_account.gamertag,
+                    exit_reason,
+                )
+                game_logger.info(f"[FC 退出] {exit_reason}")
+                stream_logger.info(
+                    f"账号 {game_account.gamertag} {exit_reason}，退出 FC"
+                )
+                exit_ok = await switcher.exit_fc_to_xbox_home()
+                if not exit_ok:
+                    task_logger.warning(
+                        "账号 %s 退出 FC 回主页未确认",
+                        game_account.gamertag,
+                    )
+                    stream_logger.warning(
+                        f"账号 {game_account.gamertag} 退出 FC 回主页超时"
+                    )
+
+                remaining_accounts = [
+                    ga for ga in context.game_accounts[account_index + 1:]
+                    if account_has_remaining_work(context, ga, skipped)
+                ]
+                if remaining_accounts:
+                    task_logger.info(
+                        "还有 %s 个游戏账号待处理",
+                        len(remaining_accounts),
+                    )
+
+                account_index += 1
+            except ResumeReanchor:
+                restart_idx = await checkpoint_resume_reanchor(
+                    context, switcher, task_logger, skipped
+                )
+                if restart_idx is not None:
+                    account_index = restart_idx
+                    if account_index >= len(context.game_accounts):
+                        break
+                continue
 
         if total_matches > 0 and completed_matches == 0:
             error_msg = "游戏自动化结束但未完成任何比赛"
@@ -1230,11 +1517,17 @@ async def step4_execute_gaming(
         return Step4Result(success=False, error_code="EXCEPTION", message=error_msg)
 
     finally:
-        if global_async_tasks:
-            task_logger.info("[全局异步] 停止帧捕获、显示和场景检测任务")
-            global_cancel_event.set()
-            await asyncio.gather(*global_async_tasks, return_exceptions=True)
-            task_logger.info("[全局异步] 帧捕获、显示和场景检测任务已停止")
+        await _fc_terminate_match_session(context, task_logger)
+        await stream_runtime.stop_automation()
+        task_logger.info("StreamRuntime 自动化循环已停止（capture/display 保留）")
+        if keep_session_alive:
+            from ..xbox.stream_session_survival import (
+                schedule_ensure_stream_subsystems_alive,
+            )
+
+            schedule_ensure_stream_subsystems_alive(
+                context, reason="step4_finally"
+            )
 
 
 async def _close_task_window(window_manager, task_id: str, reason: str, task_logger):
@@ -1263,6 +1556,7 @@ async def _init_game_automation(
     context: AgentTaskContext,
     task_logger,
     platform_client: Optional[Any] = None,
+    report_progress: Optional[Callable[[str, str, str, Optional[Dict]], None]] = None,
     input_gate: Optional[Any] = None,
 ):
     """
@@ -1314,6 +1608,7 @@ async def _init_game_automation(
         executor = ActionExecutor()
         if input_gate is not None:
             executor.set_input_gate(input_gate)
+        executor.set_task_context(context)
         if context.xbox_session:
             executor.set_xbox_session(context.xbox_session)
             task_logger.info("动作执行器已绑定Xbox会话")
@@ -1336,11 +1631,7 @@ async def _init_game_automation(
                 'gamertag': ga.gamertag,
                 'email': getattr(ga, 'email', None) or None,
                 'password': getattr(ga, 'password', None) or None,
-                'position_index': (
-                    ga.position_index if getattr(ga, 'position_index', -1) >= 0 else idx
-                ),
                 'is_new_user': bool(getattr(ga, 'is_new_user', False)),
-                'profile_bound': bool(getattr(ga, 'profile_bound', False)),
                 'max_matches_per_day': ga.target_matches,
             }
             for idx, ga in enumerate(context.game_accounts)
@@ -1353,27 +1644,35 @@ async def _init_game_automation(
             switcher.set_stream_session(context.xbox_session)
 
         async def _reconnect_input_and_rebind() -> bool:
-            from ..xbox.stream_recovery import reconnect_input_channel, rebind_stream_bindings
+            from ..xbox.stream_recovery import install_task_input_recovery
+
+            install_task_input_recovery(
+                context,
+                task_logger,
+                executor=executor,
+                switcher=switcher,
+                engine=engine,
+            )
+
+            async def _noop_report(*_args, **_kwargs):
+                return None
+
+            rp = report_progress or _noop_report
 
             await _report_input_channel_event(
                 context,
-                report_progress,
+                rp,
                 "RUNNING",
                 "Input DataChannel 已关闭，正在重连",
                 "input_reconnecting",
                 task_logger,
             )
-            ok = await reconnect_input_channel(context, task_logger)
+            base_cb = getattr(context, "_input_reconnect_base", None)
+            ok = await base_cb() if base_cb else False
             if ok:
-                rebind_stream_bindings(
-                    context,
-                    executor=executor,
-                    switcher=switcher,
-                    engine=engine,
-                )
                 await _report_input_channel_event(
                     context,
-                    report_progress,
+                    rp,
                     "RUNNING",
                     "Input DataChannel 已恢复",
                     "input_restored",
@@ -1382,7 +1681,7 @@ async def _init_game_automation(
             else:
                 await _report_input_channel_event(
                     context,
-                    report_progress,
+                    rp,
                     "FAILED",
                     "Input DataChannel 重连失败",
                     "input_reconnect_failed",
@@ -1392,22 +1691,21 @@ async def _init_game_automation(
 
         switcher.set_reconnect_callback(_reconnect_input_and_rebind)
         switcher.set_task_context(context)
+        context._account_switcher = switcher
+        context._input_reconnect_callback = _reconnect_input_and_rebind
 
         if platform_client and hasattr(platform_client, "update_profile_binding"):
 
-            async def _mark_profile_bound(
+            async def _sync_gamertag_to_platform(
                 ga_id: str,
-                position_index: int,
                 game_name: Optional[str] = None,
             ) -> None:
                 await platform_client.update_profile_binding(
                     ga_id,
-                    profile_bound=True,
-                    position_index=position_index,
                     game_name=game_name,
                 )
 
-            switcher.set_profile_bound_callback(_mark_profile_bound)
+            switcher.set_gamertag_sync_callback(_sync_gamertag_to_platform)
 
         streaming_detector = None
         if context.frame_capture:
@@ -1416,7 +1714,9 @@ async def _init_game_automation(
                 switcher.set_scene_detector(streaming_detector)
 
                 async def _capture_for_switcher():
-                    return await context.frame_capture.capture_frame()
+                    from ..runtime.stream_runtime import capture_task_frame
+
+                    return await capture_task_frame(context, timeout=0.8)
 
                 switcher.set_frame_getter(_capture_for_switcher)
             except Exception as e:
@@ -1443,6 +1743,368 @@ async def _init_game_automation(
     except Exception as e:
         task_logger.error(f"初始化游戏自动化引擎失败: {e}")
         return None, None
+
+
+async def _run_transfer_phase_for_account(
+    context: AgentTaskContext,
+    game_account: GameAccountInfo,
+    game_action_type: str,
+    task_logger,
+    game_logger,
+    check_cancel: Callable[[], bool],
+    report_progress: Callable[[str, str, str, Optional[Dict]], None],
+    platform_client: Optional[Any],
+    target_rounds: int,
+) -> tuple:
+    """
+    转会阶段：进入 FC/UT 后执行，与 SQB 比赛阶段分离。
+
+    返回 (fatal Step4Result 或 None, 完成的转会轮数)
+    """
+    if target_rounds <= 0:
+        return None, 0
+
+    action = _normalize_game_action_type(game_action_type)
+    rounds_done = 0
+    consecutive_failures = 0
+    max_failures = 3
+
+    task_logger.info(
+        "[转会阶段] 账号 %s 目标 %s 轮 (mode=%s)",
+        game_account.gamertag,
+        target_rounds,
+        action,
+    )
+    game_logger.info(f"[转会阶段] 目标 {target_rounds} 轮")
+
+    while rounds_done < target_rounds:
+        if check_cancel():
+            return (
+                Step4Result(
+                    success=False, error_code="CANCELLED", message="任务被取消"
+                ),
+                rounds_done,
+            )
+
+        await context.wait_if_paused()
+        from ..runtime.pause_input_control import raise_if_resume_reanchor
+
+        raise_if_resume_reanchor(context)
+
+        round_no = rounds_done + 1
+        await report_progress(
+            context.task_id,
+            "STEP4",
+            "RUNNING",
+            f"账号 {game_account.gamertag} 转会第 {round_no}/{target_rounds} 轮",
+            {
+                "gameAccountId": game_account.id,
+                "gameAccountName": game_account.gamertag,
+                "currentTransferRound": round_no,
+                "transferTarget": target_rounds,
+                "matchStatus": "TRANSFER_PREPARING",
+                "gameActionType": game_action_type,
+            },
+        )
+
+        success, error_code, error_msg = await _execute_transfer_round(
+            context,
+            game_account,
+            task_logger,
+            game_logger,
+            report_progress,
+        )
+        if success:
+            consecutive_failures = 0
+            rounds_done += 1
+
+            await _report_billable_event(
+                context,
+                platform_client,
+                game_account,
+                game_action_type,
+                _resolve_billing_unit(game_action_type, phase="transfer"),
+                round_no,
+                task_logger,
+            )
+            task_logger.info(
+                "账号 %s 完成转会第 %s/%s 轮",
+                game_account.gamertag,
+                round_no,
+                target_rounds,
+            )
+            game_logger.info(f"[转会阶段] 完成第 {round_no}/{target_rounds} 轮")
+
+            if action == 'transfer_sqb_combo' and round_no >= target_rounds:
+                task_logger.info(
+                    "账号 %s 转会阶段完成，即将进入 SQB 比赛阶段",
+                    game_account.gamertag,
+                )
+                game_logger.info("[转会阶段] 完成，接 SQB")
+        else:
+            consecutive_failures += 1
+            task_logger.warning(
+                "账号 %s 转会第 %s 轮失败: %s",
+                game_account.gamertag,
+                round_no,
+                error_msg,
+            )
+            game_logger.warning(f"[转会阶段] 第 {round_no} 轮失败: {error_msg}")
+            await report_progress(
+                context.task_id,
+                "STEP4",
+                "RUNNING",
+                f"账号 {game_account.gamertag} 转会第 {round_no} 轮失败",
+                {
+                    "gameAccountId": game_account.id,
+                    "gameAccountName": game_account.gamertag,
+                    "matchStatus": "TRANSFER_FAILED",
+                    "matchErrorCode": error_code,
+                    "matchErrorMessage": error_msg,
+                },
+            )
+            if consecutive_failures >= max_failures:
+                error_msg_full = (
+                    f"账号 {game_account.gamertag} 连续 {consecutive_failures} "
+                    "次转会失败，停止该轮自动化"
+                )
+                task_logger.error(error_msg_full)
+                context.update_step_status(
+                    "step4", TaskStepStatus.FAILED, error_msg_full
+                )
+                return (
+                    Step4Result(
+                        success=False,
+                        error_code=error_code or "TRANSFER_FAILED",
+                        message=error_msg_full,
+                    ),
+                    rounds_done,
+                )
+            await asyncio.sleep(5)
+
+    if rounds_done >= target_rounds:
+        context._transfer_phase_done_account_ids.add(game_account.id)
+
+    return None, rounds_done
+
+
+async def _run_sqb_phase_for_account(
+    context: AgentTaskContext,
+    game_account: GameAccountInfo,
+    game_action_type: str,
+    task_logger,
+    game_logger,
+    check_cancel: Callable[[], bool],
+    report_progress: Callable[[str, str, str, Optional[Dict]], None],
+    platform_client: Optional[Any],
+    stream_runtime,
+    pause_after_match: Optional[Callable[[], bool]],
+    keep_session_alive: bool,
+    window_manager,
+    completed_matches: int,
+) -> tuple:
+    """
+    SQB 比赛阶段：进入 FC/UT 后执行（组合模式在转会阶段之后自动进入）。
+
+    返回 (fatal Step4Result 或 None, 本轮新完成的比赛数)
+    """
+    consecutive_failures = 0
+    max_match_failures = 3
+    delta = 0
+    target = game_account.target_matches
+
+    task_logger.info(
+        "[SQB阶段] 账号 %s 目标 %s 场 (mode=%s)",
+        game_account.gamertag,
+        target,
+        game_action_type,
+    )
+    game_logger.info(f"[SQB阶段] 目标 {target} 场")
+
+    while context.matches_completed_today[game_account.id] < target:
+        if check_cancel():
+            return (
+                Step4Result(
+                    success=False,
+                    error_code="CANCELLED",
+                    message="任务被取消",
+                ),
+                delta,
+            )
+
+        await context.wait_if_paused()
+        from ..runtime.pause_input_control import raise_if_resume_reanchor
+
+        raise_if_resume_reanchor(context)
+
+        current_count = context.matches_completed_today[game_account.id] + 1
+        current_total = context.matches_completed_today[game_account.id]
+
+        await report_progress(
+            context.task_id,
+            "STEP4",
+            "RUNNING",
+            f"账号 {game_account.gamertag} 准备 SQB 第 {current_count} 场 "
+            f"(今日 {current_total}/{target})",
+            {
+                "gameAccountId": game_account.id,
+                "gameAccountName": game_account.gamertag,
+                "currentMatch": current_count,
+                "todayCompleted": current_total,
+                "dailyLimit": target,
+                "matchStatus": "PREPARING",
+                "gameActionType": game_action_type,
+            },
+        )
+        game_logger.info(
+            f"SQB 第 {current_count} 场 (今日 {current_total}/{target})"
+        )
+
+        match_success = False
+        cleanup_needed = True
+        try:
+            match_success, match_error_code, match_error_msg = (
+                await _execute_match_for_account(
+                    context,
+                    game_account,
+                    task_logger,
+                    game_logger,
+                    check_cancel,
+                    report_progress,
+                    frame_queue=stream_runtime.frame_queue,
+                    scene_queue=stream_runtime.scene_queue,
+                )
+            )
+            cleanup_needed = False
+        finally:
+            if cleanup_needed:
+                await _cleanup_account_resources(
+                    context, game_account, task_logger, game_logger
+                )
+
+        if pause_after_match and pause_after_match():
+            from ..runtime.pause_input_control import release_automation_input
+
+            await release_automation_input(context, task_logger)
+            context.pause()
+            await report_progress(
+                context.task_id,
+                "STEP4",
+                "RUNNING",
+                "本场完成后暂停",
+                {"matchStatus": "PAUSE_AFTER_MATCH"},
+            )
+            await context.wait_if_paused()
+            from ..runtime.pause_input_control import raise_if_resume_reanchor
+
+            raise_if_resume_reanchor(context)
+
+        if match_success:
+            consecutive_failures = 0
+            context.matches_completed_today[game_account.id] += 1
+            delta += 1
+            new_completed = context.matches_completed_today[game_account.id]
+
+            task_logger.info(
+                "账号 %s 完成 SQB 第 %s 场, 今日 %s/%s",
+                game_account.gamertag,
+                current_count,
+                new_completed,
+                target,
+            )
+            game_logger.info(
+                f"完成 SQB 第 {current_count} 场, 今日 {new_completed}/{target}"
+            )
+
+            is_account_completed = new_completed >= target
+            await _report_billable_event(
+                context,
+                platform_client,
+                game_account,
+                game_action_type,
+                _resolve_billing_unit(game_action_type, phase="match"),
+                current_count,
+                task_logger,
+            )
+            await report_progress(
+                context.task_id,
+                "STEP4",
+                "COMPLETED" if is_account_completed else "RUNNING",
+                f"账号 {game_account.gamertag} 完成 SQB 第 {current_count} 场, "
+                f"今日 {new_completed}/{target}",
+                {
+                    "gameAccountId": game_account.id,
+                    "gameAccountName": game_account.gamertag,
+                    "currentMatch": current_count,
+                    "todayCompleted": new_completed,
+                    "dailyLimit": target,
+                    "matchStatus": "COMPLETED",
+                    "accountCompleted": is_account_completed,
+                },
+            )
+        else:
+            consecutive_failures += 1
+            task_logger.warning(
+                "账号 %s SQB 第 %s 场失败: %s",
+                game_account.gamertag,
+                current_count,
+                match_error_msg,
+            )
+            game_logger.warning(
+                f"SQB 第 {current_count} 场失败: {match_error_msg}"
+            )
+            await report_progress(
+                context.task_id,
+                "STEP4",
+                "RUNNING",
+                f"账号 {game_account.gamertag} SQB 第 {current_count} 场失败，将继续",
+                {
+                    "gameAccountId": game_account.id,
+                    "gameAccountName": game_account.gamertag,
+                    "currentMatch": current_count,
+                    "todayCompleted": current_total,
+                    "dailyLimit": target,
+                    "matchStatus": "FAILED",
+                    "matchErrorCode": match_error_code,
+                    "matchErrorMessage": match_error_msg,
+                },
+            )
+            if consecutive_failures >= max_match_failures:
+                error_msg = (
+                    f"账号 {game_account.gamertag} 连续 {consecutive_failures} "
+                    "次 SQB 失败，停止该轮自动化以保留串流供重试"
+                )
+                task_logger.error(error_msg)
+                game_logger.error(error_msg)
+                context.update_step_status(
+                    "step4", TaskStepStatus.FAILED, error_msg
+                )
+                await _report_step4_failure(
+                    context,
+                    report_progress,
+                    error_msg,
+                    keep_session_alive,
+                    task_logger,
+                )
+                if not keep_session_alive:
+                    await _close_task_window(
+                        window_manager,
+                        context.task_id,
+                        "match_fail_bound",
+                        task_logger,
+                    )
+                return (
+                    Step4Result(
+                        success=False,
+                        error_code="NO_MATCHES_COMPLETED",
+                        message=error_msg,
+                        total_matches=completed_matches + delta,
+                    ),
+                    delta,
+                )
+            await asyncio.sleep(5)
+
+    return None, delta
 
 
 async def _execute_match_for_account(
@@ -1481,24 +2143,16 @@ async def _execute_match_for_account(
     返回：
     - tuple: (success: bool, error_code: Optional[str], error_message: Optional[str])
     """
-    task_logger.info(f"执行比赛: {game_account.gamertag}")
-    game_logger.info("执行比赛")
+    task_logger.info(f"执行 SQB 比赛: {game_account.gamertag}")
+    game_logger.info("执行 SQB 比赛")
 
-    action_type = _normalize_game_action_type(context.game_action_type)
-    if action_type == 'transfer_sqb_combo':
-        completed = context.matches_completed_today.get(game_account.id, 0)
-        if completed % 2 == 0:
-            await _navigate_to_auction(context, task_logger, game_logger)
-            game_logger.info("组合模式: 转会阶段完成")
-            return True, None, None
-        action_type = 'squad_battle'
+    from ..runtime.pause_input_control import ResumeReanchor
 
     try:
-        if action_type == 'auction_transfer':
-            await _navigate_to_auction(context, task_logger, game_logger)
-            return True, None, None
-
-        await _enter_match(context, game_account, task_logger, game_logger, report_progress)
+        if not await _enter_match(
+            context, game_account, task_logger, game_logger, report_progress
+        ):
+            return False, "SQB_NAV_FAILED", "SQB 场景导航失败"
 
         await _wait_for_match_start(context, game_account, task_logger, game_logger, report_progress)
 
@@ -1514,6 +2168,8 @@ async def _execute_match_for_account(
         game_logger.info("比赛完成")
         return True, None, None
 
+    except ResumeReanchor:
+        raise
     except asyncio.CancelledError as e:
         task_logger.error(f"比赛执行取消: {e}")
         game_logger.error(f"比赛执行取消: {e}")
@@ -1541,34 +2197,27 @@ async def _navigate_to_game_mode(
     game_action_type: str,
     task_logger,
     game_logger
-) -> None:
+) -> bool:
     """
     根据 game_action_type 导航到对应的游戏模式
 
-    导航分发中心，根据不同的 game_action_type 调用对应的导航函数。
-
-    参数：
-    - context: 任务上下文
-    - game_action_type: 游戏操作类型 (auction_transfer/squad_battle/divisions_rivals/weekend_league)
-    - task_logger: 任务日志记录器
-    - game_logger: 游戏账号专用日志记录器
+    返回：SQB/组合模式 SQB 段是否导航成功；其他类型暂返回 True。
     """
     task_logger.info(f"开始导航到游戏模式: {game_action_type}")
 
     if game_action_type == 'auction_transfer':
-        await _navigate_to_auction(context, task_logger, game_logger)
-    elif game_action_type == 'squad_battle':
-        await _navigate_to_squad_battle(context, task_logger, game_logger)
-    elif game_action_type == 'divisions_rivals':
+        return await _navigate_to_auction(context, task_logger, game_logger)
+    if game_action_type == 'squad_battle':
+        return await _navigate_to_squad_battle(context, task_logger, game_logger)
+    if game_action_type == 'divisions_rivals':
         await _navigate_to_dr(context, task_logger, game_logger)
-    elif game_action_type == 'weekend_league':
+        return True
+    if game_action_type == 'weekend_league':
         await _navigate_to_weekend_league(context, task_logger, game_logger)
-    elif game_action_type == 'transfer_sqb_combo':
-        await _navigate_to_auction(context, task_logger, game_logger)
-        await _navigate_to_squad_battle(context, task_logger, game_logger)
-    else:
-        task_logger.warning(f"未知的游戏操作类型: {game_action_type}，默认导航到SQB模式")
-        await _navigate_to_squad_battle(context, task_logger, game_logger)
+        return True
+
+    task_logger.warning(f"未知的游戏操作类型: {game_action_type}，默认导航到SQB模式")
+    return await _navigate_to_squad_battle(context, task_logger, game_logger)
 
 
 async def _press_button(context: AgentTaskContext, button: XboxButtonFlag, duration: float = 0.3) -> bool:
@@ -1597,53 +2246,166 @@ async def _navigate_to_auction(
     context: AgentTaskContext,
     task_logger,
     game_logger
-) -> None:
+) -> bool:
     """
-    导航到拍卖行转会界面
+    导航到 UT 转会 Tab（scene 152）
 
-    导航路径：主页 → UT → Transfer Market
+    路径：127/147/149 → LB → 152（`AUCTION_UT_CHAIN` + `trim_auction_navigation_chain`）
 
-    操作序列：
-    1. 从主页按 RB×3 + A 进入 UT 菜单
-    2. 按 LB + A 进入 Transfer Market
+    返回：是否到达转会 Tab（152）。
     """
-    task_logger.info("导航到拍卖行转会界面")
-    game_logger.info("[拍卖行] 开始导航到拍卖行")
+    from configs.scene_transitions import (
+        AUCTION_COMPLETE_SCENES,
+        AUCTION_NAVIGATION_SCENES,
+        trim_auction_navigation_chain,
+    )
+
+    task_logger.info("导航到转会 Tab (scene_transitions 链)")
+    game_logger.info("[转会] 开始导航 (scene_transitions 链)")
+
+    switcher = getattr(context, '_account_switcher', None)
 
     try:
-        # 1. 进入 UT 菜单：RB×3 + A
-        task_logger.info("[拍卖行] 步骤1: 进入UT菜单 (RB×3 + A)")
-        for _ in range(3):
-            await _press_button(context, XboxButtonFlag.R1, 0.2)
-            await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
-        await _press_button(context, XboxButtonFlag.A, 0.5)
-        await asyncio.sleep(2)
+        if not switcher:
+            task_logger.error("[转会] account_switcher 未初始化")
+            game_logger.error("[转会] account_switcher 未初始化")
+            return False
 
-        # 2. 进入 Transfer Market：LB + A
-        task_logger.info("[拍卖行] 步骤2: 进入Transfer Market (LB + A)")
-        await _press_button(context, XboxButtonFlag.L1, 0.3)
-        await asyncio.sleep(NAVIGATION_CONFIG['button_press_delay'])
-        await _press_button(context, XboxButtonFlag.A, 0.5)
-        await asyncio.sleep(2)
+        current = await switcher._detect_any_scene(
+            AUCTION_NAVIGATION_SCENES, strict=False
+        )
+        chain = trim_auction_navigation_chain(current)
+        if not chain:
+            task_logger.info("[转会] 已在转会 Tab (scene152)，跳过导航")
+            game_logger.info("[转会] 已在 scene152")
+            return True
 
-        task_logger.info("[拍卖行] 导航完成，等待拍卖行界面加载")
-        game_logger.info("[拍卖行] 导航完成")
+        task_logger.info(f"[转会] 当前 scene={current}，执行链: {chain}")
+        game_logger.info(f"[转会] 链: {chain}")
+
+        ok = await switcher.run_scene_transition_chain(
+            chain,
+            label="AUCTION",
+            complete_scenes=AUCTION_COMPLETE_SCENES,
+        )
+        if ok:
+            task_logger.info("[转会] 场景转移链完成")
+            game_logger.info("[转会] 导航完成")
+            return True
+
+        task_logger.error("[转会] 场景转移链未完成")
+        game_logger.error("[转会] 导航失败，请检查 logs/debug_scene*.png")
+        return False
 
     except Exception as e:
-        task_logger.error(f"[拍卖行] 导航异常: {e}")
-        game_logger.error(f"[拍卖行] 导航异常: {e}")
+        task_logger.error(f"[转会] 导航异常: {e}")
+        game_logger.error(f"[转会] 导航异常: {e}")
+        return False
+
+
+async def _execute_transfer_round(
+    context: AgentTaskContext,
+    game_account: GameAccountInfo,
+    task_logger,
+    game_logger,
+    report_progress: Callable[[str, str, str, Optional[Dict]], None],
+) -> tuple:
+    """
+    执行一轮转会任务（最小闭环）：导航到 152 → 进入转会中心 → 返回 UT 主菜单。
+
+    返回：(success, error_code, error_message)
+    """
+    from configs.scene_transitions import (
+        AUCTION_ENTRY_DWELL_SEC,
+        AUCTION_EXIT_DISMISS_TIMEOUT,
+        AUCTION_NAVIGATION_SCENES,
+    )
+
+    task_logger.info(f"执行转会轮次: {game_account.gamertag}")
+    game_logger.info("[转会] 开始 transfer_round")
+
+    switcher = getattr(context, "_account_switcher", None)
+    if not switcher:
+        return False, "TRANSFER_SWITCHER_MISSING", "account_switcher 未初始化"
+
+    on_menu = await _detect_screen_state(
+        context, "MAIN_MENU", task_logger, game_logger
+    )
+    if not on_menu:
+        task_logger.warning("[转会] 未确认 UT 主菜单，仍尝试导航")
+
+    nav_ok = await _navigate_to_auction(context, task_logger, game_logger)
+    if not nav_ok:
+        await report_progress(
+            context.task_id, "STEP4", "RUNNING",
+            f"账号 {game_account.gamertag} 转会导航失败",
+            {
+                "gameAccountId": game_account.id,
+                "gameAccountName": game_account.gamertag,
+                "matchStatus": "TRANSFER_NAV_FAILED",
+                "errorCode": "TRANSFER_NAV_FAILED",
+            },
+        )
+        return False, "TRANSFER_NAV_FAILED", "转会场景导航失败"
+
+    await report_progress(
+        context.task_id, "STEP4", "RUNNING",
+        f"账号 {game_account.gamertag} 已进入转会 Tab",
+        {
+            "gameAccountId": game_account.id,
+            "gameAccountName": game_account.gamertag,
+            "matchStatus": "TRANSFER_TAB",
+        },
+    )
+
+    task_logger.info("[转会] 按 A 进入转会中心（占位）")
+    game_logger.info("[转会] 进入转会中心")
+    await switcher._press_button("A", duration=0.15)
+    await asyncio.sleep(AUCTION_ENTRY_DWELL_SEC)
+
+    task_logger.info("[转会] 返回 UT 主菜单")
+    exit_ok = await switcher.dismiss_until_scenes(
+        UT_MENU_SCENE_IDS,
+        timeout=AUCTION_EXIT_DISMISS_TIMEOUT,
+        label="TRANSFER-EXIT",
+        probe_scene_ids=AUCTION_NAVIGATION_SCENES,
+    )
+    if not exit_ok:
+        task_logger.warning("[转会] 返回 UT 主菜单超时，仍计为本轮完成")
+        for _ in range(8):
+            await switcher._press_button("B", duration=0.1)
+            await asyncio.sleep(0.45)
+            hit = await switcher._detect_any_scene(UT_MENU_SCENE_IDS, strict=False)
+            if hit in UT_MENU_SCENE_IDS:
+                exit_ok = True
+                break
+
+    await report_progress(
+        context.task_id, "STEP4", "RUNNING",
+        f"账号 {game_account.gamertag} 转会轮次完成",
+        {
+            "gameAccountId": game_account.id,
+            "gameAccountName": game_account.gamertag,
+            "matchStatus": "TRANSFER_ROUND_COMPLETE",
+            "returnedToMenu": exit_ok,
+        },
+    )
+    game_logger.info("[转会] transfer_round 完成")
+    return True, None, None
 
 
 async def _navigate_to_squad_battle(
     context: AgentTaskContext,
     task_logger,
     game_logger
-) -> None:
+) -> bool:
     """
     导航到 SQB 模式（读取 SCENE_TRANSITIONS 链）
 
     路径：147 → 149 → 155 → 156 → 168 → 177(业余A) → 183 → 189
     对齐 streaming get_scenes_diagram / configs.scene_transitions.SQB_UT_MENU_CHAIN
+
+    返回：是否到达 SQB 赛前界面（189）或链执行成功。
     """
     from configs.scene_transitions import (
         SQB_COMPLETE_SCENES,
@@ -1660,7 +2422,7 @@ async def _navigate_to_squad_battle(
         if not switcher:
             task_logger.error("[SQB] account_switcher 未初始化，无法执行场景转移链")
             game_logger.error("[SQB] account_switcher 未初始化")
-            return
+            return False
 
         current = await switcher._detect_any_scene(
             SQB_NAVIGATION_SCENES, strict=False
@@ -1669,7 +2431,7 @@ async def _navigate_to_squad_battle(
         if not chain:
             task_logger.info("[SQB] 已在赛前界面 (scene189)，跳过导航")
             game_logger.info("[SQB] 已在 scene189")
-            return
+            return True
 
         task_logger.info(f"[SQB] 当前 scene={current}，执行链: {chain}")
         game_logger.info(f"[SQB] 链: {chain}")
@@ -1682,13 +2444,16 @@ async def _navigate_to_squad_battle(
         if ok:
             task_logger.info("[SQB] 场景转移链完成，等待匹配")
             game_logger.info("[SQB] 导航完成")
-        else:
-            task_logger.error("[SQB] 场景转移链未完成")
-            game_logger.error("[SQB] 导航失败，请检查 logs/debug_scene*.png")
+            return True
+
+        task_logger.error("[SQB] 场景转移链未完成")
+        game_logger.error("[SQB] 导航失败，请检查 logs/debug_scene*.png")
+        return False
 
     except Exception as e:
         task_logger.error(f"[SQB] 导航异常: {e}")
         game_logger.error(f"[SQB] 导航异常: {e}")
+        return False
 
 
 async def _navigate_to_dr(
@@ -1805,22 +2570,11 @@ async def _enter_match(
     task_logger,
     game_logger,
     report_progress: Callable[[str, str, str, Optional[Dict]], None]
-):
+) -> bool:
     """
     进入比赛准备
 
-    状态上报：比赛准备开始 (GAME_PREPARING)
-
-    画面检测：
-    - 检测是否在游戏主界面
-    - 导航到对应的游戏模式（根据 game_action_type）
-
-    参数：
-    - context: 任务上下文（包含 game_action_type）
-    - game_account: 游戏账号信息
-    - task_logger: 任务日志记录器
-    - game_logger: 游戏账号专用日志记录器
-    - report_progress: 进度上报函数
+    返回：False 表示 SQB 等导航失败，调用方应跳过本场。
     """
     task_logger.info(f"进入比赛准备: {game_account.gamertag}")
     game_logger.info("[场景: MAIN_MENU] 进入比赛准备")
@@ -1830,27 +2584,81 @@ async def _enter_match(
     )
     task_logger.info(f"游戏主界面检测: {screen_detected}")
 
-    # 获取游戏操作类型并导航到对应模式
+    # 组合模式转会阶段结束后，SQB 导航/比赛固定走 squad_battle 路径
     game_action_type = _normalize_game_action_type(context.game_action_type)
-    task_logger.info(f"根据游戏操作类型导航: {game_action_type}")
+    nav_mode = (
+        'squad_battle'
+        if game_action_type in ('transfer_sqb_combo', 'squad_battle')
+        else game_action_type
+    )
+    task_logger.info(f"SQB 比赛导航模式: {nav_mode} (task={game_action_type})")
 
-    # 导航到对应的游戏模式
-    await _navigate_to_game_mode(context, game_action_type, task_logger, game_logger)
+    nav_ok = await _navigate_to_game_mode(
+        context, nav_mode, task_logger, game_logger
+    )
+    if not nav_ok:
+        task_logger.error("[SQB] 导航失败，跳过本场比赛")
+        game_logger.error("[SQB] 导航失败")
+        await report_progress(
+            context.task_id, "STEP4", "RUNNING",
+            f"账号 {game_account.gamertag} SQB 导航失败",
+            {
+                "gameAccountId": game_account.id,
+                "gameAccountName": game_account.gamertag,
+                "matchStatus": "SQB_NAV_FAILED",
+                "errorCode": "SQB_NAV_FAILED",
+            },
+        )
+        return False
 
     await report_progress(
         context.task_id, "STEP4", "GAME_PREPARING",
-        f"账号 {game_account.gamertag} 导航到{game_action_type}完成",
+        f"账号 {game_account.gamertag} 导航到 {nav_mode} 完成",
         {
             "gameAccountId": game_account.id,
             "gameAccountName": game_account.gamertag,
             "gameActionType": game_action_type,
+            "navMode": nav_mode,
             "todayCompleted": context.matches_completed_today[game_account.id],
             "dailyLimit": game_account.target_matches,
             "matchStatus": "PREPARING"
         }
     )
 
+    if nav_mode == "squad_battle":
+        switcher = getattr(context, "_account_switcher", None)
+        if switcher:
+            from configs.scene_transitions import (
+                SQB_PREMATCH_DISMISS_TIMEOUT,
+                SQB_PREMATCH_PROBE_SCENES,
+                SQB_PREMATCH_TARGETS,
+            )
+
+            task_logger.info("[SQB] 赛前弹窗处理：189 → 开球")
+            game_logger.info("[SQB] dismiss_until_scenes 开球前")
+            kickoff_ok = await switcher.dismiss_until_scenes(
+                SQB_PREMATCH_TARGETS,
+                timeout=SQB_PREMATCH_DISMISS_TIMEOUT,
+                label="SQB-PREMATCH",
+                probe_scene_ids=SQB_PREMATCH_PROBE_SCENES,
+            )
+            if not kickoff_ok:
+                task_logger.error("[SQB] 开球前场景处理超时")
+                game_logger.error("[SQB] 开球前超时")
+                await report_progress(
+                    context.task_id, "STEP4", "RUNNING",
+                    f"账号 {game_account.gamertag} SQB 开球前超时",
+                    {
+                        "gameAccountId": game_account.id,
+                        "gameAccountName": game_account.gamertag,
+                        "matchStatus": "SQB_KICKOFF_FAILED",
+                        "errorCode": "SQB_KICKOFF_FAILED",
+                    },
+                )
+                return False
+
     await asyncio.sleep(1)
+    return True
 
 
 async def _wait_for_match_start(
@@ -1892,6 +2700,13 @@ async def _wait_for_match_start(
 
     await asyncio.sleep(3)
 
+    if not await _fc_init_match_session(context, task_logger):
+        task_logger.warning("FC 比赛会话初始化失败，仍尝试本地 play loop")
+
+    runtime = getattr(context, "_stream_runtime", None)
+    if runtime:
+        runtime.enter_play_mode()
+
 
 async def _play_match(
     context: AgentTaskContext,
@@ -1920,73 +2735,81 @@ async def _play_match(
     - frame_queue: 全局帧队列（可选）
     - scene_queue: 全局场景队列（可选）
     """
-    match_duration = 120
-    report_interval = 30
+    match_duration = 1200
 
     task_logger.info(f"比赛中，预计时长: {match_duration}秒")
     game_logger.info(f"[场景: IN_GAME] 比赛中，预计时长: {match_duration}秒")
 
-    if frame_queue and scene_queue:
-        task_logger.info("[比赛进行] 使用全局异步任务进行场景检测和动作控制")
+    if getattr(context, "_fc_remote_play", False):
+        runtime = getattr(context, "_stream_runtime", None)
+        if runtime:
+            from ..runtime.pause_input_control import raise_if_resume_reanchor
 
-    for i in range(match_duration // 10):
-        if check_cancel():
-            raise Exception("比赛被取消")
+            task_logger.info("[比赛进行] FC PLAY loop 已接管（StreamRuntime play 20Hz）")
+            deadline = time.monotonic() + match_duration
+            while time.monotonic() < deadline:
+                if check_cancel():
+                    raise RuntimeError("比赛被取消")
+                if context.is_paused():
+                    await context.wait_if_paused()
+                    raise_if_resume_reanchor(context)
+                if runtime.match_over.is_set():
+                    task_logger.info("FC 报告比赛结束 (ERR_MATCH_OVER)")
+                    game_logger.info("[场景: SETTLEMENT] FC 比赛结束")
+                    return
+                try:
+                    await asyncio.wait_for(runtime.match_over.wait(), timeout=2.0)
+                    task_logger.info("FC 报告比赛结束 (ERR_MATCH_OVER)")
+                    game_logger.info("[场景: SETTLEMENT] FC 比赛结束")
+                    return
+                except asyncio.TimeoutError:
+                    continue
+            task_logger.info("FC 比赛等待超时，按本地时长结束")
+            return
 
-        if scene_queue and not scene_queue.empty():
-            try:
-                scene_result = await asyncio.wait_for(
-                    scene_queue.get(),
-                    timeout=0.5
-                )
-                if scene_result and scene_result != "UNKNOWN":
-                    task_logger.info(f"[比赛进行] 检测到场景: {scene_result}")
-                    game_logger.info(f"[比赛进行] 检测到场景: {scene_result}")
+    from .in_match_controller import run_local_in_match_loop
 
-                    if scene_action_mapper:
-                        try:
-                            await scene_action_mapper.on_scene_detected(scene_result)
-                            task_logger.info(f"[比赛进行] 场景 {scene_result} 对应动作已执行")
-                        except Exception as e:
-                            task_logger.error(f"[比赛进行] 执行动作失败: {e}")
-            except asyncio.TimeoutError:
-                pass
-
-        await asyncio.sleep(10)
-
-        match_ended = await _detect_match_ended(
-            context, task_logger, game_logger
+    async def _progress(elapsed: int, total: int) -> None:
+        progress_pct = min(100, int(elapsed / total * 100)) if total else 0
+        current_count = context.matches_completed_today[game_account.id] + 1
+        target = game_account.target_matches
+        task_logger.info(
+            "比赛进行中... (%s/%s秒, %s%%)",
+            elapsed, total, progress_pct,
         )
-        if match_ended:
-            task_logger.info("检测到比赛结束画面")
-            game_logger.info("[场景: SETTLEMENT] 检测到比赛结束画面")
-            break
+        game_logger.info(
+            "[场景: IN_GAME] 比赛进行中... (%s/%s秒)",
+            elapsed, total,
+        )
+        await report_progress(
+            context.task_id, "STEP4", "GAMING",
+            f"账号 {game_account.gamertag} 比赛中 ({elapsed}/{total}秒)",
+            {
+                "gameAccountId": game_account.id,
+                "gameAccountName": game_account.gamertag,
+                "currentMatch": current_count,
+                "todayCompleted": context.matches_completed_today[game_account.id],
+                "dailyLimit": target,
+                "matchStatus": "IN_PROGRESS",
+                "elapsedSeconds": elapsed,
+                "totalSeconds": total,
+                "progressPercent": progress_pct,
+            },
+        )
 
-        elapsed = (i + 1) * 10
-        progress_pct = min(100, int(elapsed / match_duration * 100))
-
-        if i % 3 == 0 or elapsed == match_duration:
-            task_logger.info(f"比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
-            game_logger.info(f"[场景: IN_GAME] 比赛进行中... ({elapsed}/{match_duration}秒, {progress_pct}%)")
-
-            current_count = context.matches_completed_today[game_account.id] + 1
-            target = game_account.target_matches
-
-            await report_progress(
-                context.task_id, "STEP4", "GAMING",
-                f"账号 {game_account.gamertag} 比赛中 ({elapsed}/{match_duration}秒)",
-                {
-                    "gameAccountId": game_account.id,
-                    "gameAccountName": game_account.gamertag,
-                    "currentMatch": current_count,
-                    "todayCompleted": context.matches_completed_today[game_account.id],
-                    "dailyLimit": target,
-                    "matchStatus": "IN_PROGRESS",
-                    "elapsedSeconds": elapsed,
-                    "totalSeconds": match_duration,
-                    "progressPercent": progress_pct
-                }
-            )
+    task_logger.info("[比赛进行] 场中自动化（scene 长按 A + 摇杆/面键占位）")
+    context._step4_in_match_active = True
+    try:
+        await run_local_in_match_loop(
+            context,
+            task_logger,
+            check_cancel,
+            lambda: _detect_match_ended(context, task_logger, game_logger),
+            match_duration=float(match_duration),
+            on_progress=_progress,
+        )
+    finally:
+        context._step4_in_match_active = False
 
 
 async def _finish_match(
@@ -2008,6 +2831,11 @@ async def _finish_match(
     """
     task_logger.info(f"比赛结束: {game_account.gamertag}")
     game_logger.info("[场景: MATCH_END] 比赛结束")
+
+    runtime = getattr(context, "_stream_runtime", None)
+    if runtime:
+        runtime.exit_play_mode()
+    await _fc_terminate_match_session(context, task_logger)
 
     await _skip_settlement(context, task_logger, game_logger)
 
@@ -2043,6 +2871,7 @@ async def _init_gamepad_protocol(
 
         controller_protocol = ControllerProtocol()
         controller_protocol.set_stream_controller(context.xbox_session)
+        controller_protocol.set_task_context(context)
         if input_gate is not None:
             controller_protocol.set_input_gate(input_gate)
 
@@ -2093,7 +2922,9 @@ async def _detect_screen_state(
             game_logger.warning("[场景检测] 画面捕获器不可用")
             return False
 
-        frame = await context.frame_capture.capture_frame()
+        from ..runtime.stream_runtime import capture_task_frame
+
+        frame = await capture_task_frame(context)
         if frame is None:
             task_logger.warning("无法捕获画面")
             game_logger.warning(f"[场景: {expected_screen}] 无法捕获画面")
@@ -2144,8 +2975,18 @@ async def _wait_for_match_started(
     - bool: 是否检测到比赛开始
     """
     try:
+        switcher = getattr(context, "_account_switcher", None)
+        if switcher:
+            hit = await switcher._detect_any_scene([102, 190], strict=False)
+            if hit in (102, 190):
+                task_logger.info("检测到比赛开始 scene=%s", hit)
+                game_logger.info("[场景: MATCH_START] scene=%s", hit)
+                return True
+
+        from ..runtime.stream_runtime import capture_task_frame
+
         for _ in range(10):
-            frame = await context.frame_capture.capture_frame()
+            frame = await capture_task_frame(context, timeout=0.8)
             if frame:
                 task_logger.info("检测到比赛开始")
                 game_logger.info("[场景: MATCH_START] 检测到比赛开始")
@@ -2175,21 +3016,39 @@ async def _detect_match_ended(
     game_logger
 ) -> bool:
     """
-    检测比赛是否结束
+    检测比赛是否结束（streaming 对齐：场中 102 + UT 193/回到主菜单）。
 
-    参数：
-    - context: 任务上下文
-    - task_logger: 任务日志记录器
-    - game_logger: 游戏账号日志记录器
-
-    返回：
-    - bool: 是否检测到比赛结束
+    返回 True 表示应退出 _play_match 进入结算跳过。
     """
     try:
-        frame = await context.frame_capture.capture_frame()
-        if frame:
-            return False
+        switcher = getattr(context, "_account_switcher", None)
+        if switcher:
+            hit = await switcher._detect_any_scene(
+                MATCH_END_SCENE_IDS + UT_MENU_SCENE_IDS,
+                strict=False,
+            )
+            if hit in MATCH_END_SCENE_IDS or hit in UT_MENU_SCENE_IDS:
+                task_logger.info("比赛结束场景: %s", hit)
+                game_logger.info("[场景: MATCH_END] 检测到场景 %s", hit)
+                return True
 
+        detector = getattr(context, "_streaming_scene_detector", None)
+        if detector:
+            from ..runtime.stream_runtime import capture_task_frame
+
+            frame = await capture_task_frame(context, timeout=0.5)
+            if frame is not None:
+                image = frame.data if hasattr(frame, "data") else frame
+                for scene_id in MATCH_END_SCENE_IDS:
+                    try:
+                        result = detector.recognize_scene(
+                            image, scene_id=scene_id, threshold=0.78
+                        )
+                        if result.matched:
+                            task_logger.info("模板匹配比赛结束 scene=%s", scene_id)
+                            return True
+                    except Exception:
+                        continue
         return False
 
     except asyncio.TimeoutError as e:
@@ -2212,18 +3071,43 @@ async def _skip_settlement(
     game_logger
 ):
     """
-    跳过结算画面
-
-    参数：
-    - context: 任务上下文
-    - task_logger: 任务日志记录器
-    - game_logger: 游戏账号日志记录器
+    跳过结算：按 A 穿过 UT 赛后弹窗直至回到主菜单（127/147/149）。
     """
     try:
+        from ..game.account_switcher import FC_UT_TARGET_SCENES
+
         task_logger.info("跳过结算画面...")
         game_logger.info("跳过结算画面")
 
-        await asyncio.sleep(2)
+        switcher = getattr(context, "_account_switcher", None)
+        deadline = time.monotonic() + 90.0
+        while time.monotonic() < deadline:
+            if not switcher:
+                await asyncio.sleep(2.0)
+                return
+            hit = await switcher._detect_any_scene(
+                UT_MENU_SCENE_IDS,
+                strict=False,
+            )
+            if hit in UT_MENU_SCENE_IDS:
+                task_logger.info("结算完成，已回到 UT 主菜单 scene=%s", hit)
+                game_logger.info("[场景: MAIN_MENU] 结算后 scene=%s", hit)
+                return
+            # 模板均未匹配时不盲按 A，避免误操作未知界面
+            known = await switcher._detect_any_scene(
+                list(UT_MENU_SCENE_IDS) + list(FC_UT_TARGET_SCENES),
+                strict=False,
+            )
+            if known is not None:
+                from configs.scene_transitions import resolve_automation_a_press_sec
+
+                duration = resolve_automation_a_press_sec(known)
+                await switcher._press_button("A", duration=duration)
+            else:
+                task_logger.debug("结算跳过：模板未匹配，不发送 A")
+            await asyncio.sleep(0.7)
+
+        task_logger.warning("结算跳过超时，继续后续流程")
 
     except asyncio.TimeoutError as e:
         task_logger.error(f"跳过结算画面超时: {e}")
@@ -2282,185 +3166,3 @@ async def _cleanup_account_resources(
         task_logger.error(f"清理账号资源异常: {e}")
         game_logger.error(f"清理账号资源异常: {e}")
 
-
-async def _capture_loop(
-    context: AgentTaskContext,
-    frame_queue: asyncio.Queue,
-    cancel_event: asyncio.Event,
-    task_logger
-) -> None:
-    """
-    持续捕获帧的异步任务
-
-    功能说明：
-    - 持续从frame_capture捕获视频帧
-    - 将帧放入frame_queue供其他任务使用
-    - 支持窗口显示模式
-
-    参数：
-    - context: 任务上下文（包含frame_capture）
-    - frame_queue: 帧队列
-    - cancel_event: 取消事件
-    - task_logger: 日志记录器
-    """
-    task_logger.info("[显示循环] 启动帧捕获任务")
-    frame_count = 0
-    last_log_time = time.time()
-
-    while not cancel_event.is_set():
-        try:
-            if context.frame_capture is None:
-                await asyncio.sleep(0.1)
-                continue
-
-            frame = await asyncio.wait_for(
-                context.frame_capture.capture_frame(),
-                timeout=1.0
-            )
-
-            if frame is not None:
-                await asyncio.wait_for(
-                    frame_queue.put(frame),
-                    timeout=0.5
-                )
-                frame_count += 1
-
-                if time.time() - last_log_time > 10:
-                    fps = frame_count / (time.time() - last_log_time)
-                    task_logger.info(f"[显示循环] 捕获帧率: {fps:.1f} FPS")
-                    frame_count = 0
-                    last_log_time = time.time()
-
-        except asyncio.TimeoutError:
-            continue
-        except Exception as e:
-            task_logger.debug(f"[显示循环] 捕获帧异常: {e}")
-            await asyncio.sleep(0.1)
-
-    task_logger.info("[显示循环] 帧捕获任务已停止")
-
-
-async def _display_loop(
-    context: AgentTaskContext,
-    frame_queue: asyncio.Queue,
-    cancel_event: asyncio.Event,
-    task_logger
-) -> None:
-    """
-    持续更新SDL窗口显示的异步任务
-
-    功能说明：
-    - 从frame_queue获取帧
-    - 更新SDL窗口显示
-    - 支持高性能渲染
-
-    参数：
-    - context: 任务上下文（包含sdl_window）
-    - frame_queue: 帧队列
-    - cancel_event: 取消事件
-    - task_logger: 日志记录器
-    """
-    if context.sdl_window is None:
-        task_logger.info("[显示循环] SDL窗口未初始化，跳过显示循环")
-        return
-
-    task_logger.info("[显示循环] 启动SDL显示任务")
-    frame_count = 0
-    last_log_time = time.time()
-
-    while not cancel_event.is_set():
-        try:
-            if hasattr(context.sdl_window, 'process_events'):
-                context.sdl_window.process_events()
-
-            frame = await asyncio.wait_for(
-                frame_queue.get(),
-                timeout=0.5
-            )
-
-            if frame is not None and hasattr(frame, 'data'):
-                context.sdl_window.update_frame(frame.data)
-                frame_count += 1
-
-                if time.time() - last_log_time > 10:
-                    fps = frame_count / (time.time() - last_log_time)
-                    task_logger.info(f"[显示循环] 显示帧率: {fps:.1f} FPS")
-                    frame_count = 0
-                    last_log_time = time.time()
-
-        except asyncio.TimeoutError:
-            continue
-        except Exception as e:
-            task_logger.debug(f"[显示循环] 显示帧异常: {e}")
-            await asyncio.sleep(0.1)
-
-    task_logger.info("[显示循环] SDL显示任务已停止")
-
-
-async def _detect_loop(
-    context: AgentTaskContext,
-    frame_queue: asyncio.Queue,
-    scene_queue: asyncio.Queue,
-    cancel_event: asyncio.Event,
-    task_logger
-) -> None:
-    """
-    持续场景识别的异步任务
-
-    功能说明：
-    - 从frame_queue获取帧
-    - 执行场景识别
-    - 将场景结果放入scene_queue供手柄控制使用
-
-    参数：
-    - context: 任务上下文
-    - frame_queue: 帧队列
-    - scene_queue: 场景队列
-    - cancel_event: 取消事件
-    - task_logger: 日志记录器
-    """
-    task_logger.info("[显示循环] 启动场景识别任务")
-
-    while not cancel_event.is_set():
-        try:
-            frame = await asyncio.wait_for(
-                frame_queue.get(),
-                timeout=0.5
-            )
-
-            if frame is not None:
-                scene = await _detect_scene_from_frame(frame, task_logger)
-                await asyncio.wait_for(
-                    scene_queue.put(scene),
-                    timeout=0.5
-                )
-
-        except asyncio.TimeoutError:
-            continue
-        except Exception as e:
-            task_logger.debug(f"[显示循环] 场景识别异常: {e}")
-            await asyncio.sleep(0.1)
-
-    task_logger.info("[显示循环] 场景识别任务已停止")
-
-
-async def _detect_scene_from_frame(frame, task_logger) -> str:
-    """
-    从帧数据中检测场景
-
-    参数：
-    - frame: 帧数据
-    - task_logger: 日志记录器
-
-    返回：
-    - str: 场景类型
-    """
-    try:
-        if frame is None:
-            return "UNKNOWN"
-
-        return "MAIN_MENU"
-
-    except Exception as e:
-        task_logger.debug(f"场景检测异常: {e}")
-        return "UNKNOWN"

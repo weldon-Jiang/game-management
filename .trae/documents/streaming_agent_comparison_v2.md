@@ -1,3 +1,5 @@
+> **架构勘误（2026-06-13）**：生产 Step2–3 为 **xblive/xsrp（GSSV 云端 + WebRTC）**，入口见 `bend-agent/src/agent/automation/step2_xsrp.py`、`step3_xsrp.py`。下文 SmartGlass LAN、`step2_xbox_streaming.py` 等为**历史方案**；SmartGlass UDP 仅作 LAN 发现/唤醒兜底。详见 [00_架构勘误_xsrp_step2.md](./00_架构勘误_xsrp_step2.md)。
+
 # Streaming vs Agent 功能对比报告（更新版）
 
 **版本**: 2.0
@@ -22,7 +24,7 @@
 | 功能 | Streaming | Agent | 评估 |
 |------|-----------|-------|------|
 | Xbox 发现 | ✅ Xbox Live API | ✅ Xbox Live API | 功能等价 ✅ |
-| SmartGlass 连接 | ✅ C++ xsrp | ✅ Python asyncio | 功能等价 ✅ |
+| SmartGlass 连接 | ✅ C++ xsrp | ✅ Python asyncio（**历史对比**；生产为 GSSV/WebRTC `step2_xsrp.py`） | 见勘误文档 |
 | PlaySession 管理 | ✅ PlaySession API | ✅ PlaySession API | 功能等价 ✅ |
 | SDP 握手 | ✅ WebRTC | ✅ WebRTC | 功能等价 ✅ |
 | DTLS 握手 | ✅ C++ OpenSSL | ✅ Python (简化) | ⚠️ 部分实现 |

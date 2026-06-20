@@ -77,14 +77,13 @@ class StreamingAccountTask:
         self.runtime.modules["input_gate"] = input_gate
 
         async def on_phase(phase: SessionPhase, message: str):
-            self.runtime.set_phase(phase, message)
-            await self._report_session(phase, message)
+            await self._apply_session_phase(phase, message)
 
         session.set_phase_callback(on_phase)
 
         try:
             self.context.update_task_status(TaskMainStatus.RUNNING)
-            self.runtime.set_phase(SessionPhase.OPENING, "Starting streaming")
+            await self._apply_session_phase(SessionPhase.OPENING, "Starting streaming")
 
             open_result = await session.open(
                 email=self.context.streaming_account_email,
@@ -144,7 +143,7 @@ class StreamingAccountTask:
                             self._last_automation_fail_msg
                             or "自动化失败，可重新选择模式后重试"
                         )
-                        await self._report_session(
+                        await self._apply_session_phase(
                             SessionPhase.AUTOMATION_FAILED, retry_msg
                         )
                     else:
@@ -153,8 +152,7 @@ class StreamingAccountTask:
                             if display_ok
                             else "串流就绪，请显示窗口并选择自动化类型"
                         )
-                        self.runtime.set_phase(SessionPhase.READY, ready_msg)
-                        await self._report_session(SessionPhase.READY, ready_msg)
+                        await self._apply_session_phase(SessionPhase.READY, ready_msg)
                     automation_event.clear()
                     # READY 为长寿命人工交接点；仅 start_automation 或取消可退出。
                     while not automation_event.is_set():
@@ -168,8 +166,7 @@ class StreamingAccountTask:
                         await self.context.wait_if_paused()
                         await asyncio.sleep(0.5)
 
-                self.runtime.set_phase(SessionPhase.AUTOMATING, "Automation running")
-                await self._report_session(SessionPhase.AUTOMATING, "Automation running")
+                await self._apply_session_phase(SessionPhase.AUTOMATING, "Automation running")
 
                 await self._ensure_display_after_stream()
 
@@ -213,8 +210,7 @@ class StreamingAccountTask:
                 fail_msg = step4_result.message or "自动化失败"
                 self._last_automation_fail_msg = fail_msg
                 # 保留串流/窗口，使用户可在同一会话内重试 Step4。
-                self.runtime.set_phase(SessionPhase.AUTOMATION_FAILED, fail_msg)
-                await self._report_session(SessionPhase.AUTOMATION_FAILED, fail_msg)
+                await self._apply_session_phase(SessionPhase.AUTOMATION_FAILED, fail_msg)
                 self.task_logger.warning(
                     "Step4 failed (%s); stream kept alive for retry",
                     step4_result.error_code,
@@ -227,8 +223,7 @@ class StreamingAccountTask:
         except Exception as exc:
             self.task_logger.error("StreamingAccountTask failed: %s", exc, exc_info=True)
             if not self.runtime.phase_fsm.is_terminal():
-                self.runtime.set_phase(SessionPhase.FAILED, str(exc))
-                await self._report_session(SessionPhase.FAILED, str(exc))
+                await self._apply_session_phase(SessionPhase.FAILED, str(exc))
             await self._cleanup_session(session, destroy_window=True, emit_session_phases=False)
             return AutomationResult(success=False, error_code="EXCEPTION", message=str(exc))
         finally:
@@ -240,7 +235,7 @@ class StreamingAccountTask:
 
     async def _ensure_display_after_stream(self) -> bool:
         try:
-            from ..automation.step3_streaming_init import step3_ensure_display
+            from ..automation.step3_display_helpers import step3_ensure_display
 
             ok = await step3_ensure_display(self.context)
             self.runtime.window_visible = ok
@@ -282,6 +277,8 @@ class StreamingAccountTask:
         "_keyboard_mapper",
         "_gamepad_controller",
         "_sdl_display_task",
+        "_stream_runtime",
+        "_step3_init_completed",
     )
 
     def _sync_media_context(self, media_ctx: AgentTaskContext) -> None:
@@ -346,7 +343,9 @@ class StreamingAccountTask:
     ):
         await self._report_progress(task_id, step, status, message, extra_data, **kwargs)
 
-    async def _report_session(self, phase: SessionPhase, message: str) -> None:
+    async def _apply_session_phase(self, phase: SessionPhase, message: str) -> None:
+        """更新本地 FSM 并上报一条 session 事件（避免 set_phase + _report_session 双写时间线）。"""
+        self.runtime.set_phase(phase, message)
         await self._report_progress(
             self.runtime.task_id,
             "SESSION",
@@ -361,7 +360,6 @@ class StreamingAccountTask:
     async def _set_session_phase(self, phase: SessionPhase, message: str) -> None:
         from ..runtime.phase_fsm import PauseMode
 
-        self.runtime.set_phase(phase, message)
         if phase.value.startswith("paused"):
             self.runtime.pause_mode = PauseMode.IMMEDIATE
             self.runtime.pause_after_match = False
@@ -372,4 +370,4 @@ class StreamingAccountTask:
             self.runtime.pause_after_match = False
             self.context.pause_mode = None
             self.context.resume()
-        await self._report_session(phase, message)
+        await self._apply_session_phase(phase, message)

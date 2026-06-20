@@ -14,8 +14,8 @@
           <div class="overview-grid">
             <div class="overview-item">
               <span class="label">任务状态</span>
-              <el-tag :type="getTaskStatusType(task.status)" size="small">
-                {{ getTaskStatusText(task.status) }}
+              <el-tag :type="getTaskStatusType(displayTaskStatus)" size="small">
+                {{ getTaskStatusText(displayTaskStatus) }}
               </el-tag>
             </div>
             <div class="overview-item">
@@ -45,19 +45,26 @@
               <span class="label">账号进度</span>
               <span class="value">{{ accountProgress }}</span>
             </div>
-            <div class="overview-item">
+            <div class="overview-item overview-item--time">
               <span class="label">创建时间</span>
               <span class="value">{{ formatTime(task.createdTime) }}</span>
+            </div>
+            <div class="overview-item overview-item--time">
+              <span class="label">最近活跃</span>
+              <span class="value">{{ formatTime(task.updatedTime) }}</span>
             </div>
           </div>
           <div v-if="hasAlerts" class="alert-strip">
             <span v-if="lastProgressMessage" class="alert-item info">
               最新进度：{{ getTaskEventMessageText(lastProgressMessage) }}
             </span>
-            <span v-if="task.errorMessage" class="alert-item error">
+            <span v-if="task.errorMessage && shouldShowTaskErrorMessage(task)" class="alert-item error">
               任务错误：{{ task.errorMessage }}
             </span>
-            <span v-if="displaySession?.errorMessage" class="alert-item error">
+            <span
+              v-if="displaySession?.errorMessage && shouldShowSessionErrorMessage(displaySession, task)"
+              class="alert-item error"
+            >
               会话错误：{{ getTaskEventMessageText(displaySession.errorMessage) }}
             </span>
           </div>
@@ -90,9 +97,9 @@
           <TaskControlBar
             v-if="isCurrentSession"
             class="control-bar"
-            :task-status="task.status"
+            :task-status="displayTaskStatus"
             :session-phase="task.sessionPhase || session?.phase"
-            :game-action-type="task.gameActionType"
+            :game-action-type="displayGameActionType"
             :game-action-pending="task.gameActionPending"
             :pause-mode="task.pauseMode"
             @window="handleWindow"
@@ -121,14 +128,7 @@
           class="window-hint"
         />
 
-        <StreamPipelineDiagnostic
-          :events="events"
-          :task="task"
-          :session-phase="displaySessionPhase"
-        />
-
         <section class="account-section">
-          <StreamPipelineDiagnostic :diagnostic="streamPipelineDiagnostic" />
           <h3>游戏账号</h3>
           <GameAccountRunTable
             :rows="gameAccountStatuses"
@@ -140,7 +140,7 @@
       </div>
 
       <aside class="detail-aside">
-        <TaskEventTimeline :events="events" embedded />
+        <TaskEventTimeline :events="events" :account-name-map="accountNameMap" embedded />
       </aside>
     </div>
   </div>
@@ -153,39 +153,51 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useTaskMonitor } from '@/composables/useTaskMonitor'
 import { taskApi } from '@/api/task'
 import {
+  getEffectiveTaskStatus,
   getTaskStatusText,
   getTaskStatusType,
   getGameActionTypeText,
   getSessionPhaseText,
   getSessionPhaseType,
   getSessionPhaseHint,
-  getTaskEventMessageText
+  getTaskEventMessageText,
+  shouldShowTaskErrorMessage,
+  shouldShowSessionErrorMessage
 } from '@/utils/constants'
+import {
+  confirmCancelPendingTask,
+  confirmTerminateStreamingTask,
+  isConfirmDismissed
+} from '@/utils/taskControlConfirm'
 import SessionPhaseStepper from '@/components/task/SessionPhaseStepper.vue'
 import TaskControlBar from '@/components/task/TaskControlBar.vue'
 import GameAccountRunTable from '@/components/task/GameAccountRunTable.vue'
 import TaskEventTimeline from '@/components/task/TaskEventTimeline.vue'
-import StreamPipelineDiagnostic from '@/components/task/StreamPipelineDiagnostic.vue'
 
 const route = useRoute()
 const taskId = computed(() => route.params.id)
 const sessions = ref([])
 const selectedSessionId = ref('')
 
-const { detail, events, loading, startMonitor } = useTaskMonitor(taskId, selectedSessionId)
+const { detail, events, loading, startMonitor, refresh } = useTaskMonitor(taskId, selectedSessionId)
 
 const task = computed(() => detail.value?.task)
 const session = computed(() => detail.value?.session)
 const gameAccountStatuses = computed(() => detail.value?.gameAccountStatuses || [])
+/** 时间线 gameAccountId → gamertag */
+const accountNameMap = computed(() => {
+  const map = {}
+  for (const row of gameAccountStatuses.value) {
+    const id = row.gameAccountId
+    if (id) map[id] = row.gameAccountName || id
+  }
+  return map
+})
 const lastProgressMessage = computed(() => detail.value?.lastProgressMessage)
-
-const streamPipelineDiagnostic = computed(
-  () => detail.value?.streamPipelineDiagnostic || null
-)
 
 const currentSessionId = computed(() => task.value?.sessionId || session.value?.id || '')
 
@@ -204,9 +216,22 @@ const displaySessionPhase = computed(() => {
   return displaySession.value?.phase || ''
 })
 
+/** 当前会话视图下修正复用任务残留的 completed；历史会话只读展示原始 status */
+const displayTaskStatus = computed(() => {
+  if (!task.value) return ''
+  if (!isCurrentSession.value) return task.value.status || ''
+  return getEffectiveTaskStatus(task.value)
+})
+
 const displayGameActionType = computed(() => {
-  if (isCurrentSession.value) return task.value?.gameActionType
-  return displaySession.value?.gameActionType || ''
+  if (isCurrentSession.value) {
+    if (task.value?.gameActionPending) return ''
+    return task.value?.gameActionType
+  }
+  if (displaySession.value?.gameActionType && displaySession.value?.gameActionLockedAt) {
+    return displaySession.value.gameActionType
+  }
+  return ''
 })
 
 const sessionPhaseHint = computed(() =>
@@ -225,8 +250,9 @@ const sessionPhaseAlertType = computed(() => {
 const hasAlerts = computed(
   () =>
     lastProgressMessage.value ||
-    task.value?.errorMessage ||
-    displaySession.value?.errorMessage
+    (task.value?.errorMessage && shouldShowTaskErrorMessage(task.value)) ||
+    (displaySession.value?.errorMessage
+      && shouldShowSessionErrorMessage(displaySession.value, task.value))
 )
 
 // 会话列表兜底刷新间隔（detail 轮询的约 3 倍，降低 /sessions 请求量）
@@ -325,19 +351,27 @@ const handleResume = async () => {
 }
 
 const handleCancel = async () => {
-  await ElMessageBox.confirm('确定取消该任务？', '确认')
-  await taskApi.cancel(taskId.value)
-  ElMessage.success('已取消')
+  try {
+    await confirmCancelPendingTask()
+    await taskApi.cancel(taskId.value)
+    ElMessage.success('任务已取消')
+  } catch (error) {
+    if (!isConfirmDismissed(error)) {
+      ElMessage.error('取消失败')
+    }
+  }
 }
 
 const handleTerminate = async () => {
-  await ElMessageBox.confirm(
-    '终止将停止任务并关闭串流窗口，确定继续？',
-    '终止任务',
-    { type: 'warning' }
-  )
-  await taskApi.terminate(taskId.value)
-  ElMessage.success('任务已终止，窗口将关闭')
+  try {
+    await confirmTerminateStreamingTask()
+    await taskApi.terminate(taskId.value)
+    ElMessage.success('任务已终止，串流窗口将关闭')
+  } catch (error) {
+    if (!isConfirmDismissed(error)) {
+      ElMessage.error('终止失败')
+    }
+  }
 }
 
 const handleStartAutomation = async (gameActionType) => {
@@ -354,6 +388,14 @@ const handleSkip = async (gameAccountId) => {
 const handleReconnect = async () => {
   await taskApi.reconnectStream(taskId.value)
   ElMessage.success('已发送重连串流指令')
+  // Agent 重启后内存任务丢失时，平台会通过 task_control_ack 将任务标为失败；短延迟刷新以同步 UI
+  setTimeout(async () => {
+    await refresh({ immediate: true })
+    const err = task.value?.errorMessage || ''
+    if (err.includes('Agent重新上线') || err.includes('Agent 重新上线')) {
+      ElMessage.warning('Agent 已重启，原任务已结束，请从串流账号重新启动')
+    }
+  }, 1500)
 }
 </script>
 
@@ -401,6 +443,16 @@ const handleReconnect = async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 日期时间需完整展示，避免 grid 列宽不足时被 ellipsis 截断 */
+.overview-item--time {
+  min-width: max-content;
+}
+
+.overview-item--time .value {
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .alert-strip {

@@ -13,6 +13,9 @@
           <el-icon><Plus /></el-icon>
           发现主机
         </el-button>
+        <el-button type="warning" :loading="dedupeLoading" @click="handleDedupeClick">
+          合并重复
+        </el-button>
         <el-button type="primary" @click="showAddDialog">
           <el-icon><Plus /></el-icon>
           新增主机
@@ -299,6 +302,46 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 平台管理员：选择商户后合并重复主机 -->
+    <el-dialog
+      v-model="dedupeDialogVisible"
+      title="合并重复主机"
+      width="420px"
+      :close-on-click-modal="false"
+    >
+      <p class="dedupe-desc">
+        将合并同一台物理主机的重复登记（如 GSSV 云端 ID 与局域网 UUID 各一条）。
+      </p>
+      <el-form label-width="80px" class="dialog-form">
+        <el-form-item label="所属商户">
+          <el-select
+            v-model="dedupeMerchantId"
+            placeholder="请选择商户"
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="merchant in merchantList"
+              :key="merchant.id"
+              :label="merchant.name"
+              :value="merchant.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dedupeDialogVisible = false">取消</el-button>
+        <el-button
+          type="warning"
+          :loading="dedupeLoading"
+          :disabled="!dedupeMerchantId"
+          @click="confirmAndDedupe(dedupeMerchantId)"
+        >
+          开始合并
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -331,6 +374,11 @@ const loading = ref(false)
  * 提交按钮加载状态
  */
 const submitLoading = ref(false)
+
+/** 合并重复主机加载状态 */
+const dedupeLoading = ref(false)
+const dedupeDialogVisible = ref(false)
+const dedupeMerchantId = ref('')
 
 /**
  * 表格数据列表
@@ -659,6 +707,49 @@ const handleDelete = async (row) => {
 }
 
 /**
+ * 点击「合并重复」：商户用户直接确认；平台管理员先选商户。
+ */
+const handleDedupeClick = () => {
+  if (authStore.isPlatformAdmin) {
+    dedupeMerchantId.value = merchantList.value[0]?.id || ''
+    dedupeDialogVisible.value = true
+    return
+  }
+  confirmAndDedupe()
+}
+
+/**
+ * 调用后端去重接口，合并 GSSV / LAN 等重复登记的主机记录。
+ */
+const confirmAndDedupe = async (merchantId) => {
+  try {
+    await ElMessageBox.confirm(
+      '将合并同一台物理主机的重复登记记录（如同一 Xbox 的 GSSV ID 与局域网 UUID）。是否继续？',
+      '合并重复主机',
+      { type: 'warning', confirmButtonText: '开始合并', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  dedupeLoading.value = true
+  try {
+    const params = merchantId ? { merchantId } : undefined
+    const res = await xboxApi.dedupe(params)
+    const merged = res.data || []
+    ElMessage.success(
+      merged.length ? `已合并 ${merged.length} 组重复记录` : '未发现需要合并的重复记录'
+    )
+    dedupeDialogVisible.value = false
+    loadData()
+  } catch (error) {
+    console.error('Failed to dedupe xbox hosts:', error)
+  } finally {
+    dedupeLoading.value = false
+  }
+}
+
+/**
  * 加载在线Agent列表
  */
 const loadOnlineAgents = async () => {
@@ -910,6 +1001,13 @@ onUnmounted(() => {
   margin-top: 6px;
   font-size: 12px;
   color: var(--el-color-warning);
+  line-height: 1.5;
+}
+
+.dedupe-desc {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--text-muted);
   line-height: 1.5;
 }
 

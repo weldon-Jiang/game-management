@@ -1,16 +1,21 @@
 <script setup>
 import { onErrorCaptured } from 'vue'
 import { ElMessage } from 'element-plus'
+import { isRequestCanceled } from '@/utils/request'
 
 /**
- * ???? * ?????Vue?????????router-view??????
- * ??????????????????????
+ * 根组件：挂载 router-view，并捕获子组件未处理的渲染/生命周期错误。
+ * 用户主动取消（弹窗 ESC、请求 abort）不弹 toast，避免任务详情页误报。
  */
 
-// ??????
-onErrorCaptured((err, instance, info) => {
+const isBenignUserCancel = (err) => {
+  if (isRequestCanceled(err)) return true
   const errorMsg = typeof err === 'string' ? err : err?.message
-  if (errorMsg === 'cancel' || errorMsg === 'ESC') {
+  return errorMsg === 'cancel' || errorMsg === 'ESC' || errorMsg === 'canceled'
+}
+
+onErrorCaptured((err, instance, info) => {
+  if (isBenignUserCancel(err)) {
     return false
   }
   console.error('=== Vue Error Captured ===')
@@ -20,29 +25,22 @@ onErrorCaptured((err, instance, info) => {
   console.error('Component:', instance)
   console.error('Info:', info)
   console.error('Stack:', err?.stack)
-  ElMessage.error('??????: ' + (err?.message || err))
+  ElMessage.error('页面错误: ' + (err?.message || err))
   return false
 })
 </script>
 
 <template>
-  <!-- ?? router-view ????????????-->
   <router-view />
 </template>
 
 <style>
-/**
- * ???????????
- */
-
-/* ??????*/
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
-/* ??HTML?body?? */
 html,
 body {
   height: 100%;
@@ -51,12 +49,10 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ?????? */
 #app {
   height: 100%;
 }
 
-/* ????????*/
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -76,7 +72,6 @@ body {
   background: rgba(255, 255, 255, 0.25);
 }
 
-/* ???????????? element-plus.css .el-dialog .el-form? */
 .dialog-form {
   padding-top: 8px;
 }

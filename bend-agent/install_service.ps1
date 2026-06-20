@@ -20,18 +20,65 @@ $ErrorActionPreference = "Stop"
 $serviceName = "BendAgent"
 $serviceDisplayName = "Bend Agent Service"
 $serviceDescription = "Bend Platform Agent - Xbox自动化服务"
+$registryPath = "HKCU:\SOFTWARE\BendPlatform\Agent"
 
 # 文件路径
-$agentDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$agentDir = (Resolve-Path (Split-Path -Parent $MyInvocation.MyCommand.Definition)).Path
 $pythonPath = (Get-Command python).Source
 $mainScript = Join-Path $agentDir "src/main.py"
 $nssmPath = Join-Path $agentDir "nssm.exe"
+
+function Normalize-InstallPath {
+    param([string]$PathValue)
+    try {
+        return ([System.IO.Path]::GetFullPath($PathValue)).TrimEnd('\').ToLowerInvariant()
+    } catch {
+        return $PathValue.TrimEnd('\').ToLowerInvariant()
+    }
+}
+
+function Test-ExistingAgentInstall {
+    $currentPath = Normalize-InstallPath $agentDir
+    if (Test-Path $registryPath) {
+        $registeredPath = (Get-ItemProperty -Path $registryPath -Name InstallPath -ErrorAction SilentlyContinue).InstallPath
+        if ($registeredPath) {
+            $registeredNorm = Normalize-InstallPath $registeredPath
+            if ($registeredNorm -ne $currentPath) {
+                if (Test-Path $registeredPath) {
+                    Write-Error @"
+本机已安装 Bend Agent，每台电脑只能安装一个实例。
+现有安装路径: $registeredPath
+
+如需换目录安装服务，请先运行 uninstall_agent.ps1 完成卸载。
+"@
+                } else {
+                    Write-Error @"
+检测到 Agent 安装注册表残留，但原目录已不存在:
+  $registeredPath
+
+请先运行 uninstall_agent.ps1 清理后再安装服务。
+"@
+                }
+            }
+        }
+    }
+
+    $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if ($existingService) {
+        $serviceQuery = sc.exe qc $serviceName 2>$null
+        if ($LASTEXITCODE -eq 0 -and $serviceQuery -match "BINARY_PATH_NAME") {
+            Write-Host "服务 $serviceName 已存在，将在当前目录重新注册服务..." -ForegroundColor Yellow
+        }
+    }
+}
 
 # 检查管理员权限
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Error "请以管理员身份运行此脚本"
     exit 1
 }
+
+Test-ExistingAgentInstall
 
 # 检查 NSSM 是否存在
 if (-not (Test-Path $nssmPath)) {

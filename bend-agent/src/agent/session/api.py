@@ -108,7 +108,21 @@ class StreamingSession:
                 await self._close_partial_media()
                 return SessionOpenResult(success=False, error_code="CANCELLED", message="Cancelled")
 
-            await self._emit_phase(SessionPhase.STREAMING, "Opening stream")
+            from ..automation.step3_xsrp import is_xsrp_stream_media_ready
+
+            stream_already_ready = (
+                self._stream_context is not None
+                and is_xsrp_stream_media_ready(self._stream_context)
+            )
+            if stream_already_ready:
+                # xsrp 在 Step2 链内已完成 Step3，但仍须上报 STREAMING，
+                # 否则 FSM 停留在 discovering，后续 ready 迁移会被拒绝。
+                self.task_logger.info(
+                    "Step2+3 已在 discovery 完成，跳过 open_stream 重复初始化"
+                )
+                await self._emit_phase(SessionPhase.STREAMING, "Stream connected")
+            else:
+                await self._emit_phase(SessionPhase.STREAMING, "Opening stream")
             self.media = await self._stream.open_stream(
                 self.credentials,
                 self.console,

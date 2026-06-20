@@ -286,6 +286,14 @@ public interface TaskService {
     void cleanupIncompleteTasksAndRestoreAccounts(String agentId);
 
     /**
+     * Agent 进程重启后内存任务丢失，对仍标记为活跃的单条任务做失败清理并还原账号。
+     *
+     * @param agentId  目标 Agent ID（须与任务 targetAgentId 一致）
+     * @param taskId   平台任务 ID
+     */
+    void failOrphanTaskOnAgent(String agentId, String taskId);
+
+    /**
      * 根据商户ID查询所有正在运行的任务
      *
      * <p>用于计算扣点时统计其他正在运行的任务占用的点数。
@@ -294,4 +302,9 @@ public interface TaskService {
      * @return 正在运行的任务列表
      */
     List<Task> findRunningTasksByMerchantId(String merchantId);
+
+    /**
+     * 显式将 task.error_message 置 NULL（MyBatis-Plus 默认 updateById 会跳过 null 字段）。
+     */
+    void clearErrorMessage(String taskId);
 }

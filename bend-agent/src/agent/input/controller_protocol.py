@@ -20,35 +20,34 @@ import struct
 import json
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
-from enum import Enum
+from enum import IntFlag
 
 from ..core.logger import get_logger
 
 
-class XboxButtonFlag(Enum):
+class XboxButtonFlag(IntFlag):
     """
-    xCloud 手柄按钮位掩码（对齐 xsrp.XSGamepadButtons / xsrpst diagrams）。
-
-    参考 xsrpst controller_option[2]：Nexus=2, A=16, DPadDown=512, DPadUp=4096。
+    xCloud 手柄按钮位掩码（对齐 libxsrp XSGamepadButtons / xsrp.XSGamepadButtons）。
     """
-    NEXUS = 2
-    A = 16
-    B = 32
-    X = 64
-    Y = 128
-    VIEW = 256
-    DPAD_DOWN = 512
-    DPAD_LEFT = 1024
-    DPAD_RIGHT = 2048
-    DPAD_UP = 4096
-    MENU = 8192
+    CLEAR = 0
+    NEXUS = 0x0002
+    MENU = 0x0004
+    VIEW = 0x0008
+    A = 0x0010
+    B = 0x0020
+    X = 0x0040
+    Y = 0x0080
+    DPAD_UP = 0x0100
+    DPAD_DOWN = 0x0200
+    DPAD_LEFT = 0x0400
+    DPAD_RIGHT = 0x0800
+    L1 = 0x1000
+    R1 = 0x2000
+    L3 = 0x4000
+    R3 = 0x8000
     # 别名（兼容旧调用名）
-    START = 8192
-    SELECT = 256
-    L1 = 16384
-    R1 = 32768
-    L3 = 65536
-    R3 = 131072
+    START = MENU
+    SELECT = VIEW
 
 
 @dataclass
@@ -155,6 +154,18 @@ class ControllerSignal:
             right_thumb_y=data.get('right_thumb_y', 0)
         )
 
+    def is_void(self) -> bool:
+        """是否无任何有效输入（对齐 streaming XsrpController.IsVoid）。"""
+        return (
+            not self.buttons
+            and not self.left_trigger
+            and not self.right_trigger
+            and not self.left_thumb_x
+            and not self.left_thumb_y
+            and not self.right_thumb_x
+            and not self.right_thumb_y
+        )
+
     @classmethod
     def zero(cls) -> 'ControllerSignal':
         """创建零信号（所有值为0）"""
@@ -168,9 +179,10 @@ class ControllerSignal:
         signal.left_trigger = gamepad_signal.left_trigger
         signal.right_trigger = gamepad_signal.right_trigger
         signal.left_thumb_x = gamepad_signal._normalize(gamepad_signal.left_thumbstick_x)
-        signal.left_thumb_y = gamepad_signal._normalize(gamepad_signal.left_thumbstick_y)
+        # 对齐 streaming/xsrputil XsrpController.read：LeftThumbstickY = -SDL_AXIS
+        signal.left_thumb_y = gamepad_signal._normalize(-gamepad_signal.left_thumbstick_y)
         signal.right_thumb_x = gamepad_signal._normalize(gamepad_signal.right_thumbstick_x)
-        signal.right_thumb_y = gamepad_signal._normalize(gamepad_signal.right_thumbstick_y)
+        signal.right_thumb_y = gamepad_signal._normalize(-gamepad_signal.right_thumbstick_y)
         return signal
 
 
@@ -192,6 +204,11 @@ class ControllerProtocol:
         self.logger = get_logger('controller_protocol')
         self._stream_controller = stream_controller
         self._input_gate = None
+        self._task_context = None
+
+    def set_task_context(self, context: Any) -> None:
+        """绑定任务 context，用于 write_controller_final 时间戳与失败重连。"""
+        self._task_context = context
 
     def set_input_gate(self, gate) -> None:
         """绑定 InputGate：暂停/非自动化期拦截 send_signal。"""
@@ -212,6 +229,8 @@ class ControllerProtocol:
         """
         发送手柄信号到Xbox（Step4 自动化路径，受 InputGate 约束）。
         """
+        if self._task_context and getattr(self._task_context, "_manual_takeover", False):
+            return False
         if self._input_gate is not None and not self._input_gate.is_allowed():
             return False
         return await self._send_signal_ungated(signal)
@@ -228,8 +247,12 @@ class ControllerProtocol:
             return False
 
         try:
-            return await self._stream_controller.send_gamepad_state(
-                signal.to_dict()
+            from ..xbox.controller_write import write_controller_final
+
+            return await write_controller_final(
+                self._stream_controller,
+                signal.to_dict(),
+                context=self._task_context,
             )
         except Exception as e:
             self.logger.error(f"发送手柄信号失败: {e}")

@@ -52,10 +52,10 @@
 | **api** | `agent/api/` | 与Bend Platform通信 |
 | **auth** | `agent/auth/` | 微软账号认证(Token自动刷新) |
 | **automation** | `agent/automation/` | 四步骤自动化流程 |
-| **xbox** | `agent/xbox/` | Xbox主机控制(SmartGlass+PlaySession) |
-| **vision** | `agent/vision/` | 画面捕获与GPU解码 |
+| **xbox** | `agent/xbox/` | GSSV 云端串流（xsrp_cloud_connect）+ 主机匹配/租约 |
+| **vision** | `agent/vision/` | 画面捕获与模板匹配 |
 | **scene** | `agent/scene/` | 场景识别(降频+缓存优化) |
-| **input** | `agent/input/` | 手柄控制(pygame+SmartGlass) |
+| **input** | `agent/input/` | 手柄/键盘（ControllerProtocol + DataChannel） |
 | **game** | `agent/game/` | 游戏账号管理 |
 | **windows** | `agent/windows/` | 窗口管理(SDL自绘) |
 | **task** | `agent/task/` | 任务调度 |
@@ -89,52 +89,48 @@ TokenStorage.save() ──▶ 持久化Refresh Token
 输出: microsoft_tokens, xbox_tokens
 ```
 
-### 3.2 步骤二：Xbox串流连接
+### 3.2 步骤二：Xbox 串流连接（xsrp / GSSV 云端）
 
 ```
-输入: xbox_tokens
+输入: GSSV/Xbox tokens（Step1 xblive）
     │
     ▼
-XboxDiscovery.discover() ──▶ Xbox主机发现(SSDP)
+attach_streaming_credentials() ──▶ Token 校验
     │
     ▼
-XboxStreamController.connect() ──▶ SmartGlass连接(TCP:5050)
+XboxHostMatcher + GSSV 云端发现 ──▶ 主机匹配 + serverId 租约
     │
     ▼
-XboxPlaySessionManager.create_session() ──▶ PlaySession创建
+connect_xsrp_cloud() ──▶ play 会话 + WebRTC SDP（aiortc）
     │
     ▼
-XboxWebRTCHandler.exchange_sdp() ──▶ SDP握手
+step3_execute_xsrp_init()（内联）──▶ 首帧 + input ready
     │
     ▼
-GPUDecoder检测 ──▶ GPU硬件解码准备
-    │
-    ▼
-输出: xbox_session, current_xbox
+输出: WebRTC 会话, frame_capture 就绪, current_xbox
 ```
 
-### 3.3 步骤三：串流环境初始化
+> SmartGlass UDP 发现/唤醒（`xbox_discovery`）为 LAN 兜底，非 Step2 主传输路径。
+
+### 3.3 步骤三：串流环境初始化（xsrp 栈）
 
 ```
-输入: xbox_session, current_xbox
+输入: Step2 WebRTC 会话 / 帧源
     │
     ▼
-SDLStreamWindow.initialize() ──▶ pygame窗口创建
+XsrpFrameCapture ──▶ WebRTC 视频帧
     │
     ▼
-GPUFrameCapture.initialize() ──▶ GPU加速捕获器
+SDL 串流窗口（step3_display_helpers）
     │
     ▼
-XboxGamepadController.initialize() ──▶ pygame手柄
+ControllerProtocol / DataChannel ──▶ 输入通道
     │
     ▼
-KeyboardMapper.initialize() ──▶ YAML键位映射
+stream readiness 校验 + idle keepalive
     │
     ▼
-检测游戏主界面 ──▶ 模板匹配验证
-    │
-    ▼
-输出: frame_capture, sdl_window, gamepad_controller, keyboard_mapper
+输出: frame_capture, _controller_protocol, sdl_window, streaming_stack=xsrp
 ```
 
 ### 3.4 步骤四：游戏比赛自动化
@@ -172,13 +168,17 @@ AccountSwitcher ──▶ 账号切换
 | WebSocket | ws:// | URL参数agentSecret |
 | HTTP | http:// | X-Agent-Secret(Base64) |
 
-### 4.2 与Xbox通信
+### 4.2 与 Xbox 通信（生产热路径：xsrp / GSSV 云端）
 
-| 通信方式 | 端口 | 协议 | 用途 |
-|----------|------|------|------|
-| SSDP | UDP | 发现协议 | Xbox发现 |
-| SmartGlass | TCP:5050 | JSON | 控制指令 |
-| PlaySession | HTTPS | REST API | 会话管理 |
+| 通信方式 | 协议 | 用途 |
+|----------|------|------|
+| GSSV REST | HTTPS | 云端主机列表、play 会话 |
+| WebRTC | SDP/DataChannel | 视频帧 + 输入通道（Step2–3） |
+| SmartGlass UDP | LAN 5050 | **仅**发现/唤醒兜底（非 Step2 主链路） |
+
+### 4.3 遗留/调试模块
+
+LAN SmartGlass TCP、PlaySession 等类仍存在于 `xbox/`、`xhome_stream/`，供调试或历史路径；**自动化 Step2–3 不经过 SmartGlass TCP 串流**。
 
 ---
 
@@ -192,13 +192,12 @@ AccountSwitcher ──▶ 账号切换
 | `AutomationScheduler` | task | 任务调度与并发控制 |
 | `AutomationTask` | automation | 四步骤协调执行 |
 | `TaskContext` | task | 步骤间数据传递 |
-| `MicrosoftMsalAuthenticator` | auth | 微软账号认证 |
-| `XboxStreamController` | xbox | SmartGlass通信 |
-| `XboxPlaySessionManager` | xbox | PlaySession管理 |
-| `GPUDecoder` | vision | GPU硬件解码 |
-| `SDLStreamWindow` | windows | SDL窗口渲染 |
-| `OptimizedSceneDetector` | scene | 场景检测(优化) |
-| `ControllerProtocol` | input | 手柄信号协议 |
+| `MicrosoftMsalAuthenticator` | auth | 微软账号认证（调试/legacy） |
+| `connect_xsrp_cloud` | xbox | GSSV 云端 + WebRTC 串流（Step2） |
+| `XsrpFrameCapture` | xbox | WebRTC 帧捕获（Step3） |
+| `SDLStreamWindow` | windows | SDL 窗口渲染 |
+| `StreamingSceneDetector` | scene | 场景检测（Step4 主路径） |
+| `ControllerProtocol` | input | DataChannel 手柄信号 |
 
 ---
 
@@ -206,10 +205,10 @@ AccountSwitcher ──▶ 账号切换
 
 | 优化 | 对应步骤 | 功能 |
 |------|----------|------|
-| GPU硬件解码 | 步骤二 | NVDEC/AMF/QSV自动检测 |
-| SDL自绘窗口 | 步骤三 | pygame高效渲染 |
+| GSSV 云端 + WebRTC | 步骤二 | xsrp 串流握手（对齐 streaming） |
+| SDL 窗口 + WebRTC 帧 | 步骤三 | 显示与 frame_capture |
 | 场景检测优化 | 步骤四 | 降频检测+缓存 |
-| 手柄信号发送 | 步骤四 | SmartGlass协议 |
+| InputGate | 步骤四 | 自动化/人工输入隔离 |
 
 ---
 

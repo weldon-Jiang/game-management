@@ -155,14 +155,37 @@ class PlatformApiClient:
             except Exception as e:
                 self.logger.debug(f"关闭HTTP会话异常: {e}")
 
-    def _should_throttle_progress(self, task_id: str, step: str, status: str) -> bool:
-        """非终态进度按 (taskId, step) 节流，降低平台 DB 写入频率。"""
+    def _should_throttle_progress(
+        self,
+        task_id: str,
+        step: str,
+        status: str,
+        **kwargs,
+    ) -> bool:
+        """非终态进度按 (taskId, step) 节流；STEP2 主机轮询与终态握手必须全量落库。"""
         normalized = (status or '').upper()
         if normalized in self._terminal_progress_statuses:
             return False
+        if kwargs.get('hostAttempts') is not None or kwargs.get('host_attempts') is not None:
+            return False
+        if kwargs.get('selectedServerId') or kwargs.get('selected_server_id'):
+            return False
+        if kwargs.get('timelineEvent') or kwargs.get('timeline_event'):
+            return False
         if self._progress_interval_sec <= 0:
             return False
-        key = f"{task_id}:{step}"
+        scope = kwargs.get('scope')
+        phase = kwargs.get('phase')
+        # 会话阶段变更须全量落库；同一 (task, SESSION) 键会把 ready 节流掉。
+        critical_session_phases = frozenset({
+            'ready', 'automation_failed', 'failed', 'closed', 'closing',
+        })
+        if step == 'SESSION' or scope == 'session':
+            if phase and str(phase).lower() in critical_session_phases:
+                return False
+            key = f"{task_id}:{step}:{phase or 'none'}"
+        else:
+            key = f"{task_id}:{step}"
         now = time.time()
         last = self._progress_throttle_at.get(key, 0.0)
         if now - last < self._progress_interval_sec:
@@ -206,7 +229,7 @@ class PlatformApiClient:
         返回：
         - dict: 包含 received, action (CONTINUE|STOP|CANCEL) 等；失败时包含 success=False
         """
-        if self._should_throttle_progress(task_id, step, status):
+        if self._should_throttle_progress(task_id, step, status, **kwargs):
             self.logger.debug(
                 "进度上报节流跳过 - TaskID: %s, Step: %s, Status: %s",
                 task_id, step, status,
@@ -343,18 +366,22 @@ class PlatformApiClient:
         self,
         game_account_id: str,
         *,
-        profile_bound: bool = True,
+        profile_bound: Optional[bool] = None,
         position_index: Optional[int] = None,
         game_name: Optional[str] = None,
     ) -> bool:
-        """主机登录后回写 profile_bound / position_index / gameName。"""
+        """可选回写 gameName；profile_bound / position_index 仅管理端维护，自动化默认不回写。"""
         url = self._get_callback_url(f'game-account/{game_account_id}/profile-binding')
         headers = await self._get_headers()
-        payload: Dict[str, Any] = {"profileBound": profile_bound}
+        payload: Dict[str, Any] = {}
+        if profile_bound is not None:
+            payload["profileBound"] = profile_bound
         if position_index is not None:
             payload["positionIndex"] = position_index
         if game_name:
             payload["gameName"] = game_name
+        if not payload:
+            return False
 
         try:
             session = await self._get_session()
@@ -368,7 +395,7 @@ class PlatformApiClient:
                     result = await response.json()
                     if result.get('code') == 200:
                         self.logger.info(
-                            "profile_bound 已回写平台 - gameAccountId=%s",
+                            "gameName 已回写平台 - gameAccountId=%s",
                             game_account_id,
                         )
                         return True
@@ -560,6 +587,127 @@ class PlatformApiClient:
         except Exception as e:
             self.logger.warning("确保主机绑定异常（非致命）: %s", e)
             return None
+
+    async def get_auth_cache(
+        self,
+        streaming_account_id: str,
+        task_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Step1 读取串流账号 xblive Token 平台缓存。
+
+        返回 data 字段（含 found/tokenDoc/tokenVersion）；失败返回 None。
+        """
+        url = self._get_callback_url(
+            f"streaming-accounts/{streaming_account_id}/auth-cache"
+        )
+        headers = await self._get_headers()
+        try:
+            session = await self._get_session()
+            async with session.get(
+                url,
+                params={"taskId": task_id},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status != 200:
+                    self.logger.warning("读取 auth-cache HTTP 错误: %s", response.status)
+                    return None
+                result = await response.json()
+                if result.get("code") == 200:
+                    return result.get("data") or {}
+                self.logger.warning("读取 auth-cache 失败: %s", result.get("message"))
+                return None
+        except Exception as exc:
+            self.logger.warning("读取 auth-cache 异常: %s", exc)
+            return None
+
+    async def put_auth_cache(
+        self,
+        streaming_account_id: str,
+        task_id: str,
+        token_doc: Dict[str, Any],
+        *,
+        expected_token_version: int = 0,
+        auth_state: str = "valid",
+        xhome_expires_at: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Step1 写入串流账号 xblive Token 平台缓存。
+
+        成功返回 data（含 tokenVersion）；409 返回 None 供上层重试。
+        """
+        url = self._get_callback_url(
+            f"streaming-accounts/{streaming_account_id}/auth-cache"
+        )
+        headers = await self._get_headers()
+        payload: Dict[str, Any] = {
+            "taskId": task_id,
+            "tokenDoc": token_doc,
+            "expectedTokenVersion": expected_token_version,
+            "authState": auth_state,
+        }
+        if xhome_expires_at:
+            payload["xhomeExpiresAt"] = xhome_expires_at
+
+        try:
+            session = await self._get_session()
+            async with session.put(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status == 409:
+                    self.logger.info(
+                        "auth-cache 版本冲突 account=%s expected=%s",
+                        streaming_account_id,
+                        expected_token_version,
+                    )
+                    return None
+                if response.status != 200:
+                    self.logger.warning("写入 auth-cache HTTP 错误: %s", response.status)
+                    return None
+                result = await response.json()
+                if result.get("code") == 409:
+                    return None
+                if result.get("code") == 200:
+                    return result.get("data") or {}
+                self.logger.warning("写入 auth-cache 失败: %s", result.get("message"))
+                return None
+        except Exception as exc:
+            self.logger.warning("写入 auth-cache 异常: %s", exc)
+            return None
+
+    async def delete_auth_cache(
+        self,
+        streaming_account_id: str,
+        task_id: str,
+    ) -> bool:
+        """Step1 清除串流账号 xblive Token 平台缓存。"""
+        url = self._get_callback_url(
+            f"streaming-accounts/{streaming_account_id}/auth-cache"
+        )
+        headers = await self._get_headers()
+        try:
+            session = await self._get_session()
+            async with session.delete(
+                url,
+                params={"taskId": task_id},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status != 200:
+                    self.logger.warning("清除 auth-cache HTTP 错误: %s", response.status)
+                    return False
+                result = await response.json()
+                if result.get("code") == 200:
+                    return bool((result.get("data") or {}).get("deleted", True))
+                self.logger.warning("清除 auth-cache 失败: %s", result.get("message"))
+                return False
+        except Exception as exc:
+            self.logger.warning("清除 auth-cache 异常: %s", exc)
+            return False
 
     async def unlock_xbox_host(self, xbox_host_id: str, task_id: Optional[str] = None) -> bool:
         """

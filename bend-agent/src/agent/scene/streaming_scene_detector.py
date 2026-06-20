@@ -276,6 +276,12 @@ class StreamingSceneDetector:
 
     def _normalize_frame(self, frame: np.ndarray, scene_id: int) -> np.ndarray:
         """将帧缩放到 schema 场景尺寸（模板按 960×540 制作）。"""
+        from ..vision.frame_utils import frame_to_bgr_ndarray
+
+        coerced = frame_to_bgr_ndarray(frame)
+        if coerced is None:
+            return frame
+        frame = coerced
         configs = self._scene_configs.get(scene_id)
         if not configs:
             return frame

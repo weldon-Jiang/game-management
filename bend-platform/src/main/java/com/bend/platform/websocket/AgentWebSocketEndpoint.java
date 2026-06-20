@@ -177,6 +177,8 @@ public class AgentWebSocketEndpoint {
                 handleAgentLog(agentId, data);
             } else if ("xbox_discovered".equals(type)) {
                 handleXboxDiscovered(agentId, data);
+            } else if ("task_control_ack".equals(type)) {
+                handleTaskControlAck(agentId, data);
             } else {
                 log.warn("未知消息类型 - AgentID: {}, Type: {}", agentId, type);
             }
@@ -411,6 +413,34 @@ public class AgentWebSocketEndpoint {
         adminData.put("agentId", agentId);
         adminData.put("data", data.toString());
         broadcastToAdmins("task_result", adminData);
+    }
+
+    /**
+     * Agent 对 task_control 的异步应答；内存无任务时清理平台孤儿任务，避免详情页控制按钮失效。
+     */
+    private void handleTaskControlAck(String agentId, JsonNode data) {
+        if (data == null) {
+            return;
+        }
+        boolean failed = data.has("success") && !data.get("success").asBoolean(true);
+        if (!failed) {
+            return;
+        }
+        String error = data.has("error") ? data.get("error").asText("") : "";
+        String taskId = data.has("taskId") ? data.get("taskId").asText("") : "";
+        if (!error.contains("Unknown taskId") || taskId.isBlank()) {
+            return;
+        }
+        ensureServicesInitialized();
+        if (taskService == null) {
+            log.warn("task_control_ack 孤儿清理跳过：TaskService 未就绪 - AgentID: {}, TaskID: {}", agentId, taskId);
+            return;
+        }
+        try {
+            taskService.failOrphanTaskOnAgent(agentId, taskId);
+        } catch (Exception e) {
+            log.error("处理 task_control_ack 孤儿任务失败 - AgentID: {}, TaskID: {}", agentId, taskId, e);
+        }
     }
 
     private void handleStatusReport(String agentId, JsonNode data) {

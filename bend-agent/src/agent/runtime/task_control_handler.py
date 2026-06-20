@@ -89,6 +89,10 @@ class TaskControlHandler:
         runtime.pause_mode = mode
         runtime.pause_after_match = mode == PauseMode.AFTER_MATCH
         runtime.phase_before_pause = runtime.phase_fsm.phase
+        if mode == PauseMode.IMMEDIATE:
+            from .pause_input_control import release_automation_input
+
+            await release_automation_input(runtime.context, self.logger)
         runtime.context.pause()
         phase = runtime.set_phase(
             SessionPhase.PAUSED_AFTER_MATCH
@@ -99,6 +103,17 @@ class TaskControlHandler:
         self._focus.focus(runtime.task_id)
         if self._scheduler:
             await self._scheduler.pause_task(runtime.task_id, mode=mode)
+        if mode == PauseMode.IMMEDIATE:
+            from ..task.task_timeline_events import (
+                MSG_MANUAL_TAKEOVER_ON,
+                emit_task_timeline_event,
+            )
+
+            await emit_task_timeline_event(
+                runtime.context,
+                MSG_MANUAL_TAKEOVER_ON,
+                event_key="platform_pause_on",
+            )
         return {"success": True, "phase": phase.value, "pauseMode": mode.value}
 
     async def _resume(self, runtime, data: Dict) -> Dict:
@@ -106,6 +121,10 @@ class TaskControlHandler:
             return {"success": False, "error": "Task is not paused"}
         runtime.pause_mode = None
         runtime.pause_after_match = False
+        from .pause_input_control import request_resume_reanchor, sync_scene_on_resume
+
+        request_resume_reanchor(runtime.context)
+        resume_scene = await sync_scene_on_resume(runtime.context, self.logger)
         runtime.context.resume()
         prev = runtime.phase_before_pause
         runtime.phase_before_pause = None
@@ -116,7 +135,20 @@ class TaskControlHandler:
             phase = runtime.set_phase(SessionPhase.AUTOMATING, "Resumed")
         if self._scheduler:
             await self._scheduler.resume_task(runtime.task_id)
-        return {"success": True, "phase": phase.value}
+        from ..task.task_timeline_events import (
+            MSG_MANUAL_TAKEOVER_OFF,
+            emit_task_timeline_event,
+        )
+
+        await emit_task_timeline_event(
+            runtime.context,
+            MSG_MANUAL_TAKEOVER_OFF,
+            event_key="platform_pause_off",
+        )
+        result = {"success": True, "phase": phase.value}
+        if resume_scene is not None:
+            result["resumeSceneId"] = resume_scene
+        return result
 
     async def _cancel(self, runtime, data: Dict) -> Dict:
         return await self._terminate(runtime, data)
@@ -171,11 +203,18 @@ class TaskControlHandler:
         return {"success": True, "gameAccountId": ga_id}
 
     async def _reconnect_stream(self, runtime, data: Dict) -> Dict:
-        session = runtime.modules.get("streaming_session")
-        if session and hasattr(session, "reconnect"):
-            ok = await session.reconnect()
-            return {"success": ok}
-        return {"success": False, "error": "No active streaming session"}
+        """平台「重连串流」：全量重连 GSSV WebRTC（重新 play + 握手 + 等新鲜视频帧）。"""
+        context = runtime.context
+        context._reconnect_manual_override = True
+        from ..xbox.stream_recovery import (
+            invalidate_stream_video,
+            reconnect_input_channel,
+        )
+
+        invalidate_stream_video(context, clear_sdl=True)
+        task_logger = getattr(context, "task_logger", None)
+        ok = await reconnect_input_channel(context, task_logger)
+        return {"success": ok, "videoRestored": not bool(getattr(context, "_stream_video_stale", False))}
 
     async def _start_automation(self, runtime, data: Dict) -> Dict:
         """

@@ -1,4 +1,4 @@
-"""Xbox 主机发现/串流握手门面（委托 xbox/step2_discover_connect）。"""
+"""Xbox 主机发现/串流握手门面（xblive→xsrp；MSAL→legacy step2）。"""
 
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -6,7 +6,6 @@ from typing import Callable, Optional
 from ..core.account_logger import get_stream_logger
 from ..core.task_logger import get_task_logger
 from ..task.task_context import AgentTaskContext, XboxInfo
-from ..xbox.step2_discover_connect import discover_intersection_and_connect_lan
 
 
 @dataclass
@@ -17,12 +16,18 @@ class XboxConsoleResolveResult:
     error_code: Optional[str] = None
 
 
+def _resolve_xbox_step2_discover():
+    from ..auth.step2_router import resolve_step2_execute_streaming
+
+    return resolve_step2_execute_streaming()
+
+
 async def resolve_xbox_console_target(
     context: AgentTaskContext,
     check_cancel: Callable[[], bool],
     report_progress: Optional[Callable] = None,
 ) -> XboxConsoleResolveResult:
-    """Xbox：GSSV∩LAN 发现 + LAN 握手。"""
+    """Xbox：按 auth.provider 走 xsrp 或 legacy Step2。"""
     task_logger = get_task_logger(context.task_id)
     stream_logger = get_stream_logger(context.streaming_account_email)
 
@@ -33,9 +38,8 @@ async def resolve_xbox_console_target(
         if report_progress:
             await report_progress(*args, **kwargs)
 
-    result = await discover_intersection_and_connect_lan(
-        context, task_logger, stream_logger, check_cancel, _report,
-    )
+    discover_fn = _resolve_xbox_step2_discover()
+    result = await discover_fn(context, check_cancel, _report)
     if not result.success:
         return XboxConsoleResolveResult(
             success=False,

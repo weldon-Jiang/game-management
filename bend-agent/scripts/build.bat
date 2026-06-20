@@ -110,10 +110,10 @@ pyinstaller --name "BendAgent" ^
     --hidden-import=pycryptodome ^
     --hidden-import=pythonjsonlogger ^
     --hidden-import=pythonjsonlogger.jsonlogger ^
-    --hidden-import=easyocr ^
+    --hidden-import=paddleocr ^
+    --hidden-import=onnxruntime ^
+    --hidden-import=psutil ^
     --hidden-import=playwright ^
-    --hidden-import=torch ^
-    --hidden-import=torchvision ^
     --hidden-import=pyotp ^
     --hidden-import=compress_pickle ^
     --collect-all=pystray ^
@@ -136,6 +136,12 @@ if exist "%OUTPUT_DIR%\BendAgent.exe" (
     if exist "%DISTRIBUTION_DIR%\README.txt" (
         copy /y "%DISTRIBUTION_DIR%\README.txt" "%OUTPUT_DIR%\"
         echo   - Copied README.txt
+    )
+
+    REM Copy uninstall script for merchant package
+    if exist "%PROJECT_ROOT%\uninstall_agent.ps1" (
+        copy /y "%PROJECT_ROOT%\uninstall_agent.ps1" "%OUTPUT_DIR%\"
+        echo   - Copied uninstall_agent.ps1
     )
 
     REM Copy templates (scene PNGs for streaming_scene_detector)

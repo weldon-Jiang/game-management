@@ -166,9 +166,9 @@ team-management/
 │   │   ├── api/                    # 后端通信 (HTTP/WebSocket/注册)
 │   │   ├── auth/                   # Microsoft 认证
 │   │   ├── automation/             # 四步骤实现（step1~step4）
-│   │   │   ├── step1_stream_account_login.py  # 步骤1: 账号登录
-│   │   │   ├── step2_xbox_streaming.py        # 步骤2: Xbox串流
-│   │   │   ├── step3_streaming_init.py        # 步骤3: 串流环境初始化
+│   │   │   ├── step1_xblive_login.py          # 步骤1: xblive 认证（auth/step1_router）
+│   │   │   ├── step2_xsrp.py / step2_router.py # 步骤2: GSSV 云端 + WebRTC
+│   │   │   ├── step3_xsrp.py                  # 步骤3: 帧捕获 + SDL + 输入（auth/step3_router）
 │   │   │   └── step4_game_automation.py       # 步骤4: 游戏自动化
 │   │   ├── task/                   # 任务调度与编排
 │   │   │   ├── automation_scheduler.py

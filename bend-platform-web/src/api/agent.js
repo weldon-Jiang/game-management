@@ -3,6 +3,8 @@
  */
 import request from '@/utils/request'
 
+const pendingOpt = { skipPendingDedupe: true }
+
 export const agentApi = {
   list: (params) => request.get('/api/agents/page', { params }),
   listPage: (params) => request.get('/api/agents/page', { params }),
@@ -13,5 +15,9 @@ export const agentApi = {
   delete: (agentId) => request.delete(`/api/agents/${agentId}`),
   batchDelete: (agentIds) => request.delete('/api/agents/batch', { data: agentIds }),
   cleanupUninstalled: () => request.delete('/api/agents/cleanup/uninstalled'),
-  cleanupOffline: (offlineMinutes) => request.delete('/api/agents/cleanup/offline', { params: { offlineMinutes } })
+  cleanupOffline: (offlineMinutes) => request.delete('/api/agents/cleanup/offline', { params: { offlineMinutes } }),
+  getKeyboardMapping: (agentId) => request.get(`/api/agents/${agentId}/keyboard-mapping`, pendingOpt),
+  getKeyboardMappingChart: (agentId) => request.get(`/api/agents/${agentId}/keyboard-mapping/chart`, pendingOpt),
+  getDefaultKeyboardMapping: () => request.get('/api/agents/keyboard-mapping/default', pendingOpt),
+  updateKeyboardMapping: (agentId, data) => request.put(`/api/agents/${agentId}/keyboard-mapping`, data, pendingOpt)
 }

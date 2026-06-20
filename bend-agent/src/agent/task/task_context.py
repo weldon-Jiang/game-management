@@ -60,9 +60,7 @@ class GameAccountInfo:
     gamertag: str
     email: str = ""
     password: str = ""
-    position_index: int = -1
     is_new_user: bool = False
-    profile_bound: bool = False
     is_primary: bool = False
     target_matches: int = 3
     today_match_count: int = 0
@@ -192,7 +190,7 @@ class AgentTaskContext:
     platform_xbox_hosts: List[Dict[str, Any]] = field(default_factory=list)
     account_platform: str = "xbox"
     auto_match_host: bool = True
-    game_action_type: str = "squad_battle"
+    game_action_type: str = ""  # 两阶段模式下为空，由平台 start_automation 下发后再写入
 
     current_step: str = "PENDING"
     task_status: TaskMainStatus = TaskMainStatus.PENDING
@@ -204,6 +202,7 @@ class AgentTaskContext:
 
     microsoft_tokens: Optional[Any] = None
     xbox_tokens: Optional[Any] = None
+    xblive_auth: Optional[Any] = None  # XbliveAuthResult（xblive Step1）
     xbox_session: Optional[Any] = None
     frame_capture: Optional[Any] = None
 

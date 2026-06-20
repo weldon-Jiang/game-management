@@ -10,8 +10,5 @@ class ProfileDetector:
         self._scene = scene_detector
 
     async def profile_exists(self, game_account: GameAccountInfo) -> bool:
-        if game_account.profile_bound and not game_account.is_new_user:
-            return True
-        if game_account.position_index >= 0 and not game_account.is_new_user:
-            return True
-        return False
+        """是否跳过「添加账号」：仅依据 is_new_user，不读平台 profile_bound / position_index。"""
+        return not game_account.is_new_user

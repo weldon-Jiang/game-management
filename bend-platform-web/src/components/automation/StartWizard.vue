@@ -227,16 +227,31 @@ const stopPoll = () => {
   }
 }
 
+const isActiveStreamingStatus = (task, phase) => {
+  const status = String(task?.status || '').toLowerCase()
+  const sessionPhase = String(phase || '').toLowerCase()
+  if (!['running', 'pending'].includes(status)) return false
+  return !['failed', 'closed', 'automation_failed'].includes(sessionPhase)
+}
+
 const pollTaskDetail = async () => {
   if (!taskId.value) return
   try {
     const res = await taskApi.getDetail(taskId.value)
     const task = res.data?.task
     const session = res.data?.session
-    sessionPhase.value = task?.sessionPhase || session?.phase || 'opening'
+    const phase = task?.sessionPhase || session?.phase || 'opening'
+    sessionPhase.value = phase
+
+    const activeStreaming = isActiveStreamingStatus(task, phase)
+    const rawMessage = activeStreaming
+      ? (task?.progressMessage || '')
+      : (session?.errorMessage || task?.errorMessage || task?.progressMessage || '')
+
     statusMessage.value =
-      getSessionPhaseHint(sessionPhase.value, session?.errorMessage || task?.errorMessage || '') ||
-      getTaskEventMessageText(session?.errorMessage || task?.sessionPhase || '串流建立中...')
+      getSessionPhaseHint(phase, rawMessage) ||
+      getTaskEventMessageText(rawMessage) ||
+      (activeStreaming ? '串流建立中...' : '')
     if (isReady.value) {
       stopPoll()
     }
@@ -260,7 +275,7 @@ const reset = () => {
   form.agentId = ''
   form.hostId = ''
   form.gameAccountIds = []
-  merchantHosts.value = []
+  boundHosts.value = []
 }
 
 onUnmounted(stopPoll)

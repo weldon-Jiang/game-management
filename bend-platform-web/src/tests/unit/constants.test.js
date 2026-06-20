@@ -6,10 +6,13 @@ import {
   AGENT_STATUS_MAP,
   getTaskStatusText,
   getTaskStatusType,
+  getEffectiveTaskStatus,
+  getSessionPhaseText,
   getTaskTypeText,
   getAgentStatusText,
   getAgentStatusType,
-  getRoleType
+  getRoleType,
+  resolveTaskEventAccountLabel
 } from '@/utils/constants'
 
 describe('constants.js - 状态映射常量', () => {
@@ -69,6 +72,7 @@ describe('constants.js - 状态映射常量', () => {
     it('应该包含所有 Agent 状态', () => {
       expect(AGENT_STATUS_MAP).toHaveProperty('online')
       expect(AGENT_STATUS_MAP).toHaveProperty('offline')
+      expect(AGENT_STATUS_MAP).toHaveProperty('reconnecting')
       expect(AGENT_STATUS_MAP).toHaveProperty('uninstalled')
     })
   })
@@ -116,6 +120,48 @@ describe('constants.js - 工具函数', () => {
     })
   })
 
+  describe('getEffectiveTaskStatus', () => {
+    it('活跃会话应将残留 completed 修正为 running', () => {
+      expect(getEffectiveTaskStatus({
+        status: 'completed',
+        sessionPhase: 'opening',
+        sessionId: 'sess-1',
+        streamingAccountId: 'sa-1'
+      })).toBe('running')
+    })
+
+    it('会话已关闭时应保留 completed', () => {
+      expect(getEffectiveTaskStatus({
+        status: 'completed',
+        sessionPhase: 'closed',
+        sessionId: 'sess-1'
+      })).toBe('completed')
+    })
+
+    it('暂停会话应展示 paused', () => {
+      expect(getEffectiveTaskStatus({
+        status: 'running',
+        sessionPhase: 'paused_immediate',
+        sessionId: 'sess-1'
+      })).toBe('paused')
+    })
+
+    it('input_reconnecting 子阶段仍应展示 running', () => {
+      expect(getEffectiveTaskStatus({
+        status: 'running',
+        sessionPhase: 'input_reconnecting',
+        sessionId: 'sess-1'
+      })).toBe('running')
+    })
+  })
+
+  describe('getSessionPhaseText', () => {
+    it('应识别 input 通道子阶段', () => {
+      expect(getSessionPhaseText('input_reconnecting')).toBe('输入通道重连中')
+      expect(getSessionPhaseText('input_restored')).toBe('输入通道已恢复')
+    })
+  })
+
   describe('getTaskTypeText', () => {
     it('应该返回正确的类型文本', () => {
       expect(getTaskTypeText('template_match')).toBe('模板匹配')
@@ -137,6 +183,7 @@ describe('constants.js - 工具函数', () => {
     it('应该返回正确的 Agent 状态文本', () => {
       expect(getAgentStatusText('online')).toBe('在线')
       expect(getAgentStatusText('offline')).toBe('离线')
+      expect(getAgentStatusText('reconnecting')).toBe('重连中')
       expect(getAgentStatusText('uninstalled')).toBe('已卸载')
     })
 
@@ -149,6 +196,7 @@ describe('constants.js - 工具函数', () => {
     it('应该返回正确的 Agent 状态类型', () => {
       expect(getAgentStatusType('online')).toBe('success')
       expect(getAgentStatusType('offline')).toBe('info')
+      expect(getAgentStatusType('reconnecting')).toBe('warning')
       expect(getAgentStatusType('uninstalled')).toBe('danger')
     })
 
@@ -176,6 +224,23 @@ describe('constants.js - 工具函数', () => {
     it('对于 null 或 undefined 应该返回 "info"', () => {
       expect(getRoleType(null)).toBe('info')
       expect(getRoleType(undefined)).toBe('info')
+    })
+  })
+
+  describe('resolveTaskEventAccountLabel', () => {
+    it('无 gameAccountId 时返回空字符串', () => {
+      expect(resolveTaskEventAccountLabel({})).toBe('')
+      expect(resolveTaskEventAccountLabel(null)).toBe('')
+    })
+
+    it('优先使用 nameMap 中的 gamertag', () => {
+      const ev = { gameAccountId: 'abc123' }
+      expect(resolveTaskEventAccountLabel(ev, { abc123: 'MyGamer' })).toBe('MyGamer')
+    })
+
+    it('无映射时回退短 ID', () => {
+      const ev = { gameAccountId: '0123456789abcdef' }
+      expect(resolveTaskEventAccountLabel(ev)).toBe('01234567…')
     })
   })
 })

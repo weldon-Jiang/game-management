@@ -68,17 +68,20 @@ class BrowserLoginController:
         logger.info(f"浏览器登录控制器已初始化（最大并发: {max_concurrent}）")
 
     @classmethod
-    def get_instance(cls, max_concurrent: int = 3) -> 'BrowserLoginController':
+    def get_instance(cls, max_concurrent: Optional[int] = None) -> 'BrowserLoginController':
         """
         获取单例实例
 
         参数：
-        - max_concurrent: 最大并发数
+        - max_concurrent: 最大并发数；默认读 auth.browser_login_max_concurrent（压测阶段固定 3）
 
         返回：
         - BrowserLoginController 实例
         """
         if cls._instance is None:
+            if max_concurrent is None:
+                from ..core.config import config
+                max_concurrent = int(config.get("auth.browser_login_max_concurrent", 3))
             cls._instance = cls(max_concurrent)
         return cls._instance
 

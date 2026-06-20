@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS `agent_instance` (
     `os_type` VARCHAR(50) DEFAULT NULL COMMENT '操作系统类型',
     `os_version` VARCHAR(100) DEFAULT NULL COMMENT '操作系统版本',
     `cpu_count` INT DEFAULT NULL COMMENT 'CPU核心数',
+    `keyboard_mapping_json` TEXT DEFAULT NULL COMMENT '自定义键盘映射 JSON（key→action）；NULL=默认模板',
     `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
@@ -404,6 +405,26 @@ CREATE TABLE IF NOT EXISTS `streaming_account_host_binding` (
     KEY `idx_xbox_host` (`xbox_host_id`),
     KEY `idx_merchant` (`merchant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='流媒体账号与主机 M:N 绑定表';
+
+-- ---------------------------------------------
+-- 串流账号 xblive Token 平台缓存
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS `streaming_account_auth_cache` (
+    `streaming_account_id` VARCHAR(36) NOT NULL COMMENT '串流账号ID（streaming_account.id）',
+    `merchant_id` VARCHAR(36) NOT NULL COMMENT '商户ID',
+    `token_doc_encrypted` MEDIUMTEXT NOT NULL COMMENT 'AES 加密的 xblive token_doc JSON',
+    `token_version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本',
+    `auth_state` VARCHAR(16) NOT NULL DEFAULT 'valid' COMMENT 'valid/refresh_needed/expired',
+    `last_auth_agent_id` VARCHAR(64) DEFAULT NULL COMMENT '最近写入 Agent ID',
+    `last_auth_time` DATETIME DEFAULT NULL COMMENT '最近认证或刷新时间',
+    `xhome_expires_at` DATETIME DEFAULT NULL COMMENT 'xHome gsToken 预估过期时间',
+    `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`streaming_account_id`),
+    KEY `idx_merchant_id` (`merchant_id`),
+    KEY `idx_auth_state` (`auth_state`),
+    KEY `idx_xhome_expires_at` (`xhome_expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='串流账号 xblive 认证 Token 平台缓存';
 
 -- ---------------------------------------------
 -- VIP分组表 (VIP等级配置)

@@ -714,21 +714,25 @@ class XboxLiveClient:
             return None
     
     def _select_xhome_base_uri(self, data: Dict[str, Any]) -> Optional[str]:
-        """从 xHome token 响应里选择默认区域 baseUri。"""
-        server_details = data.get("serverDetails") or {}
-        regions = server_details.get("regions") or data.get("regions") or []
-        if not isinstance(regions, list):
-            return None
+        """从 xHome token 响应里选择默认区域 baseUri（同步，不含 HTTP 探测）。"""
+        from ..gssv.region_resolver import extract_xhome_regions, select_xhome_base_uri
 
-        for region in regions:
-            if isinstance(region, dict) and region.get("isDefault") and region.get("baseUri"):
-                return str(region["baseUri"]).rstrip("/")
+        uri = select_xhome_base_uri(data)
+        if uri:
+            regions = extract_xhome_regions(data)
+            names = [str(r.get("name") or "?") for r in regions[:5]]
+            logger.info("xHome 默认区域 baseUri=%s regions=%s", uri, names)
+        return uri
 
-        for region in regions:
-            if isinstance(region, dict) and region.get("baseUri"):
-                return str(region["baseUri"]).rstrip("/")
+    async def _resolve_xhome_base_uri(
+        self,
+        data: Dict[str, Any],
+        gs_token: str,
+    ) -> Optional[str]:
+        """解析 xHome baseUri；缺失时对已知区域做 /v6/servers/home 探测。"""
+        from ..gssv.region_resolver import resolve_xhome_base_uri
 
-        return None
+        return await resolve_xhome_base_uri(data, gs_token)
 
     async def _get_xhome_token(self, gssv_token: str) -> Optional[Tuple[str, Optional[str], Dict[str, Any]]]:
         """
@@ -780,12 +784,18 @@ class XboxLiveClient:
                     if not gs_token:
                         logger.error("xHome 认证数据不完整")
                         return None
-                    
-                    base_uri = self._select_xhome_base_uri(data)
+
+                    base_uri = await self._resolve_xhome_base_uri(data, gs_token)
                     if base_uri:
-                        logger.info(f"xHome 认证成功，默认区域: {base_uri}")
+                        logger.info("xHome 认证成功，GSSV baseUri=%s", base_uri)
                     else:
-                        logger.warning("xHome 认证成功，但响应中未找到默认区域 baseUri，将使用默认 GSSV 地址")
+                        from ..gssv.base_uri import DEFAULT_GSSV_BASE_URI
+
+                        logger.warning(
+                            "xHome 响应未解析到 baseUri，将使用默认 GSSV 地址 %s；"
+                            "请检查 offeringSettings.regions 或配置 gssv.base_uri",
+                            DEFAULT_GSSV_BASE_URI,
+                        )
                     return gs_token, base_uri, data
                     
         except Exception as e:

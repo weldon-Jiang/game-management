@@ -18,12 +18,13 @@ SDL2自绘串流窗口
 import asyncio
 import sys
 import time
-from typing import Optional, Tuple, Callable
+from typing import Optional, Tuple, Callable, Any
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
 
 from ..core.logger import get_logger
+from ..core.paths import resolve_agent_path
 
 try:
     import pygame
@@ -31,6 +32,26 @@ try:
 except ImportError:
     PYGAME_AVAILABLE = False
     pygame = None
+
+# Windows 任务栏按进程 AppUserModelID 分组；未设置时会沿用 python.exe 图标。
+_WIN32_APP_USER_MODEL_ID = "com.bend.agent.streamwindow"
+_win32_app_user_model_id_applied = False
+
+
+def ensure_win32_app_user_model_id() -> None:
+    """在创建任何 HWND 之前调用，使任务栏使用窗口自定义图标而非 python.exe。"""
+    global _win32_app_user_model_id_applied
+    if _win32_app_user_model_id_applied or sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            _WIN32_APP_USER_MODEL_ID
+        )
+        _win32_app_user_model_id_applied = True
+    except Exception:
+        pass
 
 
 class SDLWindowState(Enum):
@@ -43,6 +64,27 @@ class SDLWindowState(Enum):
     HIDDEN = "hidden"
     CLOSED = "closed"
     ERROR = "error"
+
+
+def confirm_window_close(title: str, message: str) -> bool:
+    """关窗二次确认（Windows MessageBox；其他平台默认确认）。"""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            MB_YESNO = 0x00000004
+            MB_ICONWARNING = 0x00000030
+            IDYES = 6
+            result = ctypes.windll.user32.MessageBoxW(
+                None,
+                message,
+                title,
+                MB_YESNO | MB_ICONWARNING,
+            )
+            return result == IDYES
+        except Exception:
+            return False
+    return True
 
 
 @dataclass
@@ -91,6 +133,7 @@ class SDLStreamWindow:
         self._display_fps_max = 30.0
         self._close_callback: Optional[Callable[[], None]] = None
         self._close_requested = False
+        self._keyboard_event_handler: Optional[Callable[[Any], bool]] = None
 
         if not PYGAME_AVAILABLE:
             self.logger.warning("pygame不可用，SDL窗口功能将不可用")
@@ -112,6 +155,7 @@ class SDLStreamWindow:
                 import os
                 os.environ.setdefault('SDL_VIDEO_VSYNC', '1')
 
+            ensure_win32_app_user_model_id()
             pygame.init()
 
             flags = 0
@@ -136,6 +180,7 @@ class SDLStreamWindow:
 
             self._apply_window_constraints()
             self._center_on_screen()
+            self._apply_window_icon()
 
             self._running = True
             self._state = SDLWindowState.READY
@@ -166,6 +211,7 @@ class SDLStreamWindow:
                 )
                 self._apply_window_constraints()
                 self._center_on_screen()
+                self._apply_window_icon()
                 self._running = True
                 self._state = SDLWindowState.READY
                 self.logger.info(
@@ -215,6 +261,23 @@ class SDLStreamWindow:
             return None
         return None
 
+    def is_foreground(self) -> bool:
+        """当前进程 SDL 串流窗口是否为前台窗口（Win32）。"""
+        if sys.platform != "win32":
+            try:
+                return bool(PYGAME_AVAILABLE and pygame.display.get_active())
+            except Exception:
+                return False
+        try:
+            import ctypes
+
+            hwnd = self._get_hwnd()
+            if not hwnd:
+                return False
+            return int(ctypes.windll.user32.GetForegroundWindow()) == int(hwnd)
+        except Exception:
+            return False
+
     def _bring_to_front(self):
         """尽力将可见 SDL 任务窗口置前。"""
         if sys.platform != 'win32':
@@ -250,6 +313,12 @@ class SDLStreamWindow:
     def set_close_callback(self, callback: Optional[Callable[[], None]]) -> None:
         """用户点击标题栏关闭按钮时调用。"""
         self._close_callback = callback
+
+    def set_keyboard_event_handler(
+        self, handler: Optional[Callable[[Any], bool]]
+    ) -> None:
+        """SDL 显示泵 process_events 将 KEYDOWN/KEYUP 转发给 KeyboardMapper。"""
+        self._keyboard_event_handler = handler
 
     def _apply_window_constraints(self):
         """Windows：固定客户区、标准标题栏（关闭/最小化）、不可缩放。"""
@@ -327,6 +396,77 @@ class SDLStreamWindow:
             user32.SetWindowPos(hwnd, 0, x, y, 0, 0, 0x0001 | 0x0004)  # NOSIZE | NOZORDER
         except Exception as e:
             self.logger.debug(f"窗口居中失败: {e}")
+
+    def _apply_window_icon(self) -> None:
+        """设置标题栏与任务栏图标（优先 assets/window_icon.*）。"""
+        if not PYGAME_AVAILABLE:
+            return
+
+        png_path = resolve_agent_path("assets/window_icon.png")
+        ico_path = resolve_agent_path("assets/window_icon.ico")
+
+        try:
+            if png_path.is_file():
+                icon_surface = pygame.image.load(str(png_path))
+                pygame.display.set_icon(icon_surface)
+        except Exception as exc:
+            self.logger.debug("pygame window icon failed: %s", exc)
+
+        if sys.platform != "win32" or not ico_path.is_file():
+            return
+
+        try:
+            import ctypes
+
+            ensure_win32_app_user_model_id()
+
+            hwnd = self._get_hwnd()
+            if not hwnd:
+                return
+
+            WM_SETICON = 0x0080
+            ICON_SMALL = 0
+            ICON_BIG = 1
+            IMAGE_ICON = 1
+            LR_LOADFROMFILE = 0x0010
+            LR_DEFAULTSIZE = 0x0040
+            GCLP_HICON = -14
+            GCLP_HICONSM = -34
+            user32 = ctypes.windll.user32
+            ico_path_str = str(ico_path)
+
+            hicon_small = user32.LoadImageW(
+                None, ico_path_str, IMAGE_ICON, 16, 16, LR_LOADFROMFILE
+            )
+            # 任务栏/Alt+Tab 使用 ICON_BIG；0×0 + LR_DEFAULTSIZE 取 ICO 内最佳尺寸。
+            hicon_big = user32.LoadImageW(
+                None,
+                ico_path_str,
+                IMAGE_ICON,
+                0,
+                0,
+                LR_LOADFROMFILE | LR_DEFAULTSIZE,
+            )
+            if not hicon_big:
+                hicon_big = user32.LoadImageW(
+                    None, ico_path_str, IMAGE_ICON, 32, 32, LR_LOADFROMFILE
+                )
+
+            if hicon_small:
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_small)
+            if hicon_big:
+                user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_big)
+                # 部分 SDL 窗口需同时设置类图标，任务栏才会刷新。
+                if hasattr(user32, "SetClassLongPtrW"):
+                    user32.SetClassLongPtrW(hwnd, GCLP_HICON, hicon_big)
+                    if hicon_small:
+                        user32.SetClassLongPtrW(hwnd, GCLP_HICONSM, hicon_small)
+                else:
+                    user32.SetClassLongW(hwnd, GCLP_HICON, hicon_big)
+                    if hicon_small:
+                        user32.SetClassLongW(hwnd, GCLP_HICONSM, hicon_small)
+        except Exception as exc:
+            self.logger.debug("win32 window icon failed: %s", exc)
 
     def set_display_fps_max(self, fps: float) -> None:
         """显示刷新上限（对齐 streaming DECODE_VIDEO_FPS，默认 30）。"""
@@ -502,6 +642,7 @@ class SDLStreamWindow:
             except Exception as e:
                 self.logger.warning(f"显示窗口失败: {e}")
         self._apply_window_constraints()
+        self._apply_window_icon()
         self._bring_to_front()
         self._visible = True
         if self._running:
@@ -525,7 +666,7 @@ class SDLStreamWindow:
         """
         处理pygame事件。
 
-        关闭按钮默认隐藏窗口而非退出，避免中断自动化。
+        关闭按钮：hide_on_close 时仅隐藏；否则由 close_callback 处理（可终止任务）。
         """
         if not PYGAME_AVAILABLE:
             return False
@@ -545,6 +686,16 @@ class SDLStreamWindow:
                         continue
                     self.close()
                     return False
+
+                if self._keyboard_event_handler and event.type in (
+                    pygame.KEYDOWN,
+                    pygame.KEYUP,
+                ):
+                    try:
+                        self._keyboard_event_handler(event)
+                    except Exception as exc:
+                        self.logger.warning("keyboard event handler failed: %s", exc)
+                    continue
 
                 if event.type in self._event_callbacks:
                     self._event_callbacks[event.type](event)

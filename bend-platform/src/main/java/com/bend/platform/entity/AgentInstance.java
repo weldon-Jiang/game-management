@@ -146,6 +146,12 @@ public class AgentInstance {
     private Integer cpuCount;
 
     /**
+     * 自定义键盘→手柄映射 JSON（pygame 键名 → KeyAction 枚举名）。
+     * NULL 表示使用平台默认模板 {@link com.bend.platform.util.AgentKeyboardMappingDefaults}。
+     */
+    private String keyboardMappingJson;
+
+    /**
      * 创建时间
      * Agent首次注册到系统的时间
      */

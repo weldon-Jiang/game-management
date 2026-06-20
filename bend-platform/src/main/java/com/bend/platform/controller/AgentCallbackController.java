@@ -227,6 +227,58 @@ public class AgentCallbackController {
     }
 
     /**
+     * Step1 读取串流账号 xblive Token 平台缓存（跨 Agent 复用/刷新）。
+     */
+    @GetMapping("/streaming-accounts/{streamingAccountId}/auth-cache")
+    public ApiResponse<Map<String, Object>> getStreamingAuthCache(
+            @PathVariable String streamingAccountId,
+            @RequestParam("taskId") String taskId) {
+        try {
+            return ApiResponse.success(agentCallbackService.getStreamingAuthCache(streamingAccountId, taskId));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        } catch (Exception e) {
+            log.error("读取串流 Token 缓存失败", e);
+            return ApiResponse.error(500, "处理失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Step1 写入/刷新串流账号 xblive Token 平台缓存。
+     */
+    @PutMapping("/streaming-accounts/{streamingAccountId}/auth-cache")
+    public ApiResponse<Map<String, Object>> saveStreamingAuthCache(
+            @PathVariable String streamingAccountId,
+            @RequestBody Map<String, Object> payload) {
+        try {
+            return ApiResponse.success(agentCallbackService.saveStreamingAuthCache(streamingAccountId, payload));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        } catch (Exception e) {
+            log.error("写入串流 Token 缓存失败", e);
+            return ApiResponse.error(500, "处理失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Step1 清除串流账号 xblive Token 平台缓存（refresh 作废或不可恢复失败）。
+     */
+    @DeleteMapping("/streaming-accounts/{streamingAccountId}/auth-cache")
+    public ApiResponse<Map<String, Object>> deleteStreamingAuthCache(
+            @PathVariable String streamingAccountId,
+            @RequestParam("taskId") String taskId) {
+        try {
+            return ApiResponse.success(
+                    agentCallbackService.deleteStreamingAuthCache(streamingAccountId, taskId));
+        } catch (BusinessException e) {
+            return ApiResponse.error(e.getCode(), e.getMessage());
+        } catch (Exception e) {
+            log.error("清除串流 Token 缓存失败", e);
+            return ApiResponse.error(500, "处理失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 旧版任务状态回调。
      *
      * <p>保留给旧 Agent 版本兼容，新任务流应使用 /progress 和 task_control 协议。

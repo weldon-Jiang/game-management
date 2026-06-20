@@ -17,6 +17,7 @@ import com.bend.platform.service.*;
 import com.bend.platform.util.PlatformTypeUtil;
 import com.bend.platform.util.StreamingTaskConflictMessage;
 import com.bend.platform.websocket.AgentWebSocketEndpoint;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -116,6 +117,7 @@ public class TaskControlServiceImpl implements TaskControlService {
             if (!hostBindingService.hasActiveBinding(streamingAccountId, selectedHost.getId())) {
                 throw new BusinessException(400, "所选主机未绑定到该串流账号，请先在主机管理中绑定或留空由 Agent 自动发现");
             }
+            selectedHost = releaseStaleHostLockIfNeeded(selectedHost, merchantId);
             if (Boolean.TRUE.equals(selectedHost.getLocked())) {
                 throw new BusinessException(400, "所选主机已被其他任务占用");
             }
@@ -152,7 +154,9 @@ public class TaskControlServiceImpl implements TaskControlService {
 
         task.setSessionId(session.getId());
         task.setSessionPhase("opening");
+        task.setProgressMessage(null);
         taskMapper.updateById(task);
+        taskService.clearErrorMessage(task.getId());
 
         markStreamingAccountsBusy(streamingAccountId, agentId, gameAccounts);
 
@@ -235,8 +239,38 @@ public class TaskControlServiceImpl implements TaskControlService {
         } catch (Exception e) {
             task.setParams("{}");
         }
-        taskMapper.updateById(task);
-        return task;
+        Task fresh = taskMapper.selectById(task.getId());
+        if (fresh == null) {
+            throw new BusinessException(404, "复用任务不存在");
+        }
+        fresh.setStatus(task.getStatus());
+        fresh.setErrorMessage(task.getErrorMessage());
+        fresh.setResult(task.getResult());
+        fresh.setGameActionType(task.getGameActionType());
+        fresh.setGameActionPending(task.getGameActionPending());
+        fresh.setSessionPhase(task.getSessionPhase());
+        fresh.setWindowVisible(task.getWindowVisible());
+        fresh.setPauseMode(task.getPauseMode());
+        fresh.setProgressMessage(task.getProgressMessage());
+        fresh.setCurrentStep(task.getCurrentStep());
+        fresh.setStepStatus(task.getStepStatus());
+        fresh.setCompletedTime(task.getCompletedTime());
+        fresh.setStartedTime(task.getStartedTime());
+        fresh.setXboxHostId(task.getXboxHostId());
+        fresh.setDescription(task.getDescription());
+        fresh.setParams(task.getParams());
+        taskMapper.updateById(fresh);
+        LambdaUpdateWrapper<Task> clearWrapper = new LambdaUpdateWrapper<>();
+        clearWrapper.eq(Task::getId, fresh.getId())
+                .set(Task::getErrorMessage, null)
+                .set(Task::getGameActionType, null)
+                .set(Task::getProgressMessage, null)
+                .set(Task::getResult, null)
+                .set(Task::getPauseMode, null)
+                .set(Task::getCompletedTime, null)
+                .set(Task::getStartedTime, null);
+        taskMapper.update(null, clearWrapper);
+        return taskMapper.selectById(fresh.getId());
     }
 
     private void markStreamingAccountsBusy(
@@ -285,10 +319,7 @@ public class TaskControlServiceImpl implements TaskControlService {
         }
         streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
         streamingAccountService.updateAgentId(streamingAccountId, null);
-        for (GameAccount ga : gameAccountService.findByStreamingId(streamingAccountId)) {
-            gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
-            gameAccountService.updateAgentId(ga.getId(), null);
-        }
+        gameAccountService.clearAgentIdByStreamingId(streamingAccountId);
     }
 
     /**
@@ -397,12 +428,15 @@ public class TaskControlServiceImpl implements TaskControlService {
         task.setStatus("cancelled");
         task.setSessionPhase("closed");
         task.setWindowVisible(false);
+        task.setErrorMessage("用户终止串流");
+        task.setProgressMessage(null);
         taskMapper.updateById(task);
         StreamingSession session = streamingSessionService.findByTaskId(taskId);
         if (session != null) {
             streamingSessionService.closeSession(session.getId(), "closed");
         }
         restoreStreamingAccountState(task);
+        releaseXboxHostLock(task, merchantId);
 
         final String cancelTaskId = taskId;
         final Task controlTask = task;
@@ -455,6 +489,7 @@ public class TaskControlServiceImpl implements TaskControlService {
         detail.put("task", task);
         detail.put("session", session);
         detail.put("gameAccountStatuses", statuses);
+        detail.put("lastProgressMessage", task.getProgressMessage());
         detail.put("streamPipelineDiagnostic", loadLatestPipelineDiagnostic(taskId));
         return detail;
     }
@@ -472,7 +507,18 @@ public class TaskControlServiceImpl implements TaskControlService {
             try {
                 Map<String, Object> parsed = objectMapper.readValue(
                         event.getPayload(), Map.class);
-                if (parsed.containsKey("auth") || parsed.containsKey("firstFrame")) {
+                Object nested = parsed.get("pipelineDiagnostic");
+                if (nested instanceof Map<?, ?> nestedMap) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> diagnostic = (Map<String, Object>) nestedMap;
+                    return diagnostic;
+                }
+                if (parsed.containsKey("auth")
+                        || parsed.containsKey("firstFrame")
+                        || parsed.containsKey("gssvPlay")
+                        || parsed.containsKey("webrtc")
+                        || parsed.containsKey("capturePump")
+                        || parsed.containsKey("streamRuntime")) {
                     return parsed;
                 }
             } catch (Exception e) {
@@ -590,12 +636,6 @@ public class TaskControlServiceImpl implements TaskControlService {
             info.put("id", ga.getId());
             info.put("gameName", ga.getGameName());
             info.put("email", ga.getEmail());
-            if (ga.getPositionIndex() != null) {
-                info.put("positionIndex", ga.getPositionIndex());
-            }
-            if (Boolean.TRUE.equals(ga.getProfileBound())) {
-                info.put("profileBound", true);
-            }
             info.put("dailyMatchLimit", ga.getDailyMatchLimit());
             info.put("todayMatchCount", ga.getTodayMatchCount());
             info.put("cooldownHours", ga.getCooldownHours());
@@ -627,6 +667,41 @@ public class TaskControlServiceImpl implements TaskControlService {
             result.add(buildHostInfo(xbox));
         }
         return result;
+    }
+
+    private static final Set<String> TERMINAL_TASK_STATUSES =
+            Set.of("completed", "failed", "cancelled", "stopped");
+
+    /**
+     * 若主机锁来自已终态任务，自动释放陈旧租约，避免取消/失败后无法再次选主机。
+     */
+    private XboxHost releaseStaleHostLockIfNeeded(XboxHost host, String merchantId) {
+        if (host == null || !Boolean.TRUE.equals(host.getLocked())) {
+            return host;
+        }
+        String lockTaskId = host.getLockedByTaskId();
+        if (!StringUtils.hasText(lockTaskId)) {
+            return host;
+        }
+        Task lockTask = taskService.findById(lockTaskId);
+        if (lockTask == null || !TERMINAL_TASK_STATUSES.contains(lockTask.getStatus())) {
+            return host;
+        }
+        xboxHostService.unlock(
+                merchantId, host.getId(), host.getLockedByAgentId(), lockTaskId);
+        return xboxHostService.requireForMerchant(host.getId(), merchantId);
+    }
+
+    /** 终止任务时释放该任务持有的 Xbox 主机锁。 */
+    private void releaseXboxHostLock(Task task, String merchantId) {
+        if (task == null || !StringUtils.hasText(task.getXboxHostId())) {
+            return;
+        }
+        xboxHostService.unlock(
+                merchantId,
+                task.getXboxHostId(),
+                task.getTargetAgentId(),
+                task.getId());
     }
 
     private void sendTaskControl(Task task, String action, Map<String, Object> extra) {

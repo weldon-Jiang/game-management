@@ -110,10 +110,13 @@
             {{ row.lastHeartbeat ? formatDate(row.lastHeartbeat) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="210" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
+        <el-table-column label="操作" width="280" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="showNameDialog(row)">
               编辑名称
+            </el-button>
+            <el-button type="primary" link size="small" @click="showKeyboardMappingDialog(row)">
+              键盘映射
             </el-button>
             <el-button type="primary" link size="small" @click="goAgentTasks(row)">
               查看任务
@@ -138,6 +141,11 @@
         />
       </div>
     </div>
+
+    <AgentKeyboardMappingDialog
+      v-model="keyboardMappingVisible"
+      :agent-id="keyboardMappingAgentId"
+    />
 
     <el-dialog v-model="nameDialogVisible" title="编辑Agent名称" width="480px" :close-on-click-modal="false">
       <el-form v-if="nameDialogVisible" label-width="auto" class="dialog-form">
@@ -168,6 +176,7 @@ import { agentApi, merchantApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { getAgentDisplayName, getAgentStatusText, getAgentStatusType } from '@/utils/constants'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import AgentKeyboardMappingDialog from '@/components/agent/AgentKeyboardMappingDialog.vue'
 
 const router = useRouter()
 
@@ -185,6 +194,8 @@ const cleaningUninstalled = ref(false)
 const cleaningOffline = ref(false)
 const batchDeleting = ref(false)
 const nameDialogVisible = ref(false)
+const keyboardMappingVisible = ref(false)
+const keyboardMappingAgentId = ref('')
 const editingAgent = ref(null)
 const editingAgentName = ref('')
 const savingName = ref(false)
@@ -207,6 +218,11 @@ const showNameDialog = (agent) => {
   editingAgent.value = agent
   editingAgentName.value = agent.agentName || ''
   nameDialogVisible.value = true
+}
+
+const showKeyboardMappingDialog = (agent) => {
+  keyboardMappingAgentId.value = agent.agentId
+  keyboardMappingVisible.value = true
 }
 
 const handleSaveName = async () => {

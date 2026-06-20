@@ -140,7 +140,7 @@ if __name__ == "__main__":
         print("   python test_xbox_auth_debug.py")
         print("")
         print("2. 运行串流测试:")
-        print("   python -m agent.automation.step2_xbox_streaming")
+        print("   python -m agent.automation.step2_xsrp")
         print("")
         print("3. 如果仍有问题，请检查:")
         print("   - Token 是否过期 (需要重新认证)")

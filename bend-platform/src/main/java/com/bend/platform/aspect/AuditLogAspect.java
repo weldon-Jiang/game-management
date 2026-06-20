@@ -21,7 +21,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AuditLogAspect {
 
-    @Around("@annotation(AuditLog)")
+    @Around("@annotation(com.bend.platform.annotation.AuditLog)")
     public Object around(ProceedingJoinPoint joinPoint) throws Throwable {
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
         Method method = signature.getMethod();

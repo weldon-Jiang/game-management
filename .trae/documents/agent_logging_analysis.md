@@ -1,3 +1,5 @@
+> **架构勘误（2026-06-13）**：生产 Step2–3 为 **xblive/xsrp（GSSV 云端 + WebRTC）**，入口见 `bend-agent/src/agent/automation/step2_xsrp.py`、`step3_xsrp.py`。下文 SmartGlass LAN、`step2_xbox_streaming.py` 等为**历史方案**；SmartGlass UDP 仅作 LAN 发现/唤醒兜底。详见 [00_架构勘误_xsrp_step2.md](./00_架构勘误_xsrp_step2.md)。
+
 # Agent 日志记录分析报告
 
 **版本**: 1.0  
@@ -29,7 +31,7 @@
 
 ## 二、当前日志记录分析
 
-### 2.1 步骤一：登录（step1_stream_account_login.py）
+### 2.1 步骤一：登录（`step1_xblive_login.py`，历史名 `step1_stream_account_login.py`）
 
 #### 流媒体账号日志 ✅
 ```
@@ -46,7 +48,7 @@
 
 ---
 
-### 2.2 步骤二：串流连接（step2_xbox_streaming.py）
+### 2.2 步骤二：串流连接（step2_xsrp.py）
 
 #### 流媒体账号日志 ✅
 ```
@@ -66,7 +68,7 @@
 
 ---
 
-### 2.3 步骤三：串流前期准备（step3_streaming_init.py）
+### 2.3 步骤三：串流前期准备（step3_xsrp.py）
 
 #### 流媒体账号日志 ✅
 ```

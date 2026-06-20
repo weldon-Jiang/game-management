@@ -29,4 +29,9 @@ public class TaskPageRequest extends PageRequest {
      * 串流账号过滤
      */
     private String streamingAccountId;
+
+    /**
+     * 仅返回今日有更新的任务（按 updated_time 当天 00:00 起算，适配长寿命任务复用场景）
+     */
+    private Boolean activeToday;
 }

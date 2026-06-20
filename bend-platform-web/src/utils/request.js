@@ -27,6 +27,9 @@ const removePendingRequest = (config) => {
 }
 
 const addPendingRequest = (config) => {
+  if (config.skipPendingDedupe) {
+    return
+  }
   removePendingRequest(config)
   const controller = new AbortController()
   config.signal = controller.signal
@@ -36,6 +39,17 @@ const addPendingRequest = (config) => {
 const clearAllPendingRequests = () => {
   pendingRequests.forEach((cancel) => cancel('请求取消：全局清理'))
   pendingRequests.clear()
+}
+
+/** 同 URL 去重取消或路由切换 abort 时不应弹网络错误 toast。 */
+export const isRequestCanceled = (error) => {
+  if (!error) return false
+  return (
+    axios.isCancel(error) ||
+    error.code === 'ERR_CANCELED' ||
+    error.name === 'CanceledError' ||
+    error.message === 'canceled'
+  )
 }
 
 let isRefreshing = false
@@ -90,7 +104,11 @@ request.interceptors.request.use(
 
 request.interceptors.response.use(
   (response) => {
-    removePendingRequest(response.config)
+    if (response.config?.skipPendingDedupe) {
+      // skipPendingDedupe 未注册 pending，无需 remove
+    } else {
+      removePendingRequest(response.config)
+    }
     const res = response.data
     if (res.code !== 200 && res.code !== 0) {
       console.log('Response with error code:', res.code, res.message)
@@ -117,7 +135,13 @@ request.interceptors.response.use(
   async (error) => {
     const authStore = useAuthStore()
 
-    removePendingRequest(error.config || {})
+    if (!error.config?.skipPendingDedupe) {
+      removePendingRequest(error.config || {})
+    }
+
+    if (isRequestCanceled(error)) {
+      return Promise.reject(error)
+    }
 
     if (error.response) {
       console.log('Request error with response:', error.response.status, error.response.data)

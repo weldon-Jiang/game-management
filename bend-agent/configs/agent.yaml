@@ -59,6 +59,7 @@ fc_server:
   host: "127.0.0.1"
   port: 8080
   prefer_remote_scene: false
+  use_remote_play: false   # 启用 FC PLAY 20Hz 比赛 loop（需 enabled=true）
 
 # ----------------------------------------------
 # 场景检测配置
@@ -74,10 +75,8 @@ input:
   click_delay: 0.1
   key_press_delay: 0.05
   move_duration: 0.2
-  pump_focus_hz: 125       # InputPump 焦点任务频率
-  pump_background_hz: 8    # 背景任务 keepalive 频率
-  pump_focus_hz: 125          # InputPump 焦点任务 DC 发送频率
-  pump_background_hz: 8       # 背景任务 keepalive 频率
+  pump_focus_hz: 125       # InputPump 人工输入采样（void 保活由 xsrp access 环 30Hz 负责）
+  pump_background_hz: 10   # 非焦点任务轮询间隔
 
 # ----------------------------------------------
 # 自动化任务配置
@@ -87,11 +86,52 @@ automation:
   retry_delay: 2
   action_cooldown: 1
 
+# Step4：false=走 switch_to（内含主页 OCR 匹配则自动跳过切换）；true=强制跳过切换（仅调试）
+step4:
+  skip_account_switch: false
+  # 自动化「按住 A 跳过」过场/庆祝（scene 101/102/189/190 等）
+  hold_a_skip_sec: 2.0
+  dismiss_a_tap_sec: 0.12
+  # 场中占位输入：左摇杆/面键单次 hold 与周期间隔（秒）
+  in_match_stick_hold_sec: 0.45
+  in_match_button_hold_sec: 0.25
+  in_match_tick_interval_sec: 0.85
+
+# Step4 档案 OCR（PaddleOCR PP-OCRv6_tiny + ONNX Runtime）
+ocr:
+  engine: onnxruntime
+  det_model: PP-OCRv6_tiny_det
+  rec_model: PP-OCRv6_tiny_rec
+  enable_mkldnn: true
+  cpu_threads: 0              # 0=自动 max(10, 逻辑核数)
+  min_crop_brightness: 25    # 裁剪区过暗则跳过 OCR
+  min_rec_confidence: 0.12
+  min_line_confidence: 0.12
+
+# 调试：场景顺序截图 + 手柄输入日志（输出 logs/scene_capture/{task_id}/）
+debug:
+  scene_capture_enabled: true
+  input_trace_enabled: true
+  # 串流窗口人工调试（须先点击 Xbox 窗口获得焦点）
+  manual_input_enabled: true       # Step4 期间保留键盘；false=与旧行为一致停键盘
+  manual_takeover_hotkey: f8       # 切换人工接管（拦截自动化按键）
+  manual_screenshot_hotkey: f9     # 保存 960×540 → logs/manual_capture/{task_id}/
+  manual_help_hotkey: f10
+  # F8 导航：短按跳一格；长按超过 delay 后按 interval 重复（面键 A/B/X/Y 按住即持续）
+  manual_nav_repeat_delay_sec: 0.45
+  manual_nav_repeat_interval_sec: 0.12
+  # F8 键盘：split=WASD 左摇杆 + 方向键十字键；auto/stick/dpad=旧调试模式
+  manual_keyboard_movement: split
+
 # ----------------------------------------------
 # 认证配置
 # ----------------------------------------------
 auth:
-  device_code_timeout: 300   # 设备码认证总超时（秒），默认 5 分钟
+  provider: xblive              # 生产固定 xblive（SISU）；MSAL 仅 scripts/debug
+  # 唯一保留的并发上限：Playwright 浏览器登录（压测后按实测调整）
+  browser_login_max_concurrent: 3
+  device_code_timeout: 300      # MSAL 设备码认证总超时（秒）
+  xblive_web_headless: true      # xblive Playwright 回退是否无头
   xhome_token_ttl_sec: 14340
   xsts_token_ttl_sec: 57540
   prefetch_console_discovery: true
@@ -107,17 +147,32 @@ discovery:
   wakeup_timeout_sec: 30
   smartglass_wake_fallback: true
 
-# LAN 媒体（SmartGlass → DTLS-PSK → SRTP → RTP；唯一串流路径）
-lan_stream:
-  rtp_port: 50500
-  dtls_port: 50500
-  handshake_timeout_sec: 15
-  first_frame_timeout_sec: 10
-  per_host_attempt_timeout_sec: 45  # 单台主机握手+首 RTP 总预算，超时换下一台
-  smartglass_udp_connect: true     # OpenXbox 0xCC00 XSTS 授权（UDP 5050）
-  smartglass_connect_timeout_sec: 8
-  # 可选：指向 streaming/xsrp 目录以加载 libxsrp（Windows）
-  xsrp_module_path: ""
+# GSSV / xHome 云端（设备列表、play session；baseUri 来自 xHome offeringSettings.regions）
+gssv:
+  stream_mode: cloud
+  cloud_provision_timeout_sec: 45
+  cloud_webrtc_timeout_sec: 90
+  cloud_first_frame_timeout_sec: 20
+  cloud_post_provision_delay_sec: 2
+  cloud_ice_exchange_timeout_sec: 20
+  cloud_reconnect_timeout_sec: 45
+  # GSSV input ~35s idle 断开：须持续发 neutral gamepad（对齐 xsrpd 每帧 WriteControllerData）
+  gssv_keepalive_interval_sec: 3
+  input_reconnect_wait_sec: 8
+  xsrp_capture_fps: 30
+  xsrp_streaming_idle_pulse_sec: 20   # 空闲 Nexus 防 Xbox 屏保 / GSSV idle-off
+  manual_idle_pulse_sec: 20            # F8/平台暂停无按键时 Nexus 脉冲（InputPump 接管）
+  input_metadata_refresh_sec: 30      # 周期性重发 gamepadChanged + ClientMetadata
+  # 串流活性监控（Step3 起全程后台）
+  liveness_check_sec: 10
+  input_stale_sec: 28                # GSSV ~35s 无 input 会断，提前恢复
+  video_stale_sec: 45                 # 视频轨无新帧则重连
+  liveness_reconnect_after_failures: 3
+  xsrp_idle_keepalive_sec: 3          # legacy idle keepalive（已由 access 环取代）
+  xsrp_idle_pulse_every_sec: 15
+  xsrp_idle_pulse_sec: 0.05
+  # 留空则自动从 xHome 响应解析；仅当自动解析/探测失败时手动指定，例如：
+  # base_uri: "https://uks.core.gssv-play-prodxhome.xboxlive.com"
 
 vision:
   decode_mode: auto
@@ -126,9 +181,10 @@ vision:
 # 任务执行器配置（高并发支持）
 # ----------------------------------------------
 task:
-  max_concurrent: 10
-  max_concurrent_gpu: 3
-  max_xbox_sessions: 100
+  # 0=不限制，压测后按实测写入正整数
+  max_concurrent: 0
+  max_concurrent_gpu: 0
+  max_xbox_sessions: 0
   result_ttl: 3600
   cleanup_interval: 300
 
@@ -153,4 +209,6 @@ window:
   default_mode: headless       # Phase A 无头；focus 时升 full
   display_fps_max: 30           # 对齐 streaming XsrpConfig.DECODE_VIDEO_FPS
   title_template: "{email}"     # 对齐 Worker.window_tile
-  close_terminates_task: false  # 关窗 hide，不结束任务（streaming 一致）
+  close_terminates_task: true   # 关窗确认后终止串流+自动化并上报平台
+  close_confirm_title: "结束串流"
+  close_confirm_message: "关闭窗口将结束串流任务和自动化，是否继续？"

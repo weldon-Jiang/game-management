@@ -14,5 +14,7 @@ export const xboxApi = {
   unbind: (id) => request.put(`/api/xbox-hosts/${id}/unbind`),
   getAvailableAccounts: (id) => request.get(`/api/xbox-hosts/${id}/available-streaming-accounts`),
   discover: (agentId) => request.post('/api/xbox-hosts/discover', null, { params: { agentId } }),
-  unlock: (id) => request.post(`/api/xbox-hosts/${id}/unlock`)
+  unlock: (id) => request.post(`/api/xbox-hosts/${id}/unlock`),
+  /** 合并商户下重复登记的主机（GSSV ID / LAN UUID 等） */
+  dedupe: (params) => request.post('/api/xbox-hosts/dedupe', null, { params })
 }

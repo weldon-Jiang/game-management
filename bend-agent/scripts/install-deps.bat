@@ -27,7 +27,7 @@ if errorlevel 1 (
 echo.
 echo [2/2] Verifying core modules ...
 set PYTHONPATH=%PROJECT_ROOT%\src
-python -c "import pygame, compress_pickle; from agent.xbox.lan_media_session import establish_lan_media_security; from agent.xbox.stream_recovery import reconnect_input_channel; print('pygame', pygame.ver); print('LAN stream modules OK')"
+python -c "import pygame, compress_pickle, psutil; from agent.vision.ocr_engine import recognize_line; from agent.vision.profile_name_reader import gamertag_matches; from agent.xbox.lan_media_session import establish_lan_media_security; from agent.xbox.stream_recovery import reconnect_input_channel; print('pygame', pygame.ver); print('OCR/profile modules OK'); print('LAN stream modules OK')"
 if errorlevel 1 (
     echo [ERROR] Module verification failed. Ensure PYTHONPATH includes src or run from bend-agent with:
     echo   set PYTHONPATH=src

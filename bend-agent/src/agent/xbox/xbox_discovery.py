@@ -21,7 +21,6 @@ from ..core.logger import get_logger
 from ..gssv.base_uri import DEFAULT_GSSV_BASE_URI, normalize_gssv_base_uri
 from ..gssv.device_info import build_x_ms_device_info
 from ..lan.network_util import is_blocked_scan_ip, pick_local_lan_ip
-from .smartglass_discovery import SmartGlassConsole, discover_smartglass_consoles
 
 
 @dataclass
@@ -271,19 +270,7 @@ class XboxDiscovery:
                     self.logger.info(f"云端发现成功，共 {len(xboxes)} 台")
                     return xboxes
 
-            if self._smartglass_udp_enabled():
-                self.logger.info("=== 步骤2: SmartGlass UDP Discovery (0xDD00) ===")
-                sg_xboxes = await self._smartglass_udp_discover()
-                for xbox in sg_xboxes:
-                    self._discovered_xboxes[xbox.device_id] = xbox
-                    xboxes.append(xbox)
-                    discovered_ips.add(xbox.ip_address)
-                    self.logger.info(
-                        f"✓ SmartGlass UDP: {xbox.name} ({xbox.ip_address}) "
-                        f"id={xbox.device_id}"
-                    )
-
-            self.logger.info("=== 步骤3: 使用 SSDP 发现 ===")
+            self.logger.info("=== 步骤2: 使用 SSDP 发现 ===")
             devices = await self._ssdp_discover()
             for device in devices:
                 ip = device.get("ip", "")
@@ -395,78 +382,6 @@ class XboxDiscovery:
 
         self.logger.info(f"SSDP发现完成，找到 {len(devices)} 个设备")
         return devices
-
-    def _smartglass_udp_enabled(self) -> bool:
-        return bool(config.get("discovery.smartglass_udp_enabled", True))
-
-    def _smartglass_udp_timeout(self) -> float:
-        return float(config.get("discovery.smartglass_udp_timeout_sec", 5))
-
-    def _subnet_broadcast(self) -> Optional[str]:
-        local_ip = self._get_local_ip()
-        if not local_ip:
-            return None
-        parts = local_ip.split(".")
-        if len(parts) != 4:
-            return None
-        return f"{parts[0]}.{parts[1]}.{parts[2]}.255"
-
-    async def _smartglass_udp_discover(self) -> List[XboxInfo]:
-        """OpenXbox SmartGlass UDP 发现，解析 0xDD01 响应。"""
-        if is_blocked_scan_ip(self._get_local_ip() or ""):
-            self.logger.warning("SmartGlass UDP 发现跳过：本机不在真实 LAN 网段")
-            return []
-
-        try:
-            consoles = await discover_smartglass_consoles(
-                timeout_sec=self._smartglass_udp_timeout(),
-                subnet_broadcast=self._subnet_broadcast(),
-            )
-        except Exception as exc:
-            self.logger.warning("SmartGlass UDP 发现异常: %s", exc)
-            return []
-
-        xboxes: List[XboxInfo] = []
-        for console in consoles:
-            xbox = self._xbox_info_from_smartglass(console)
-            if xbox:
-                xboxes.append(xbox)
-        self.logger.info("SmartGlass UDP 发现完成，找到 %s 台", len(xboxes))
-        return xboxes
-
-    def _xbox_info_from_smartglass(self, console: SmartGlassConsole) -> Optional[XboxInfo]:
-        """将 SmartGlass Discovery Response 转为 XboxInfo。"""
-        if not console.ip_address:
-            return None
-
-        hardware_id = (console.hardware_uuid or "").strip()
-        if hardware_id:
-            device_id = hardware_id.upper()
-            if not device_id.startswith("XBOX-"):
-                device_id = f"XBOX-{device_id}"
-        else:
-            device_id = self._generate_device_id(console.ip_address)
-
-        console_type = self._console_type_from_smartglass(console.console_type)
-        name = console.console_name or f"Xbox ({console.ip_address})"
-
-        return XboxInfo(
-            device_id=device_id,
-            name=name,
-            ip_address=console.ip_address,
-            port=self.SMARTGLASS_PORT,
-            live_id=hardware_id.upper() if hardware_id else device_id,
-            console_type=console_type,
-            firmware_version="Unknown",
-            last_seen=datetime.now(),
-            power_state="On",
-        )
-
-    @staticmethod
-    def _console_type_from_smartglass(console_type: int) -> str:
-        if console_type == 0x01:
-            return "Xbox One"
-        return "Xbox Unknown"
 
     async def _scan_local_network(self) -> List[str]:
         """扫描局域网开放 Xbox 端口的设备。"""

@@ -25,6 +25,7 @@ import asyncio
 import threading
 import time
 import random
+from pathlib import Path
 from typing import Dict, Optional, List, Any, Callable
 
 from ..core.logger import get_logger
@@ -37,7 +38,12 @@ from ..runtime.task_control_handler import TaskControlHandler  # noqa: F401 — 
 from ..runtime.input_focus import InputFocusManager
 from ..runtime.phase_fsm import SessionPhase
 from ..core.config import config
+from ..core.concurrency_limits import resolve_concurrency_limit
 from ..api.platform_api_client import PlatformApiClient
+
+_AGENT_CONFIG_PATH = str(
+    Path(__file__).resolve().parents[3] / "configs" / "agent.yaml"
+)
 
 
 _active_scheduler: Optional["AutomationScheduler"] = None
@@ -83,9 +89,11 @@ class AutomationScheduler:
         - agent_secret: Agent Secret（用于HTTP认证）
         """
         self.logger = get_logger('automation_scheduler')
-        self._max_concurrent = max_concurrent_tasks or int(
-            config.get("task.max_concurrent", 10)
-        )
+        if max_concurrent_tasks is not None:
+            raw_limit = max_concurrent_tasks
+        else:
+            raw_limit = config.get("task.max_concurrent", 0)
+        self._max_concurrent = resolve_concurrency_limit(raw_limit)
         self._semaphore = asyncio.Semaphore(self._max_concurrent)
 
         self._running_tasks: Dict[str, asyncio.Task] = {}
@@ -189,6 +197,7 @@ class AutomationScheduler:
         two_phase: bool = True,
         relaunch: bool = False,
         platform_xbox_hosts: Optional[List[Dict[str, Any]]] = None,
+        keyboard_mapping: Optional[Dict[str, str]] = None,
     ) -> bool:
         """
         启动自动化任务
@@ -230,6 +239,8 @@ class AutomationScheduler:
             return False
         self.logger.info("流媒体账号密码解密成功")
 
+        # 两阶段：Step3 完成后停在 READY，等平台下发 gameActionType；一步式才回退 squad_battle。
+        resolved_game_action_type = game_action_type or ("" if two_phase else "squad_battle")
         context = AgentTaskContext(
             task_id=task_id,
             streaming_account_id=streaming_account_id,
@@ -237,7 +248,7 @@ class AutomationScheduler:
             streaming_account_password=decrypted_password,
             streaming_account_auto_code=streaming_account_auto_code,
             window_id=f"window_{task_id}",
-            game_action_type=game_action_type or "squad_battle",
+            game_action_type=resolved_game_action_type,
             account_platform=account_platform or "xbox",
             auto_match_host=auto_match_host,
         )
@@ -252,9 +263,7 @@ class AutomationScheduler:
                 gamertag=ga.get("gameName", ga.get("gamertag", "")),
                 email=ga.get("email", ""),
                 password=decrypted_game_password or "",
-                position_index=ga.get("positionIndex", ga.get("position_index", -1)),
                 is_new_user=bool(ga.get("isNewUser", ga.get("is_new_user", False))),
-                profile_bound=bool(ga.get("profileBound", ga.get("profile_bound", False))),
                 is_primary=ga.get("isPrimary", False),
                 target_matches=ga.get("dailyMatchLimit", ga.get("targetMatches", 3)),
                 today_match_count=ga.get("todayMatchCount", 0),
@@ -265,6 +274,10 @@ class AutomationScheduler:
             ))
 
         context.game_accounts = game_accounts_with_passwords
+
+        from ..input.agent_keyboard_config import apply_task_keyboard_mapping
+
+        apply_task_keyboard_mapping(task_id, context, keyboard_mapping)
 
         if assigned_xbox:
             platform_id = assigned_xbox.get("id", "")
@@ -282,8 +295,15 @@ class AutomationScheduler:
         context.pause_event = asyncio.Event()
         context.pause_event.set()
 
+        close_terminates = bool(config.get("window.close_terminates_task", True))
+
         def _on_window_close() -> None:
-            asyncio.create_task(self.close_display_window(task_id))
+            if close_terminates:
+                asyncio.create_task(
+                    self._handle_user_window_close_request(task_id)
+                )
+            else:
+                asyncio.create_task(self.close_display_window(task_id))
 
         context.window_close_callback = _on_window_close
 
@@ -293,7 +313,7 @@ class AutomationScheduler:
             cancel_event=cancel_event,
             modules={"window_manager": self._window_manager},
         )
-        runtime.on_phase_change = self._make_phase_reporter(task_id)
+        # 会话阶段事件由 StreamingAccountTask._apply_session_phase 统一上报，避免双写时间线。
 
         # 登录间隔控制（防止触发安全验证）
         await self._wait_login_interval(streaming_account_email)
@@ -306,7 +326,9 @@ class AutomationScheduler:
         await self._semaphore.acquire()
 
         asyncio_task = asyncio.create_task(
-            self._run_task(task_id, runtime, cancel_event, two_phase, game_action_type)
+            self._run_task_wrapper(
+                task_id, runtime, cancel_event, two_phase, game_action_type,
+            )
         )
         runtime.asyncio_task = asyncio_task
 
@@ -390,21 +412,6 @@ class AutomationScheduler:
         self.logger.error(f"执行失败，已达最大重试次数 {max_retries}")
         raise last_exception
 
-    def _make_phase_reporter(self, task_id: str):
-        async def _report(phase: SessionPhase, message: str):
-            context = self._task_contexts.get(task_id)
-            if context:
-                context.session_phase = phase.value
-            await self._platform_client.report_progress(
-                task_id,
-                "SESSION",
-                "RUNNING",
-                message,
-                scope="session",
-                phase=phase.value,
-            )
-        return _report
-
     @property
     def task_control_handler(self) -> TaskControlHandler:
         return self._task_control
@@ -430,6 +437,28 @@ class AutomationScheduler:
         if event:
             event.set()
         return True
+
+    async def _run_task_wrapper(
+        self,
+        task_id: str,
+        runtime: StreamingAccountTaskRuntime,
+        cancel_event: asyncio.Event,
+        two_phase: bool = True,
+        game_action_type: str = "",
+    ) -> None:
+        await self._run_task(
+            task_id, runtime, cancel_event, two_phase, game_action_type,
+        )
+
+    async def _run_task_finally(self, task_id: str, runtime: StreamingAccountTaskRuntime) -> None:
+        with self._lock:
+            self._running_tasks.pop(task_id, None)
+            self._task_objects.pop(task_id, None)
+            self._cancel_events.pop(task_id, None)
+            self._task_contexts.pop(task_id, None)
+        self._registry.unregister(task_id)
+        self._semaphore.release()
+        self.logger.info("任务 %s 协程/宿主结束", task_id)
 
     async def _run_task(
         self,
@@ -506,17 +535,7 @@ class AutomationScheduler:
                 )
 
         finally:
-            with self._lock:
-                self._running_tasks.pop(task_id, None)
-                self._task_objects.pop(task_id, None)
-                self._cancel_events.pop(task_id, None)
-                self._task_contexts.pop(task_id, None)
-            self._registry.unregister(task_id)
-
-            # 仅释放当前任务的并发槽位；禁止在此调用 scheduler.close() 误杀其他任务。
-            self._semaphore.release()
-
-            self.logger.info(f"任务 {task_id} 协程结束")
+            await self._run_task_finally(task_id, runtime)
 
     async def pause_task(
         self,
@@ -566,13 +585,64 @@ class AutomationScheduler:
         """停止任务并释放串流/窗口资源。"""
         return await self.force_terminate_task(task_id)
 
+    async def _handle_user_window_close_request(self, task_id: str) -> None:
+        """用户点关窗：二次确认后终止串流任务并同步平台。"""
+        context = self._task_contexts.get(task_id)
+        if context and getattr(context, "_user_close_terminating", False):
+            return
+
+        from ..windows.sdl_window import confirm_window_close
+
+        title = str(config.get("window.close_confirm_title", "结束串流"))
+        message = str(
+            config.get(
+                "window.close_confirm_message",
+                "关闭窗口将结束串流任务和自动化，是否继续？",
+            )
+        )
+        confirmed = await asyncio.to_thread(confirm_window_close, title, message)
+        if not confirmed:
+            self.logger.info("用户取消关窗，任务 %s 继续运行", task_id)
+            return
+
+        await self._terminate_from_user_window_close(task_id)
+
+    async def _terminate_from_user_window_close(self, task_id: str) -> None:
+        """关窗确认后：先关闭显示窗口 → 上报 CANCELLED → 本地终止串流与自动化。"""
+        context = self._task_contexts.get(task_id)
+        if context:
+            if getattr(context, "_user_close_terminating", False):
+                return
+            context._user_close_terminating = True
+
+        # 用户已确认关窗：立即销毁 SDL 窗口，避免终止串流期间窗口仍停留在屏幕上。
+        await self.close_display_window(task_id)
+
+        cancel_message = "用户关闭串流窗口，任务已结束"
+        try:
+            await self._platform_client.report_progress(
+                task_id,
+                "SESSION",
+                "CANCELLED",
+                cancel_message,
+                reason="user_closed_window",
+                windowState="hidden",
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "关窗终止任务：平台上报失败 task=%s: %s", task_id, exc
+            )
+
+        await self.force_terminate_task(task_id)
+        self.logger.info("用户关窗已终止任务 %s（串流与自动化已结束）", task_id)
+
     async def close_display_window(self, task_id: str) -> bool:
         """仅关闭 SDL 显示；保持串流与自动化运行。"""
         context = self._task_contexts.get(task_id)
         if not context:
             return False
 
-        from ..automation.step3_streaming_init import step3_close_display
+        from ..automation.step3_display_helpers import step3_close_display
 
         await step3_close_display(context)
         runtime = self._registry.get(task_id)
@@ -588,7 +658,7 @@ class AutomationScheduler:
             self.logger.warning("ensure_display_window: no context for %s", task_id)
             return False
 
-        from ..automation.step3_streaming_init import step3_ensure_display
+        from ..automation.step3_display_helpers import step3_ensure_display
 
         ok = await step3_ensure_display(context)
         runtime = self._registry.get(task_id)
@@ -629,6 +699,12 @@ class AutomationScheduler:
     async def _cleanup_task_resources(self, task_id: str) -> None:
         context = self._task_contexts.get(task_id)
         if context:
+            try:
+                from ..input.agent_keyboard_config import clear_task_keyboard_mapping
+
+                clear_task_keyboard_mapping(task_id, context)
+            except Exception as exc:
+                self.logger.debug("clear keyboard mapping cache: %s", exc)
             try:
                 from ..xhome_stream.cleanup import close_media_context
 
@@ -697,6 +773,12 @@ class AutomationScheduler:
             await asyncio.sleep(0.1)
 
     def _purge_task_maps(self, task_id: str) -> None:
+        try:
+            from ..input.agent_keyboard_config import clear_task_keyboard_mapping
+
+            clear_task_keyboard_mapping(task_id)
+        except Exception:
+            pass
         with self._lock:
             self._running_tasks.pop(task_id, None)
             self._cancel_events.pop(task_id, None)

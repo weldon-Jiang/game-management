@@ -315,4 +315,23 @@ public class XboxHostController {
         
         return ApiResponse.success("发现指令已发送", null);
     }
+
+    /**
+     * 合并商户下重复登记的 Xbox 主机（同 IP / ID 别名 / GSSV+LAN 互补）。
+     */
+    @PostMapping("/dedupe")
+    public ApiResponse<List<Map<String, Object>>> dedupeHosts(
+            @RequestParam(required = false) String merchantId) {
+        String targetMerchantId;
+        if (UserContext.isPlatformAdmin()) {
+            if (!StringUtils.isNotBlank(merchantId)) {
+                throw new BusinessException(ResultCode.System.PARAM_INVALID, "平台管理员需指定 merchantId");
+            }
+            targetMerchantId = merchantId;
+        } else {
+            targetMerchantId = UserContext.getMerchantId();
+        }
+        List<Map<String, Object>> merged = xboxHostService.dedupeForMerchant(targetMerchantId);
+        return ApiResponse.success("去重完成", merged);
+    }
 }

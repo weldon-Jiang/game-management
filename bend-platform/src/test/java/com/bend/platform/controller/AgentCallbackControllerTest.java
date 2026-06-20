@@ -64,6 +64,32 @@ class AgentCallbackControllerTest {
     }
 
     @Test
+    void testGetStreamingAuthCache_Success() {
+        when(agentCallbackService.getStreamingAuthCache("acc-001", "task-001"))
+                .thenReturn(Map.of("found", true, "tokenVersion", 1));
+
+        ApiResponse<Map<String, Object>> response =
+                controller.getStreamingAuthCache("acc-001", "task-001");
+
+        assertEquals(200, response.getCode());
+        assertEquals(true, response.getData().get("found"));
+    }
+
+    @Test
+    void testSaveStreamingAuthCache_Conflict() {
+        when(agentCallbackService.saveStreamingAuthCache(
+                org.mockito.ArgumentMatchers.eq("acc-001"),
+                org.mockito.ArgumentMatchers.anyMap()))
+                .thenThrow(new BusinessException(409, "Token 版本冲突，请重新读取后保存"));
+
+        ApiResponse<Map<String, Object>> response = controller.saveStreamingAuthCache(
+                "acc-001",
+                Map.of("taskId", "task-001", "tokenDoc", Map.of("gamer_tag", "x")));
+
+        assertEquals(409, response.getCode());
+    }
+
+    @Test
     void testGetGameAccountsStatusLegacy_Success() {
         when(agentCallbackService.getGameAccountsStatusLegacy("task-001"))
                 .thenReturn(List.of(Map.of("id", "ga-001", "gamertag", "Player1")));

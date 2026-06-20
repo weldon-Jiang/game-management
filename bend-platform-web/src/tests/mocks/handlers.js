@@ -41,6 +41,7 @@ const handlers = [
   http.get('/api/tasks/page', ({ request }) => {
     const url = new URL(request.url)
     const agentId = url.searchParams.get('agentId')
+    const activeToday = url.searchParams.get('activeToday') === 'true'
 
     const tasks = [
       {
@@ -51,7 +52,7 @@ const handlers = [
         agentId: agentId || 'agent-001',
         streamingAccountId: 'stream-001',
         gameAccountId: 'game-001',
-        createdTime: new Date().toISOString(),
+        createdTime: new Date(Date.now() - 86400000 * 3).toISOString(),
         updatedTime: new Date().toISOString()
       },
       {
@@ -68,12 +69,19 @@ const handlers = [
       }
     ]
 
+    let records = agentId ? tasks.filter(t => t.agentId === agentId) : tasks
+    if (activeToday) {
+      const start = new Date()
+      start.setHours(0, 0, 0, 0)
+      records = records.filter((t) => new Date(t.updatedTime) >= start)
+    }
+
     return HttpResponse.json({
       code: 200,
       message: 'success',
       data: {
-        records: agentId ? tasks.filter(t => t.agentId === agentId) : tasks,
-        total: 2,
+        records,
+        total: records.length,
         pageNum: 1,
         pageSize: 10
       }

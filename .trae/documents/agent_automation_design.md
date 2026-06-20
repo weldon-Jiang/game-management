@@ -1,3 +1,5 @@
+> **架构勘误（2026-06-13）**：生产 Step2–3 为 **xblive/xsrp（GSSV 云端 + WebRTC）**，入口见 `bend-agent/src/agent/automation/step2_xsrp.py`、`step3_xsrp.py`。下文 SmartGlass LAN、`step2_xbox_streaming.py` 等为**历史方案**；SmartGlass UDP 仅作 LAN 发现/唤醒兜底。详见 [00_架构勘误_xsrp_step2.md](./00_架构勘误_xsrp_step2.md)。
+
 # Agent 自动化任务实现计划
 
 ## 一、需求概述
@@ -411,9 +413,9 @@ bend-agent/src/agent/
 ├── automation/                          # 新增：自动化模块
 │   ├── __init__.py
 │   ├── agent_automation_task.py         # 主自动化任务类（拆分为四个独立步骤）
-│   ├── step1_stream_account_login.py    # 步骤一：串流账号登录
-│   ├── step2_xbox_streaming.py         # 步骤二：Xbox串流连接
-│   ├── step3_gpu_decode.py             # 步骤三：显卡解码流转
+│   ├── step1_xblive_login.py           # 步骤一：xblive 认证（历史名 step1_stream_account_login.py）
+│   ├── step2_xsrp.py                   # 步骤二：GSSV/WebRTC 串流连接
+│   ├── step3_xsrp.py                   # 步骤三：WebRTC 帧 + SDL 窗口（历史名 step3_gpu_decode.py）
 │   ├── step4_game_automation.py        # 步骤四：游戏比赛自动化
 │   ├── task_context.py                 # 任务上下文管理
 │   ├── task_window_manager.py          # 窗口管理器（一个任务一个窗口）
@@ -431,7 +433,9 @@ bend-agent/src/agent/
 
 ### 3.2 核心类实现
 
-#### 3.2.1 Step1: 串流账号登录 (step1_stream_account_login.py)
+#### 3.2.1 Step1: xblive 认证 (`step1_xblive_login.py`，历史名 `step1_stream_account_login.py`)
+
+> 设计稿伪代码；生产入口见 `auth/step1_router`。
 
 ```python
 """
@@ -511,7 +515,9 @@ async def step1_execute_login(context: AgentTaskContext, check_cancel: Callable)
     return Step1Result(success=True, message="串流账号登录成功", xbox_tokens=xbox_tokens)
 ```
 
-#### 3.2.2 Step2: Xbox串流连接 (step2_xbox_streaming.py)
+#### 3.2.2 Step2: GSSV/WebRTC 串流 (`step2_xsrp.py` → `xbox/step2_xsrp_connect.py`)
+
+> 设计稿仍描述 LAN 匹配 + SmartGlass 连接；**生产**为 GSSV 云端 + WebRTC，见 [00_架构勘误_xsrp_step2.md](./00_架构勘误_xsrp_step2.md)。
 
 ```python
 """
@@ -591,7 +597,9 @@ async def step2_execute_streaming(context: AgentTaskContext, check_cancel: Calla
     return Step2Result(success=True, message="Xbox串流连接成功", xbox_info=context.current_xbox)
 ```
 
-#### 3.2.3 Step3: 显卡解码流转 (step3_gpu_decode.py)
+#### 3.2.3 Step3: WebRTC 帧 + SDL 窗口 (`step3_xsrp.py`，历史名 `step3_gpu_decode.py`)
+
+> 设计稿描述 Moonlight/GPU 窗口捕获；**生产**为 xsrp WebRTC 帧 + SDL + DataChannel。
 
 ```python
 """
