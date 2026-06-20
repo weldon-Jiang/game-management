@@ -197,6 +197,7 @@ class AutomationScheduler:
         two_phase: bool = True,
         relaunch: bool = False,
         platform_xbox_hosts: Optional[List[Dict[str, Any]]] = None,
+        keyboard_mapping: Optional[Dict[str, str]] = None,
     ) -> bool:
         """
         启动自动化任务
@@ -273,6 +274,10 @@ class AutomationScheduler:
             ))
 
         context.game_accounts = game_accounts_with_passwords
+
+        from ..input.agent_keyboard_config import apply_task_keyboard_mapping
+
+        apply_task_keyboard_mapping(task_id, context, keyboard_mapping)
 
         if assigned_xbox:
             platform_id = assigned_xbox.get("id", "")
@@ -695,6 +700,12 @@ class AutomationScheduler:
         context = self._task_contexts.get(task_id)
         if context:
             try:
+                from ..input.agent_keyboard_config import clear_task_keyboard_mapping
+
+                clear_task_keyboard_mapping(task_id, context)
+            except Exception as exc:
+                self.logger.debug("clear keyboard mapping cache: %s", exc)
+            try:
                 from ..xhome_stream.cleanup import close_media_context
 
                 await close_media_context(context, self.logger)
@@ -762,6 +773,12 @@ class AutomationScheduler:
             await asyncio.sleep(0.1)
 
     def _purge_task_maps(self, task_id: str) -> None:
+        try:
+            from ..input.agent_keyboard_config import clear_task_keyboard_mapping
+
+            clear_task_keyboard_mapping(task_id)
+        except Exception:
+            pass
         with self._lock:
             self._running_tasks.pop(task_id, None)
             self._cancel_events.pop(task_id, None)

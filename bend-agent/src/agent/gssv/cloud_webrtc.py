@@ -145,15 +145,29 @@ class GssvWebRtcSession:
         self._video_task: Optional[asyncio.Task] = None
         self._input_reporting_task: Optional[asyncio.Task] = None
         self._latest_frame: Optional[np.ndarray] = None
+        self._latest_frame_at: float = 0.0
         self._frame_lock = threading.Lock()
         self._frame_event = asyncio.Event()
         self._connect_time = 0.0
         self._input_close_callbacks: list = []
+        self._video_close_callbacks: list = []
 
     def on_input_channel_close(self, callback) -> None:
         """注册 input DataChannel 关闭回调。"""
         if callable(callback):
             self._input_close_callbacks.append(callback)
+
+    def on_video_track_close(self, callback) -> None:
+        """video track recv 结束（Xbox 待机/断流）时回调。"""
+        if callable(callback):
+            self._video_close_callbacks.append(callback)
+
+    def _notify_video_closed(self) -> None:
+        for cb in list(self._video_close_callbacks):
+            try:
+                cb()
+            except Exception as exc:
+                self.logger.debug("video close callback: %s", exc)
 
     def _notify_input_closed(self) -> None:
         self._input_ready = False
@@ -780,7 +794,9 @@ class GssvWebRtcSession:
             self._input_sender.frame_sync.push_video_frame(int(pts))
             with self._frame_lock:
                 self._latest_frame = img
+                self._latest_frame_at = time.time()
             self._frame_event.set()
+        self._notify_video_closed()
 
     async def wait_first_frame(self, timeout: Optional[float] = None) -> bool:
         timeout = timeout or float(config.get("gssv.cloud_first_frame_timeout_sec", 20))

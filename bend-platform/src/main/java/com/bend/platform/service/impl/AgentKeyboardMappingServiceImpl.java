@@ -1,6 +1,7 @@
 package com.bend.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.bend.platform.dto.AgentKeyboardMappingChartResponse;
 import com.bend.platform.dto.AgentKeyboardMappingResponse;
 import com.bend.platform.dto.UpdateAgentKeyboardMappingRequest;
 import com.bend.platform.entity.AgentInstance;
@@ -51,7 +52,7 @@ public class AgentKeyboardMappingServiceImpl implements AgentKeyboardMappingServ
         } else if (bindings == null || bindings.isEmpty()) {
             throw new BusinessException(ResultCode.System.PARAM_INVALID, "请提供 bindings 或设置 resetToDefault=true");
         } else {
-            Map<String, String> normalized = AgentKeyboardMappingDefaults.validateCustomBindings(bindings);
+            Map<String, String> normalized = AgentKeyboardMappingDefaults.validateFullBindings(bindings);
             storedJson = AgentKeyboardMappingDefaults.toJson(normalized);
         }
 
@@ -68,9 +69,9 @@ public class AgentKeyboardMappingServiceImpl implements AgentKeyboardMappingServ
     public Map<String, String> getEffectiveBindingsForAgent(String agentId) {
         AgentInstance instance = agentInstanceMapper.selectByAgentId(agentId);
         if (instance == null) {
-            return AgentKeyboardMappingDefaults.copyDefault();
+            return AgentKeyboardMappingDefaults.copyAgentFullDefault();
         }
-        return AgentKeyboardMappingDefaults.resolveEffectiveBindings(instance.getKeyboardMappingJson());
+        return AgentKeyboardMappingDefaults.resolveFullEffectiveBindings(instance.getKeyboardMappingJson());
     }
 
     @Override
@@ -78,36 +79,43 @@ public class AgentKeyboardMappingServiceImpl implements AgentKeyboardMappingServ
         return buildResponse(null);
     }
 
+    @Override
+    public AgentKeyboardMappingChartResponse getChartForAgent(String agentId) {
+        AgentInstance instance = requireAccessibleAgent(agentId);
+        return AgentKeyboardMappingDefaults.buildChartResponse(instance.getKeyboardMappingJson());
+    }
+
     private AgentKeyboardMappingResponse buildResponse(String keyboardMappingJson) {
         boolean usingDefault = keyboardMappingJson == null || keyboardMappingJson.isBlank();
-        Map<String, String> effective = AgentKeyboardMappingDefaults.resolveEffectiveBindings(keyboardMappingJson);
-        Map<String, String> actionToKey = invertBindings(effective);
-        Map<String, String> custom = usingDefault ? null : effective;
+        Map<String, String> effectiveFull = AgentKeyboardMappingDefaults.resolveFullEffectiveBindings(keyboardMappingJson);
+        Map<String, String> custom = usingDefault ? null : new LinkedHashMap<>(effectiveFull);
 
         List<AgentKeyboardMappingResponse.BindingRow> rows = new ArrayList<>();
-        for (AgentKeyboardMappingDefaults.ActionMeta meta : AgentKeyboardMappingDefaults.ACTION_METAS) {
+        for (AgentKeyboardMappingDefaults.BindingSlotRow slot
+                : AgentKeyboardMappingDefaults.buildBindingSlotRows(effectiveFull)) {
             rows.add(AgentKeyboardMappingResponse.BindingRow.builder()
-                    .action(meta.action())
-                    .label(meta.label())
-                    .defaultKey(meta.defaultKey())
-                    .key(actionToKey.getOrDefault(meta.action(), meta.defaultKey()))
+                    .bindingKey(slot.bindingKey())
+                    .key(slot.key())
+                    .action(slot.action())
+                    .label(slot.label())
+                    .defaultKey(slot.defaultKey())
+                    .category(slot.category())
+                    .groupLabel(slot.groupLabel())
                     .build());
         }
+
+        AgentKeyboardMappingChartResponse chart =
+                AgentKeyboardMappingDefaults.buildChartResponse(keyboardMappingJson);
 
         return AgentKeyboardMappingResponse.builder()
                 .usingDefault(usingDefault)
                 .customBindings(custom)
-                .effectiveBindings(effective)
+                .effectiveBindings(effectiveFull)
                 .rows(rows)
+                .groups(chart.getGroups())
+                .keyCaps(chart.getKeyCaps())
+                .debugHotkeys(chart.getDebugHotkeys())
                 .build();
-    }
-
-    private Map<String, String> invertBindings(Map<String, String> keyToAction) {
-        Map<String, String> actionToKey = new LinkedHashMap<>();
-        for (Map.Entry<String, String> entry : keyToAction.entrySet()) {
-            actionToKey.put(entry.getValue(), entry.getKey());
-        }
-        return actionToKey;
     }
 
     private AgentInstance requireAccessibleAgent(String agentId) {

@@ -142,7 +142,8 @@ class HighConcurrencyTaskExecutor:
             'xboxInfo',
             'taskType',
             'gameActionType',
-            'merchantId'
+            'merchantId',
+            'keyboardMapping',
         ):
             if key in task_data and key not in params:
                 params[key] = task_data.get(key)
@@ -438,6 +439,10 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
     else:
         scheduler.set_credentials(agent_id, agent_secret)
 
+    keyboard_mapping = params.get('keyboardMapping')
+    if not isinstance(keyboard_mapping, dict):
+        keyboard_mapping = None
+
     try:
         # 启动自动化任务
         success = await scheduler.start_task(
@@ -454,6 +459,7 @@ async def handle_stream_control(params: Dict[str, Any], check_cancel: Callable) 
             two_phase=two_phase,
             relaunch=relaunch,
             platform_xbox_hosts=platform_xbox_hosts,
+            keyboard_mapping=keyboard_mapping,
         )
 
         if not success:

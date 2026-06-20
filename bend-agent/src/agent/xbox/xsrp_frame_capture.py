@@ -11,6 +11,7 @@ import numpy as np
 from ..core.config import config
 from ..core.logger import get_logger
 from ..vision.frame_capture import Frame
+from ..vision.frame_utils import frame_to_bgr_ndarray
 
 
 class XsrpFrameCapture:
@@ -38,12 +39,10 @@ class XsrpFrameCapture:
         raw = await self._direct.get_frame(timeout=1.0)
         if raw is None:
             return None
-        if isinstance(raw, np.ndarray) and raw.size == 0:
+        img = frame_to_bgr_ndarray(raw)
+        if img is None or img.size == 0:
             return None
 
-        img = raw
-        if hasattr(raw, "copy"):
-            img = raw.copy()
         h, w = img.shape[:2]
         self._frame_counter += 1
         self._last_capture_ts = time.monotonic()

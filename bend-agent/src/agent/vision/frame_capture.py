@@ -35,6 +35,7 @@ from dataclasses import dataclass
 
 from ..core.config import config
 from ..core.logger import get_logger
+from .frame_utils import frame_to_bgr_ndarray
 
 try:
     from .gpu_frame_capture import GPUFrameCapture
@@ -279,16 +280,19 @@ class VideoFrameCapture:
             frame_data = await self._direct_capture.get_frame(timeout=0.5)
 
             if frame_data is not None:
+                img = frame_to_bgr_ndarray(frame_data)
+                if img is None:
+                    return await self._capture_window_frame()
                 self._frame_counter += 1
                 loop = asyncio.get_event_loop()
                 frame_id = f"frame_{self._frame_counter}_{int(loop.time() * 1000)}"
                 
                 frame = Frame(
-                    data=frame_data,
+                    data=img,
                     frame_id=frame_id,
                     timestamp=loop.time(),
-                    width=frame_data.shape[1] if len(frame_data.shape) > 1 else 1280,
-                    height=frame_data.shape[0] if len(frame_data.shape) > 1 else 720,
+                    width=img.shape[1],
+                    height=img.shape[0],
                     fps=getattr(self._direct_capture, 'fps', 0.0)
                 )
                 self._last_frame = frame

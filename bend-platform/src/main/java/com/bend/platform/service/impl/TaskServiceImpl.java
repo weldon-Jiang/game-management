@@ -35,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -70,9 +71,9 @@ public class TaskServiceImpl implements TaskService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    /** 任务列表分页：执行中 → 已暂停 → 待执行 → 其余；同组内 created_time 倒序 */
+    /** 任务列表分页：执行中 → 已暂停 → 待执行 → 其余；同组内 updated_time 倒序（复用任务以最近活跃为准） */
     private static final String TASK_LIST_STATUS_ORDER =
-            "CASE status WHEN 'running' THEN 0 WHEN 'paused' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END ASC, created_time DESC";
+            "CASE status WHEN 'running' THEN 0 WHEN 'paused' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END ASC, updated_time DESC";
 
     private final TaskMapper taskMapper;
     private final TaskStateMachine stateMachine;
@@ -252,7 +253,7 @@ public class TaskServiceImpl implements TaskService {
      * 返回值：
      * - 分页结果（包含数据列表和分页信息）
      *
-     * 默认排序：执行中 → 已暂停 → 待执行 → 其余状态；同优先级内按创建时间倒序。
+     * 默认排序：执行中 → 已暂停 → 待执行 → 其余状态；同优先级内按最近更新时间倒序。
      */
     @Override
     public IPage<Task> findPage(TaskPageRequest request) {
@@ -281,6 +282,9 @@ public class TaskServiceImpl implements TaskService {
         }
         if (StringUtils.hasText(request.getStreamingAccountId())) {
             wrapper.eq(Task::getStreamingAccountId, request.getStreamingAccountId());
+        }
+        if (Boolean.TRUE.equals(request.getActiveToday())) {
+            wrapper.ge(Task::getUpdatedTime, LocalDate.now().atStartOfDay());
         }
         wrapper.last("ORDER BY " + TASK_LIST_STATUS_ORDER);
         Page<Task> page = new Page<>(request.getPageNum(), request.getPageSize(), true);

@@ -16,6 +16,7 @@ import numpy as np
 from ..core.logger import get_logger
 from ..scene.fc_scene_client import FC_ERR_MATCH_OVER, FC_ERR_NETWORK, FC_ERR_OK
 from ..vision.frame_capture import Frame
+from ..vision.frame_utils import frame_to_bgr_ndarray
 
 GRAPH_INTERVAL_SEC = 1.0
 PLAY_INTERVAL_SEC = 0.05
@@ -70,6 +71,13 @@ class StreamRuntime:
     def seed_latest_frame(self, frame: Frame) -> None:
         """Step3 首帧校验通过后写入，避免 SDL 显示泵空窗。"""
         self._latest_frame = frame
+        ctx = self._context
+        if ctx is not None:
+            ctx._stream_video_stale = False
+
+    def invalidate_latest_frame(self) -> None:
+        """断流/重连前丢弃缓存，防止 SDL 展示静态旧帧。"""
+        self._latest_frame = None
 
     def get_latest_frame(self) -> Optional[Frame]:
         return self._latest_frame
@@ -78,10 +86,7 @@ class StreamRuntime:
         frame = self._latest_frame
         if frame is None:
             return None
-        data = getattr(frame, "data", frame)
-        if isinstance(data, np.ndarray) and data.size > 0:
-            return data
-        return None
+        return frame_to_bgr_ndarray(frame)
 
     async def wait_for_latest_frame(self, timeout: float = 1.0) -> Optional[Frame]:
         """等待 capture 泵产出首帧/新帧，避免与 capture 泵并发 poll frame_capture。"""
@@ -179,7 +184,26 @@ class StreamRuntime:
                     continue
                 frame = await capture.capture_frame()
                 if frame is not None:
+                    img = frame_to_bgr_ndarray(frame)
+                    if img is None:
+                        await asyncio.sleep(0.05)
+                        continue
+                    if getattr(frame, "data", None) is not img:
+                        frame = Frame(
+                            data=img,
+                            frame_id=frame.frame_id,
+                            timestamp=frame.timestamp,
+                            width=img.shape[1],
+                            height=img.shape[0],
+                            fps=getattr(frame, "fps", 0.0),
+                        )
                     self._latest_frame = frame
+                    try:
+                        from ..xbox.stream_liveness_monitor import touch_video_frame_at
+
+                        touch_video_frame_at(self._context)
+                    except Exception:
+                        pass
                     await self._offer_queue(self.frame_queue, frame)
             except asyncio.CancelledError:
                 raise
@@ -210,6 +234,14 @@ class StreamRuntime:
                 if not self.auto_play:
                     await asyncio.sleep(PLAY_INTERVAL_SEC)
                     continue
+                ctx = self._context
+                if (
+                    ctx is not None
+                    and hasattr(ctx, "is_paused")
+                    and ctx.is_paused()
+                ):
+                    await asyncio.sleep(PLAY_INTERVAL_SEC)
+                    continue
                 elapsed = time.monotonic() - play_tp
                 if elapsed < PLAY_INTERVAL_SEC:
                     await asyncio.sleep(PLAY_INTERVAL_SEC - elapsed)
@@ -236,6 +268,9 @@ class StreamRuntime:
             if actions and self._apply_fc_actions:
                 await self._apply_fc_actions(self._context, actions, task_logger)
             if scene_id >= 0:
+                from ..input.manual_nav import update_last_streaming_scene_id
+
+                update_last_streaming_scene_id(self._context, scene_id)
                 return str(scene_id)
             return "UNKNOWN"
 
@@ -256,6 +291,9 @@ class StreamRuntime:
         try:
             result = detector.recognize_scenes_batch(image, candidate_ids)
             if result.matched and result.scene_id > 0:
+                from ..input.manual_nav import update_last_streaming_scene_id
+
+                update_last_streaming_scene_id(self._context, result.scene_id)
                 return str(result.scene_id)
         except Exception as exc:
             task_logger.debug("StreamRuntime scene detect: %s", exc)

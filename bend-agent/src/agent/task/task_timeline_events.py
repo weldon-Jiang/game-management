@@ -57,6 +57,36 @@ def _should_emit(context: Any, event_key: str, throttle_sec: float) -> bool:
     return True
 
 
+def _resolve_timeline_game_account(context: Any) -> tuple:
+    """
+    解析当前 Step4 游戏账号，供 session 级时间线事件附带 gameAccountId。
+
+    优先级：context._timeline_game_account_* → account_switcher 当前账号 → 单账号任务。
+    """
+    ga_id = getattr(context, "_timeline_game_account_id", None)
+    ga_name = getattr(context, "_timeline_game_account_name", None)
+    if ga_id:
+        return str(ga_id), ga_name
+
+    switcher = getattr(context, "_account_switcher", None)
+    if switcher is not None:
+        current_id = getattr(switcher, "_current_account_id", None)
+        if current_id:
+            accounts = getattr(switcher, "_accounts", {}) or {}
+            acc = accounts.get(current_id)
+            name = getattr(acc, "gamertag", None) if acc else None
+            return str(current_id), name
+
+    accounts = getattr(context, "game_accounts", None) or []
+    if len(accounts) == 1:
+        acc = accounts[0]
+        acc_id = getattr(acc, "id", None)
+        if acc_id:
+            return str(acc_id), getattr(acc, "gamertag", None)
+
+    return None, None
+
+
 def _resolve_platform_client(context: Any):
     client = getattr(context, "_platform_client", None)
     if client is not None:
@@ -102,16 +132,29 @@ async def emit_task_timeline_event(
         logger.debug("时间线事件跳过（无 PlatformApiClient）: %s", message)
         return
 
+    ga_id, ga_name = _resolve_timeline_game_account(context)
+    progress_kwargs = {
+        "scope": "session",
+        "timelineEvent": True,
+    }
+    if ga_id:
+        progress_kwargs["gameAccountId"] = ga_id
+    if ga_name:
+        progress_kwargs["gameAccountName"] = ga_name
+
     try:
         await client.report_progress(
             task_id,
             "SESSION",
             status,
             message,
-            scope="session",
-            timelineEvent=True,
+            **progress_kwargs,
         )
-        logger.info("时间线事件已上报: %s", message)
+        logger.info(
+            "时间线事件已上报: %s%s",
+            message,
+            f" (账号={ga_name or ga_id})" if ga_id else "",
+        )
     except Exception as exc:
         logger.debug("时间线事件上报失败 (%s): %s", message, exc)
 

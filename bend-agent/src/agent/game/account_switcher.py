@@ -27,6 +27,12 @@ from ..debug.automation_trace import (
     get_scene_capture_session,
     log_gamepad_input,
 )
+from ..vision.frame_utils import frame_to_bgr_ndarray
+
+
+def _extract_frame_image(frame: Any) -> Optional[Any]:
+    """从 Frame/ndarray 提取 BGR 图像；禁止对 ndarray 误用 .data。"""
+    return frame_to_bgr_ndarray(frame)
 
 
 class AccountStatus(Enum):
@@ -85,6 +91,8 @@ class AccountSwitchResult:
     error_message: Optional[str] = None
     time_taken: float = 0.0
     host_gamertag: Optional[str] = None
+    # True 表示主页 OCR 已匹配目标，未走 3/5/6 切档导航
+    skipped_switch: bool = False
 
 
 # 进 UT 主菜单前的场景链（对齐 streaming get_scenes_diagram）
@@ -146,6 +154,7 @@ class AccountSwitcher:
     """
     游戏账号切换器（gamertag OCR + 场景校验）
 
+    Step4 标准入口：ensure_target_game_account — 先 Xbox 主页，再 OCR 比对，按需切档。
     已有档案：引导菜单 → 场景3 → 场景5 → 场景6 → OCR 按 gamertag 选账号
     新用户：引导菜单 → 场景3 → 场景5 → 添加新用户 → 场景10+ 登录
     """
@@ -343,13 +352,17 @@ class AccountSwitcher:
             time_taken=time_taken,
         )
 
-    async def switch_to(self, target_account_id: str) -> AccountSwitchResult:
+    async def ensure_target_game_account(
+        self, target_account_id: str
+    ) -> AccountSwitchResult:
         """
-        切换至目标游戏账号（Step4 账号轮询主入口）。
+        Step4 账号门禁（固定顺序，自动化路径标准入口）。
 
-        流程：StreamKeepaliveLoop 保活 → 确保 input 通道 → 引导菜单/主页导航
-        → 按 is_new_user 分支（OCR 选档或新用户登录）→ 可选回写主机 Gamertag。
-        退出：成功更新 _current_account_id；失败返回 AccountSwitchResult(success=False)。
+        1. 回到 Xbox 主页 (203/1/24)
+        2. OCR 判断当前签入档案是否为目标游戏账号
+        3. 已匹配 → 跳过切档；未匹配 → 走 3/5/6 完整切档
+
+        注意：串流账号邮箱仅用于 Step1 连主机，主页显示以 OCR 游戏账号为准。
         """
         start_time = time.time()
         from_account = self._current_account_id
@@ -359,6 +372,7 @@ class AccountSwitcher:
                 success=True,
                 from_account=from_account,
                 to_account=target_account_id,
+                skipped_switch=True,
                 time_taken=time.time() - start_time,
             )
 
@@ -372,8 +386,9 @@ class AccountSwitcher:
             )
 
         self.logger.info(
-            f"切换账号: {from_account} -> {target_account_id} "
-            f"({target_account.gamertag}, 新用户: {target_account.is_new_user})"
+            "账号门禁: 目标游戏账号 %s (%s)",
+            target_account.gamertag,
+            target_account_id,
         )
 
         try:
@@ -389,12 +404,20 @@ class AccountSwitcher:
 
                 await self.capture_automation_entry_snapshot()
 
+                if not await self._ensure_xbox_home_before_account_switch():
+                    raise RuntimeError(
+                        "账号门禁：未能回到 Xbox 主页（场景203/1/24）；"
+                        "请手动关闭 FC/弹窗回到主页后重试"
+                    )
+
+                await self._log_home_profile_gate(target_account)
+
                 if await self._is_already_signed_in_as(target_account):
                     self._current_account_id = target_account_id
                     target_account.mark_login()
                     time_taken = time.time() - start_time
                     self.logger.info(
-                        "主页档案已是 %s，跳过切换 (耗时: %.2fs)",
+                        "账号门禁：主页已是目标 %s，跳过切档 (耗时: %.2fs)",
                         target_account.gamertag,
                         time_taken,
                     )
@@ -402,114 +425,30 @@ class AccountSwitcher:
                         success=True,
                         from_account=from_account,
                         to_account=target_account_id,
+                        skipped_switch=True,
                         time_taken=time_taken,
                     )
 
-                if await self._wait_for_scene(3, timeout=2.0):
-                    self.logger.info("已在场景3（档案和系统），跳过引导页")
-                else:
-                    on_home = await self._detect_any_scene([203, 1, 24], strict=False)
-                    guide_ok = await self._open_guide_menu()
-                    if not guide_ok:
-                        self.logger.warning("未能打开引导页，尝试备用导航")
-                        if on_home in XBOX_HOME_SCENES or on_home is None:
-                            if not await self._wait_for_scene(3, timeout=3.0):
-                                await self._navigate_to_accounts_from_home()
-                        else:
-                            await self._navigate_to_accounts_system()
-                    elif not await self._wait_for_scene(3, timeout=2.0):
-                        if not await self._run_scene_transition(2, 2):
-                            self.logger.warning("场景转移 2->3 未确认，回退到手动导航")
-                            await self._navigate_to_accounts_system()
-
-                if not await self._wait_for_scene(3):
-                    await self._log_scene_probe([2, 3, 5])
-                    await self._save_debug_frame(3)
-                    raise RuntimeError("未进入档案和系统页面（场景3）")
-
-                if target_account.is_new_user and target_account.needs_credential_login():
-                    await self._select_add_switch()
-                    if not await self._wait_for_scene(5, timeout=15.0):
-                        raise RuntimeError("未进入添加和切换页面（场景5）")
-                    await self._select_add_new_user()
-                    await self._login_with_credentials(
-                        target_account.email, target_account.password
-                    )
-                    host_tag = await self._read_host_gamertag_from_profile_list()
-                    await self._sync_host_gamertag(
-                        target_account, host_gamertag=host_tag
-                    )
-                else:
-                    await self._select_add_switch()
-                    if not await self._wait_for_scene(5):
-                        raise RuntimeError("未进入添加和切换页面（场景5）")
-
-                    await self._enter_account_selection()
-                    scene6_ready = await self._wait_for_scene(
-                        6, timeout=12.0, strict=True
-                    )
-                    scene6_layout_ok = (
-                        scene6_ready and await self._verify_scene6_layout()
-                    )
-                    if not scene6_layout_ok:
-                        if await self._is_already_signed_in_as(target_account):
-                            self.logger.info(
-                                "场景6未确认但主页已是目标账号 (%s)，跳过档案列表选择",
-                                target_account.gamertag,
-                            )
-                        elif not scene6_ready:
-                            raise RuntimeError("未进入账号选择页面（场景6）")
-                        else:
-                            await self._save_debug_frame(6)
-                            raise RuntimeError(
-                                "场景6模板误匹配：当前帧不具备档案列表布局"
-                            )
-                    else:
-                        found_index = await self._select_account_by_gamertag(
-                            target_account.gamertag,
-                            email=target_account.email,
-                            host_display_name=target_account.host_display_name,
-                        )
-                        target_account.position_index = found_index
-                        await self._confirm_account_selection()
-
-                        if await self._wait_for_scene(10, timeout=10.0):
-                            if target_account.email and target_account.password:
-                                self.logger.info(
-                                    "切换后出现登录页，使用凭据登录 (%s)",
-                                    target_account.gamertag,
-                                )
-                                await self._login_with_credentials(
-                                    target_account.email, target_account.password
-                                )
-                                host_tag = await self._read_host_gamertag_from_profile_list()
-                                await self._sync_host_gamertag(
-                                    target_account, host_gamertag=host_tag
-                                )
-                            else:
-                                raise RuntimeError(
-                                    f"档案 {target_account.gamertag} 需重新登录，"
-                                    "但未配置邮箱/密码凭据"
-                                )
-                        else:
-                            self.logger.info(
-                                "档案切换完成，未出现登录页 (%s)",
-                                target_account.gamertag,
-                            )
-                            host_tag = await self._read_host_gamertag_from_profile_list()
-                            await self._sync_host_gamertag(
-                                target_account, host_gamertag=host_tag
-                            )
+                self.logger.info(
+                    "账号门禁：主页档案与目标 %s 不一致，开始 Xbox 系统切档",
+                    target_account.gamertag,
+                )
+                await self._perform_full_account_switch(target_account)
 
             self._current_account_id = target_account_id
             target_account.mark_login()
 
             time_taken = time.time() - start_time
-            self.logger.info(f"账号切换成功: {target_account_id} (耗时: {time_taken:.2f}s)")
+            self.logger.info(
+                "账号门禁：切档完成 %s (耗时: %.2fs)",
+                target_account_id,
+                time_taken,
+            )
             return AccountSwitchResult(
                 success=True,
                 from_account=from_account,
                 to_account=target_account_id,
+                skipped_switch=False,
                 time_taken=time_taken,
             )
 
@@ -522,7 +461,7 @@ class AccountSwitcher:
                 time_taken=time.time() - start_time,
             )
         except Exception as e:
-            self.logger.error(f"账号切换失败: {e}")
+            self.logger.error(f"账号门禁失败: {e}")
             return AccountSwitchResult(
                 success=False,
                 from_account=from_account,
@@ -530,6 +469,127 @@ class AccountSwitcher:
                 error_message=str(e),
                 time_taken=time.time() - start_time,
             )
+
+    async def switch_to(self, target_account_id: str) -> AccountSwitchResult:
+        """切换至目标游戏账号；实现为 ensure_target_game_account 别名。"""
+        return await self.ensure_target_game_account(target_account_id)
+
+    async def _log_home_profile_gate(self, target_account: GameAccount) -> None:
+        """主页门禁：记录当前主页档案与目标游戏账号（OCR，仅日志）。"""
+        norm = await self._get_normalized_frame()
+        if norm is None:
+            self.logger.info(
+                "账号门禁：无法截帧，跳过主页档案 OCR 预览"
+            )
+            return
+
+        from ..vision.profile_name_reader import read_home_profile_identity
+
+        identity = read_home_profile_identity(norm)
+        self.logger.info(
+            "账号门禁：主页档案 name=%r email=%r → 目标 gamertag=%s email=%s",
+            identity.display_name,
+            identity.email_text,
+            target_account.gamertag,
+            self._mask_email(target_account.email),
+        )
+
+    async def _perform_full_account_switch(self, target_account: GameAccount) -> None:
+        """主页门禁未匹配时，走 Guide → 场景3/5/6 完整切档。"""
+        if await self._wait_for_scene(3, timeout=2.0, strict=True):
+            self.logger.info("已在场景3（档案和系统），跳过引导页")
+        else:
+            if not await self._is_on_xbox_home():
+                self.logger.warning(
+                    "未在场景3且不在 Xbox 主页，尝试打开引导页"
+                )
+            on_home = await self._detect_any_scene(
+                list(XBOX_HOME_SCENES), strict=False
+            )
+            guide_ok = await self._open_guide_menu()
+            if not guide_ok:
+                self.logger.warning("未能打开引导页，尝试备用导航")
+                if on_home in XBOX_HOME_SCENES or on_home is None:
+                    if not await self._wait_for_scene(3, timeout=3.0):
+                        await self._navigate_to_accounts_from_home()
+                else:
+                    await self._navigate_to_accounts_system()
+            elif not await self._wait_for_scene(3, timeout=2.0):
+                if not await self._run_scene_transition(2, 2):
+                    self.logger.warning("场景转移 2->3 未确认，回退到手动导航")
+                    await self._navigate_to_accounts_system()
+
+        if not await self._wait_for_scene(3):
+            await self._log_scene_probe([2, 3, 5])
+            await self._save_debug_frame(3)
+            raise RuntimeError("未进入档案和系统页面（场景3）")
+
+        if target_account.is_new_user and target_account.needs_credential_login():
+            await self._select_add_switch()
+            if not await self._wait_for_scene(5, timeout=15.0):
+                raise RuntimeError("未进入添加和切换页面（场景5）")
+            await self._select_add_new_user()
+            await self._login_with_credentials(
+                target_account.email, target_account.password
+            )
+            host_tag = await self._read_host_gamertag_from_profile_list()
+            await self._sync_host_gamertag(
+                target_account, host_gamertag=host_tag
+            )
+        else:
+            if not await self._select_add_switch():
+                raise RuntimeError("未进入添加和切换页面（场景5）")
+
+            scene6_ok = await self._enter_account_selection()
+            if not scene6_ok:
+                if await self._is_already_signed_in_as(target_account):
+                    self.logger.info(
+                        "场景6未确认但主页已是目标账号 (%s)，跳过档案列表选择",
+                        target_account.gamertag,
+                    )
+                elif await self._is_scene6_template_without_layout():
+                    await self._save_debug_frame(6)
+                    raise RuntimeError(
+                        "场景6模板误匹配：当前帧不具备档案列表布局"
+                    )
+                else:
+                    raise RuntimeError("未进入账号选择页面（场景6）")
+            else:
+                found_index = await self._select_account_by_gamertag(
+                    target_account.gamertag,
+                    email=target_account.email,
+                    host_display_name=target_account.host_display_name,
+                )
+                target_account.position_index = found_index
+                await self._confirm_account_selection()
+
+                if await self._wait_for_scene(10, timeout=10.0):
+                    if target_account.email and target_account.password:
+                        self.logger.info(
+                            "切换后出现登录页，使用凭据登录 (%s)",
+                            target_account.gamertag,
+                        )
+                        await self._login_with_credentials(
+                            target_account.email, target_account.password
+                        )
+                        host_tag = await self._read_host_gamertag_from_profile_list()
+                        await self._sync_host_gamertag(
+                            target_account, host_gamertag=host_tag
+                        )
+                    else:
+                        raise RuntimeError(
+                            f"档案 {target_account.gamertag} 需重新登录，"
+                            "但未配置邮箱/密码凭据"
+                        )
+                else:
+                    self.logger.info(
+                        "档案切换完成，未出现登录页 (%s)",
+                        target_account.gamertag,
+                    )
+                    host_tag = await self._read_host_gamertag_from_profile_list()
+                    await self._sync_host_gamertag(
+                        target_account, host_gamertag=host_tag
+                    )
 
     async def launch_fc_to_ut_menu(self, timeout: float = 90.0) -> bool:
         """切换账号后从 Xbox 主页启动 FC 并进入 UT 相关界面。"""
@@ -653,6 +713,32 @@ class AccountSwitcher:
             host_display_name=target_account.host_display_name,
             combined_text=identity.combined,
         )
+        if matched and reason == "gamertag":
+            from ..vision.profile_name_reader import (
+                email_local_part,
+                gamertag_matches,
+                normalize_gamertag,
+            )
+
+            if len(normalize_gamertag(target_account.gamertag)) < 4:
+                email_ok = False
+                if target_account.email:
+                    local = email_local_part(target_account.email)
+                    if identity.email_text and gamertag_matches(
+                        identity.email_text, local
+                    ):
+                        email_ok = True
+                    if (
+                        identity.email_text
+                        and target_account.email.strip().lower()
+                        in identity.email_text.strip().lower()
+                    ):
+                        email_ok = True
+                if not email_ok:
+                    self.logger.info(
+                        "短 gamertag 匹配但邮箱未交叉确认，仍执行账号切换"
+                    )
+                    matched = False
         if not matched:
             self.logger.info(
                 "主页 OCR name=%r email=%r 与目标 gamertag=%s host=%s email=%s 不一致，需切换",
@@ -690,7 +776,7 @@ class AccountSwitcher:
         frame = await self._frame_getter()
         if frame is None:
             return False
-        image = frame.data if hasattr(frame, "data") else frame
+        image = _extract_frame_image(frame)
         if self._scene_detector and hasattr(self._scene_detector, "_normalize_frame"):
             image = self._scene_detector._normalize_frame(image, 6)
         from ..vision.profile_name_reader import scene6_list_layout_present
@@ -698,6 +784,37 @@ class AccountSwitcher:
         if scene6_list_layout_present(image):
             return True
         self.logger.warning("场景6模板命中但档案列表布局未确认")
+        return False
+
+    async def _is_scene6_template_without_layout(self, *, strict: bool = True) -> bool:
+        """模板判为场景6但左侧无档案列表（如 FC 游戏详情页误匹配）。"""
+        if await self._detect_any_scene([6], strict=strict) is None:
+            return False
+        return not await self._verify_scene6_layout()
+
+    async def _wait_for_scene6_confirmed(
+        self,
+        timeout: float = 12.0,
+        *,
+        strict: bool = True,
+    ) -> bool:
+        """场景6须同时满足：模板命中 + 档案列表布局。"""
+        if not self._scene_detector or not self._frame_getter:
+            self.logger.warning("跳过场景6校验（未绑定检测器或截帧）")
+            return True
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if await self._detect_any_scene([6], strict=strict) is not None:
+                if await self._verify_scene6_layout():
+                    self.logger.info("场景6校验通过（模板+布局）")
+                    return True
+                self.logger.debug("场景6模板命中但布局未确认，继续等待")
+            await asyncio.sleep(0.5)
+
+        self.logger.warning(f"场景6校验超时（模板+布局）({timeout}s)")
+        await self._log_scene_probe([6])
+        await self._save_debug_frame(6)
         return False
 
     async def _save_home_ocr_debug(
@@ -830,6 +947,60 @@ class AccountSwitcher:
         else:
             self.logger.warning("FC 磁贴焦点未确认 (scene203)，仍尝试启动游戏")
 
+    async def _is_on_xbox_home(self) -> bool:
+        """当前帧是否为 Xbox 主机主页（203/1/24 或 scene203 高置信）。"""
+        home = await self._detect_any_scene(list(XBOX_HOME_SCENES), strict=False)
+        if home in XBOX_HOME_SCENES:
+            return True
+        return await self._is_home_203_dominant()
+
+    async def _ensure_xbox_home_before_account_switch(
+        self,
+        timeout: float = 45.0,
+    ) -> bool:
+        """
+        账号切换前强制落在 Xbox 主页 (203/1/24)。
+
+        若停在 FC 游戏 Hub、详情页、多主机冲突弹窗等，仅用 B/Guide 退回，不盲按 A。
+        """
+        if await self._is_on_xbox_home():
+            home = await self._detect_any_scene(list(XBOX_HOME_SCENES), strict=False)
+            self.logger.info(
+                "账号切换前已在 Xbox 主页 (scene=%s)",
+                home if home in XBOX_HOME_SCENES else 203,
+            )
+            return True
+
+        self.logger.warning(
+            "账号切换前未在 Xbox 主页 (203/1/24)，尝试 B/Guide 退回 (timeout=%ss)",
+            timeout,
+        )
+        deadline = time.time() + timeout
+        step = 0
+        while time.time() < deadline:
+            if await self._is_on_xbox_home():
+                home = await self._detect_any_scene(list(XBOX_HOME_SCENES), strict=False)
+                self.logger.info(
+                    "已回到 Xbox 主页 (scene=%s)",
+                    home if home in XBOX_HOME_SCENES else 203,
+                )
+                return True
+
+            step += 1
+            if step == 1 or step % 6 == 0:
+                await self._press_guide_button()
+            else:
+                await self._press_button("B", duration=0.1)
+            await asyncio.sleep(0.45)
+            if step % 5 == 0:
+                await self._recover_input_if_closed()
+                await self._send_keepalive()
+
+        self.logger.warning("账号切换前未能回到 Xbox 主页")
+        await self._log_scene_probe([203, 1, 24, 3, 5, 6])
+        await self._save_debug_frame(203)
+        return False
+
     async def _is_home_203_dominant(self) -> bool:
         """当前帧是否仍为 Xbox 主页 scene203（高置信度）。"""
         if not self._scene_detector or not self._frame_getter:
@@ -837,7 +1008,7 @@ class AccountSwitcher:
         frame = await self._frame_getter()
         if frame is None:
             return False
-        image = frame.data if hasattr(frame, "data") else frame
+        image = _extract_frame_image(frame)
         threshold = self._scene_match_threshold(203)
         result = self._scene_detector.recognize_scene(
             image, scene_id=203, threshold=threshold
@@ -868,6 +1039,210 @@ class AccountSwitcher:
                 await self._send_keepalive()
             await asyncio.sleep(0.5)
         return False
+
+    async def exit_fc_to_xbox_home(self, timeout: float = 90.0) -> bool:
+        """
+        从 FC/UT 退出回到 Xbox 主机主页，便于切换下一游戏账号。
+
+        策略：轮询 scene 203/1/24；未在主页则 B 回退，周期性 Guide+B 尝试关闭游戏/ overlay。
+        不保证一次成功，超时返回 False，由调用方决定是否继续 switch_to。
+        """
+        self.logger.info("退出 FC/UT，返回 Xbox 主页 (timeout=%ss)", timeout)
+        async with self._stream_keepalive_loop():
+            if not await self._ensure_input_ready():
+                self.logger.error("exit_fc_to_xbox_home: input 通道不可用")
+                return False
+
+            deadline = time.time() + timeout
+            step = 0
+            while time.time() < deadline:
+                home = await self._detect_any_scene([203, 1, 24], strict=False)
+                if home in XBOX_HOME_SCENES:
+                    self.logger.info("已回到 Xbox 主页 scene=%s", home)
+                    return True
+                if await self._is_home_203_dominant():
+                    self.logger.info("已回到 Xbox 主页 (scene203 高置信)")
+                    return True
+
+                step += 1
+                if step % 14 == 0:
+                    await self._press_guide_button()
+                    await asyncio.sleep(0.5)
+                    for _ in range(3):
+                        await self._press_button("B", duration=0.1)
+                        await asyncio.sleep(0.35)
+                else:
+                    await self._press_button("B", duration=0.1)
+                    await asyncio.sleep(0.45)
+
+                if step % 6 == 0:
+                    await self._recover_input_if_closed()
+                    await self._send_keepalive()
+
+            self.logger.warning("exit_fc_to_xbox_home 超时，未确认回到 Xbox 主页")
+            await self._save_debug_frame(203)
+            return False
+
+    async def dismiss_until_scenes(
+        self,
+        target_scene_ids: List[int],
+        timeout: float = 60.0,
+        *,
+        label: str = "",
+        probe_scene_ids: Optional[List[int]] = None,
+    ) -> bool:
+        """
+        轮询识别当前 scene，直到命中 target_scene_ids 或超时。
+
+        每轮 (~1Hz)：
+        - 已在目标 scene → 成功返回
+        - 当前 scene 在 SCENE_TRANSITIONS 有配置 → 执行首选转移
+        - 已识别 scene 但无转移表 → 按 A（过场 scene 长按，普通弹窗短按）
+        - 模板均未匹配 → 特定 label（如 SQB-PREMATCH）周期性尝试长按 A
+        """
+        from configs.scene_transitions import (
+            DISMISS_HOLD_A_UNMATCHED_LABELS,
+            get_transitions_by_scene,
+            resolve_automation_a_press_sec,
+        )
+
+        if not target_scene_ids:
+            return True
+
+        tag = f"[{label}] " if label else ""
+        targets = set(target_scene_ids)
+        probes = list(
+            dict.fromkeys(
+                (probe_scene_ids or []) + list(target_scene_ids)
+            )
+        )
+        self.logger.info(
+            "%sdismiss_until_scenes 目标=%s probes=%s timeout=%ss",
+            tag,
+            sorted(targets),
+            len(probes),
+            timeout,
+        )
+
+        async with self._stream_keepalive_loop():
+            if not await self._ensure_input_ready():
+                self.logger.error("%sdismiss_until_scenes: input 不可用", tag)
+                return False
+
+            deadline = time.time() + timeout
+            step = 0
+            while time.time() < deadline:
+                hit = await self._detect_any_scene(
+                    list(target_scene_ids), strict=False
+                )
+                if hit in targets:
+                    self.logger.info("%s已到达目标 scene %s", tag, hit)
+                    return True
+
+                current = None
+                if probes:
+                    current = await self._detect_any_scene(probes, strict=False)
+
+                if current is not None:
+                    transitions = get_transitions_by_scene(current)
+                    if transitions:
+                        tid = transitions[0]["transition_id"]
+                        self.logger.info(
+                            "%s当前 scene=%s，执行转移 %s/%s",
+                            tag,
+                            current,
+                            current,
+                            tid,
+                        )
+                        await self._run_scene_transition(current, tid)
+                    else:
+                        duration = resolve_automation_a_press_sec(current)
+                        self.logger.debug(
+                            "%s当前 scene=%s 无转移表，按 A %.2fs",
+                            tag,
+                            current,
+                            duration,
+                        )
+                        await self._press_button("A", duration=duration)
+                else:
+                    label_key = (label or "").strip()
+                    if (
+                        label_key in DISMISS_HOLD_A_UNMATCHED_LABELS
+                        and step > 0
+                        and step % 3 == 2
+                    ):
+                        duration = resolve_automation_a_press_sec(
+                            102, force_hold=True
+                        )
+                        self.logger.info(
+                            "%s未识别 scene，尝试长按 A %.1fs（过场跳过）",
+                            tag,
+                            duration,
+                        )
+                        await self._press_button("A", duration=duration)
+                    else:
+                        self.logger.warning(
+                            "%s模板均未匹配，跳过 A（继续轮询）",
+                            tag,
+                        )
+
+                step += 1
+                if step % 8 == 0:
+                    await self._recover_input_if_closed()
+                    await self._send_keepalive()
+                await asyncio.sleep(1.0)
+
+            self.logger.warning(
+                "%sdismiss_until_scenes 超时，未到达 %s",
+                tag,
+                sorted(targets),
+            )
+            await self._save_debug_frame(target_scene_ids[0])
+            return False
+
+    async def go_to_xbox_home_for_resume(self, timeout: float = 90.0) -> bool:
+        """
+        恢复自动化：不论当前在 FC/UT 哪一屏，优先按 Xbox(NEXUS) 键回到主机主页。
+
+        用于暂停恢复后重锚，再按 matches_completed_today 跳过已完成进度。
+        """
+        self.logger.info(
+            "恢复重锚：Guide(NEXUS) → Xbox 主页 (timeout=%ss)", timeout
+        )
+        async with self._stream_keepalive_loop():
+            if not await self._ensure_input_ready():
+                self.logger.error("go_to_xbox_home_for_resume: input 不可用")
+                return False
+
+            deadline = time.time() + timeout
+            step = 0
+            while time.time() < deadline:
+                home = await self._detect_any_scene([203, 1, 24], strict=False)
+                if home in XBOX_HOME_SCENES:
+                    self.logger.info("恢复重锚：已在 Xbox 主页 scene=%s", home)
+                    return True
+                if await self._is_home_203_dominant():
+                    self.logger.info("恢复重锚：已在 Xbox 主页 (scene203 高置信)")
+                    return True
+
+                step += 1
+                if step == 1 or step % 8 == 0:
+                    await self._press_guide_button()
+                elif step % 4 == 0:
+                    for _ in range(2):
+                        await self._press_button("B", duration=0.1)
+                        await asyncio.sleep(0.35)
+                else:
+                    await self._press_button("B", duration=0.1)
+
+                await asyncio.sleep(0.45)
+                if step % 6 == 0:
+                    await self._recover_input_if_closed()
+                    await self._send_keepalive()
+
+            self.logger.warning("恢复重锚：超时未回到 Xbox 主页")
+            await self._save_debug_frame(203)
+            return False
 
     async def _launch_fc_from_home_tile(self) -> bool:
         """在主页 FC 磁贴获焦后按 A 启动，仍停 203 则重试。"""
@@ -921,7 +1296,7 @@ class AccountSwitcher:
         frame = await self._frame_getter()
         if frame is None:
             return None
-        image = frame.data if hasattr(frame, 'data') else frame
+        image = _extract_frame_image(frame)
         if self._scene_detector:
             return self._scene_detector._normalize_frame(image, 203)
         import cv2
@@ -954,6 +1329,11 @@ class AccountSwitcher:
 
     def _scene_match_threshold(self, scene_id: int) -> float:
         """Xbox 系统 UI / 小键盘场景允许略低于 schema 默认阈值的匹配。"""
+        # 场景 5/6 在 FC 游戏 Hub 等页面易误匹配，需提高阈值
+        if scene_id == 6:
+            return 0.95
+        if scene_id == 5:
+            return 0.88
         if scene_id <= 64:
             return 0.60
         if scene_id in FC_UT_TARGET_SCENES:
@@ -985,7 +1365,7 @@ class AccountSwitcher:
         """
         轮询截帧直至任一 scene_ids 匹配或超时。
 
-        等待期间：FC/UT 场景每 5s 按 A 跳过弹窗；每 8s 检测 input 通道并发送 keepalive。
+        等待期间：模板未匹配时不盲按 A；每 8s 检测 input 通道并发送 keepalive。
         strict=True 时会额外比对 XBOX_UI_AMBIGUOUS_SCENES 以降低误匹配。
         """
         if not self._scene_detector or not self._frame_getter:
@@ -994,8 +1374,6 @@ class AccountSwitcher:
 
         deadline = time.time() + timeout
         last_keepalive = 0.0
-        last_skip_press = 0.0
-        fc_wait = bool(set(scene_ids) & FC_UT_TARGET_SCENES)
         while time.time() < deadline:
             matched = await self._detect_any_scene(
                 scene_ids,
@@ -1006,7 +1384,7 @@ class AccountSwitcher:
                 self.logger.info(f"场景{matched}校验通过")
                 frame = await self._frame_getter()
                 if frame is not None:
-                    image = frame.data if hasattr(frame, "data") else frame
+                    image = _extract_frame_image(frame)
                     scores = await self._score_scenes([matched], image)
                     conf = scores.get(matched)
                     await self._capture_detected_scene(
@@ -1017,9 +1395,6 @@ class AccountSwitcher:
                     )
                 return True
             now = time.time()
-            if fc_wait and now - last_skip_press >= 5.0:
-                await self._press_button('A', duration=0.12)
-                last_skip_press = now
             if now - last_keepalive >= 8.0:
                 if not await self._recover_input_if_closed():
                     self.logger.warning(
@@ -1070,7 +1445,7 @@ class AccountSwitcher:
         frame = await self._frame_getter()
         if frame is None:
             return None
-        image = frame.data if hasattr(frame, 'data') else frame
+        image = _extract_frame_image(frame)
 
         compare_ids = list(dict.fromkeys(scene_ids))
         if strict:
@@ -1096,6 +1471,8 @@ class AccountSwitcher:
                 if conf >= thr and conf > best_conf:
                     best_conf = conf
                     best_id = scene_id
+            if best_id is not None:
+                self._cache_detected_scene_id(best_id)
             return best_id
 
         target_scores = {sid: scores.get(sid, 0.0) for sid in scene_ids}
@@ -1109,7 +1486,16 @@ class AccountSwitcher:
             amb_conf = scores.get(amb_id, 0.0)
             if amb_conf > best_conf + 0.03:
                 return None
+        self._cache_detected_scene_id(best_id)
         return best_id
+
+    def _cache_detected_scene_id(self, scene_id: int) -> None:
+        ctx = getattr(self, "_task_context", None)
+        if ctx is None:
+            return
+        from ..input.manual_nav import update_last_streaming_scene_id
+
+        update_last_streaming_scene_id(ctx, scene_id)
 
     async def _log_scene_probe(self, scene_ids: List[int]) -> None:
         """场景校验失败时输出候选场景置信度，便于联调。"""
@@ -1119,7 +1505,7 @@ class AccountSwitcher:
         if frame is None:
             self.logger.warning("场景探针：当前帧为空")
             return
-        image = frame.data if hasattr(frame, 'data') else frame
+        image = _extract_frame_image(frame)
         probe_ids = list(dict.fromkeys(scene_ids + XBOX_UI_AMBIGUOUS_SCENES))
         scores = await self._score_scenes(probe_ids, image)
         if not scores:
@@ -1140,7 +1526,7 @@ class AccountSwitcher:
             frame = await self._frame_getter()
             if frame is None:
                 return
-            image = frame.data if hasattr(frame, 'data') else frame
+            image = _extract_frame_image(frame)
             log_dir = get_logs_dir_fallback()
             os.makedirs(log_dir, exist_ok=True)
             path = os.path.join(log_dir, f"debug_scene{scene_id}_{int(time.time())}.png")
@@ -1214,7 +1600,7 @@ class AccountSwitcher:
         frame = await self._frame_getter()
         if frame is None:
             return False
-        image = frame.data if hasattr(frame, "data") else frame
+        image = _extract_frame_image(frame)
         scores = await self._score_scenes([2, 3, 6, 203, 1], image)
         guide_score = scores.get(2, 0.0)
         if guide_score < self._scene_match_threshold(2):
@@ -1289,24 +1675,67 @@ class AccountSwitcher:
         await self._press_button('A', duration=0.05)
         await asyncio.sleep(1.2)
 
-    async def _select_add_switch(self):
-        """场景3：优先直接 A（「添加和切换」已高亮时），否则 DOWN 后 A。"""
-        if await self._wait_for_scene(5, timeout=2.5):
-            return
+    async def _select_add_switch(self) -> bool:
+        """
+        场景3 → 场景5：须 strict 确认场景3，且不在引导/主页误页按 A。
+
+        按 A 后若未进入场景5 立即中止，不再 DPAD 盲重试（避免误触 FC/其它项）。
+        """
+        if not await self._wait_for_scene(3, timeout=1.5, strict=True):
+            self.logger.warning("_select_add_switch: 未在场景3，跳过盲按 A")
+            return False
+
+        if await self._wait_for_scene(5, timeout=1.0, strict=True):
+            return True
+
+        if await self._is_scene6_template_without_layout(strict=True):
+            self.logger.warning(
+                "当前页似场景6但无档案列表（可能为游戏 Hub），拒绝盲按 A"
+            )
+            await self._save_debug_frame(6)
+            return False
+
+        dominant = await self._detect_any_scene([2, 24, 3], strict=False)
+        if dominant in (2, 24):
+            self.logger.warning(
+                "_select_add_switch: 当前仍似引导/主页 (scene=%s)，不按 A",
+                dominant,
+            )
+            await self._save_debug_frame(dominant or 3)
+            return False
 
         await self._press_button('A', duration=0.08)
-        if await self._wait_for_scene(5, timeout=3.0):
-            return
+        if await self._wait_for_scene(5, timeout=4.0, strict=True):
+            return True
 
-        for _ in range(2):
-            await self._press_button('DPAD_DOWN', duration=0.1)
-            await asyncio.sleep(0.2)
+        self.logger.warning(
+            "_select_add_switch: 按 A 后未进入场景5，中止（不再盲重试 DPAD+A）"
+        )
+        await self._save_debug_frame(5)
+        return False
+
+    async def _enter_account_selection(self) -> bool:
+        """
+        场景5 → 场景6：须先确认场景5，且不在误匹配页按 A；进入后须模板+布局双确认。
+        """
+        if await self._wait_for_scene6_confirmed(timeout=1.5, strict=True):
+            return True
+
+        if not await self._wait_for_scene(5, timeout=3.0, strict=True):
+            self.logger.warning("_enter_account_selection: 场景5未确认，不按 A")
+            await self._save_debug_frame(5)
+            return False
+
+        if await self._is_scene6_template_without_layout(strict=True):
+            self.logger.warning(
+                "_enter_account_selection: 场景5后页面似误匹配场景6，不按 A"
+            )
+            await self._save_debug_frame(6)
+            return False
+
         await self._press_button('A', duration=0.1)
         await asyncio.sleep(1.5)
-
-    async def _enter_account_selection(self):
-        await self._press_button('A', duration=0.1)
-        await asyncio.sleep(1.5)
+        return await self._wait_for_scene6_confirmed(timeout=12.0, strict=True)
 
     async def _read_host_gamertag_from_profile_list(self) -> Optional[str]:
         """
@@ -1331,10 +1760,8 @@ class AccountSwitcher:
             self.logger.warning("读取主机昵称：未能进入场景5")
             return None
 
-        await self._enter_account_selection()
-        if not await self._wait_for_scene(6, timeout=12.0):
-            self.logger.warning("读取主机昵称：未能进入场景6")
-            await self._save_debug_frame(6)
+        if not await self._enter_account_selection():
+            self.logger.warning("读取主机昵称：未能进入场景6（模板+布局）")
             return None
 
         await self._scroll_profile_list_to_top()
@@ -1424,7 +1851,7 @@ class AccountSwitcher:
         frame = await self._frame_getter() if self._frame_getter else None
         if frame is None:
             return ""
-        image = frame.data if hasattr(frame, 'data') else frame
+        image = _extract_frame_image(frame)
         if self._scene_detector and hasattr(self._scene_detector, '_normalize_frame'):
             image = self._scene_detector._normalize_frame(image, 6)
         return read_focused_gamertag(image)
@@ -1476,7 +1903,7 @@ class AccountSwitcher:
             if slot == 0 and not detected:
                 frame = await self._frame_getter() if self._frame_getter else None
                 if frame is not None:
-                    image = frame.data if hasattr(frame, 'data') else frame
+                    image = _extract_frame_image(frame)
                     if self._scene_detector and hasattr(
                         self._scene_detector, '_normalize_frame'
                     ):
@@ -1506,6 +1933,9 @@ class AccountSwitcher:
         )
 
     async def _confirm_account_selection(self):
+        if not await self._verify_scene6_layout():
+            await self._save_debug_frame(6)
+            raise RuntimeError("确认档案前场景6布局校验失败")
         await self._press_button('A', duration=0.1)
         await asyncio.sleep(2.0)
 
@@ -1723,6 +2153,10 @@ class AccountSwitcher:
                 task_id=self._trace_task_id(),
             )
         if self._input_gate is not None and not self._input_gate.is_allowed():
+            return False
+
+        ctx = getattr(self, "_task_context", None)
+        if ctx is not None and getattr(ctx, "_manual_takeover", False):
             return False
 
         session = self._resolve_input_session()

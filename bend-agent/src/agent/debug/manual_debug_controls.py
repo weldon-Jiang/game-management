@@ -26,11 +26,11 @@ _logger = get_logger("manual_debug")
 
 HELP_TEXT = """
 === Bend Agent 调试快捷键（须先点击串流窗口）===
-  F8  人工接管 开/关（开=自动化不发键，键盘 WASD/ABXY 可用）
+  F8  人工接管 开/关（开=键盘/手柄可用；关=仅自动化可发键，F8/F9/F10 仍可用）
   F9  保存调试截图 960×540 → logs/manual_capture/{task_id}/
   F10 显示本帮助
 
-  键盘映射: W/S/A/D=左摇杆(比赛带球；菜单请改 yaml manual_keyboard_movement: dpad)  方向键=菜单导航  J/B/X/Y=面键  Enter=Start  Esc=View  Q/E=LB/RB
+  键盘映射: W/S/A/D=左摇杆  ↑↓←→=十字键  I/J/K/L=Y/X/A/B  Shift=LT  Space=RT  T/F/G/H=右摇杆  C/V=L3/R3  Ctrl=Xbox键  Enter=Start  Esc=View  Q/E=LB/RB
   截图后把 template/search 坐标发开发者，或自行裁 templates/{{scene}}.{{tpl}}.png
 """
 
@@ -48,12 +48,28 @@ def set_manual_takeover(context: Any, enabled: bool, *, reason: str = "") -> Non
         state,
         extra,
         "拦截" if enabled else "恢复",
-        "可用" if enabled else "随自动化/暂停策略",
+        "可用" if enabled else "已禁用（仅自动化可发键；平台暂停仍可人工）",
     )
     if enabled:
+        import time as _time
+
+        context._manual_takeover_on_at = _time.time()
+        context._manual_no_input_warn_at = 0.0
+        context._manual_idle_pulse_at = 0.0
+        from ..input.controller_protocol import ControllerSignal
+
+        context._keyboard_overlay_signal = ControllerSignal.zero()
+        pump = getattr(context, "_input_pump", None)
+        if pump is not None and hasattr(pump, "reset_manual_nav_filter"):
+            pump.reset_manual_nav_filter()
+        from ..xbox.stream_session_survival import (
+            schedule_ensure_stream_subsystems_alive,
+        )
+
+        schedule_ensure_stream_subsystems_alive(context, reason="manual_takeover_on")
         _logger.info(
             "[人工接管] 请点击串流窗口；键盘建议切英文输入法；"
-            "映射键 W/S/A/D 方向 J/B/X/Y 面键；已插手柄可直接按"
+            "WASD 左摇杆、方向键十字键、I/J/K/L 面键、Shift/Space 扳机、T/F/G/H 右摇杆、C/V L3/R3；已插手柄可直接按"
         )
         schedule_task_timeline_event(
             context,
@@ -64,11 +80,24 @@ def set_manual_takeover(context: Any, enabled: bool, *, reason: str = "") -> Non
         keyboard = getattr(context, "_keyboard_mapper", None)
         if keyboard is not None and hasattr(keyboard, "set_manual_face_hold"):
             keyboard.set_manual_face_hold(True)
-            from ..input.manual_nav import manual_keyboard_uses_stick
+            from ..input.manual_nav import wire_manual_in_match_checker
 
-            if hasattr(keyboard, "set_manual_wasd_stick"):
-                keyboard.set_manual_wasd_stick(manual_keyboard_uses_stick())
+            wire_manual_in_match_checker(context, keyboard)
+            if hasattr(keyboard, "set_physical_mapping_enabled"):
+                keyboard.set_physical_mapping_enabled(True)
+            if hasattr(keyboard, "set_focused_win32_poll"):
+                keyboard.set_focused_win32_poll(True)
         sdl = getattr(context, "sdl_window", None)
+        if sdl is not None and hasattr(sdl, "is_foreground"):
+            try:
+                fg = bool(sdl.is_foreground())
+                _logger.info(
+                    "[人工接管] 串流窗口前台=%s hwnd=%s",
+                    fg,
+                    getattr(sdl, "_get_hwnd", lambda: None)(),
+                )
+            except Exception as exc:
+                _logger.debug("人工接管前台检测: %s", exc)
         if sdl is not None:
             try:
                 if hasattr(sdl, "show"):
@@ -81,8 +110,22 @@ def set_manual_takeover(context: Any, enabled: bool, *, reason: str = "") -> Non
             from ..xbox.stream_keepalive import is_input_channel_open
 
             session = getattr(context, "xbox_session", None)
-            if session is not None and is_input_channel_open(session):
-                webrtc = getattr(session, "_webrtc", None) or getattr(context, "_cloud_webrtc", None)
+            video_stale = bool(getattr(context, "_stream_video_stale", False))
+            if video_stale:
+                from ..xbox.stream_recovery import (
+                    invalidate_stream_video,
+                    request_input_recovery,
+                )
+
+                _logger.warning(
+                    "[人工接管] 视频帧已过期，将触发全量重连 Xbox 串流"
+                )
+                invalidate_stream_video(context, clear_sdl=True)
+                request_input_recovery(context, force=True)
+            elif session is not None and is_input_channel_open(session):
+                webrtc = getattr(session, "_webrtc", None) or getattr(
+                    context, "_cloud_webrtc", None
+                )
                 if webrtc is not None and getattr(webrtc, "is_input_ready", False):
                     pass
                 else:
@@ -110,12 +153,25 @@ def set_manual_takeover(context: Any, enabled: bool, *, reason: str = "") -> Non
                 keyboard.set_focused_win32_poll(False)
             if hasattr(keyboard, "set_manual_face_hold"):
                 keyboard.set_manual_face_hold(False)
-            if hasattr(keyboard, "set_manual_wasd_stick"):
-                keyboard.set_manual_wasd_stick(False)
+            if hasattr(keyboard, "set_physical_mapping_enabled"):
+                keyboard.set_physical_mapping_enabled(False)
         pump = getattr(context, "_input_pump", None)
         if pump is not None and hasattr(pump, "reset_manual_nav_filter"):
             pump.reset_manual_nav_filter()
         from ..input.controller_protocol import ControllerSignal
+
+        protocol = getattr(context, "_controller_protocol", None)
+        if protocol is not None:
+            try:
+                import asyncio
+
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(
+                        protocol.send_manual_signal(ControllerSignal.zero())
+                    )
+            except Exception as exc:
+                _logger.debug("F8 关闭释键: %s", exc)
 
         context._keyboard_overlay_signal = ControllerSignal.zero()
 

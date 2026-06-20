@@ -45,9 +45,13 @@
               <span class="label">账号进度</span>
               <span class="value">{{ accountProgress }}</span>
             </div>
-            <div class="overview-item">
+            <div class="overview-item overview-item--time">
               <span class="label">创建时间</span>
               <span class="value">{{ formatTime(task.createdTime) }}</span>
+            </div>
+            <div class="overview-item overview-item--time">
+              <span class="label">最近活跃</span>
+              <span class="value">{{ formatTime(task.updatedTime) }}</span>
             </div>
           </div>
           <div v-if="hasAlerts" class="alert-strip">
@@ -136,7 +140,7 @@
       </div>
 
       <aside class="detail-aside">
-        <TaskEventTimeline :events="events" embedded />
+        <TaskEventTimeline :events="events" :account-name-map="accountNameMap" embedded />
       </aside>
     </div>
   </div>
@@ -184,6 +188,15 @@ const { detail, events, loading, startMonitor, refresh } = useTaskMonitor(taskId
 const task = computed(() => detail.value?.task)
 const session = computed(() => detail.value?.session)
 const gameAccountStatuses = computed(() => detail.value?.gameAccountStatuses || [])
+/** 时间线 gameAccountId → gamertag */
+const accountNameMap = computed(() => {
+  const map = {}
+  for (const row of gameAccountStatuses.value) {
+    const id = row.gameAccountId
+    if (id) map[id] = row.gameAccountName || id
+  }
+  return map
+})
 const lastProgressMessage = computed(() => detail.value?.lastProgressMessage)
 
 const currentSessionId = computed(() => task.value?.sessionId || session.value?.id || '')
@@ -430,6 +443,16 @@ const handleReconnect = async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 日期时间需完整展示，避免 grid 列宽不足时被 ellipsis 截断 */
+.overview-item--time {
+  min-width: max-content;
+}
+
+.overview-item--time .value {
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .alert-strip {

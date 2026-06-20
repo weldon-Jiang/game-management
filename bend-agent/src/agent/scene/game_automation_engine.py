@@ -177,6 +177,8 @@ class ActionExecutor:
 
     async def _send_gamepad_state(self, gamepad_data: Dict[str, Any]) -> bool:
         """经 SmartGlass 输入通道发送手柄状态。"""
+        if self._task_context and getattr(self._task_context, "_manual_takeover", False):
+            return False
         if self._input_gate is not None and not self._input_gate.is_allowed():
             return False
         if not self._xbox_session:

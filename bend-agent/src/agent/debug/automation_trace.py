@@ -23,6 +23,7 @@ import numpy as np
 from ..core.config import config
 from ..core.logger import get_logger
 from ..core.paths import get_logs_dir_fallback
+from ..vision.frame_utils import frame_to_bgr_ndarray
 
 _logger = get_logger("automation_trace")
 
@@ -125,13 +126,13 @@ class SceneCaptureSession:
             return None
         self._last_capture_at[scene_id] = now
 
-        if hasattr(image, "data"):
+        if hasattr(image, "data") and not isinstance(image, np.ndarray):
             image = image.data
-        if not isinstance(image, np.ndarray) or image.size == 0:
+        image = frame_to_bgr_ndarray(image)
+        if image is None or image.size == 0:
             _logger.warning(
-                "[场景截图] 跳过：无效 ndarray scene=%s type=%s",
+                "[场景截图] 跳过：无效 ndarray scene=%s",
                 scene_id,
-                type(image).__name__,
             )
             return None
 
@@ -237,7 +238,11 @@ async def capture_entry_scene_survey(
         _logger.warning("[场景截图] entry 截帧为空，跳过 entry_survey")
         return
 
-    image = frame.data if hasattr(frame, "data") else frame
+    image = frame_to_bgr_ndarray(frame)
+    if image is None:
+        _logger.warning("[场景截图] entry 帧无法转为 ndarray，跳过 entry_survey")
+        return
+
     entry_path = session.capture_frame(
         image,
         scene_id=0,

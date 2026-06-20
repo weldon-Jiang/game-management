@@ -48,6 +48,7 @@ export const CODE_STATUS_TYPE_MAP = {
 export const AGENT_STATUS_MAP = {
   online: '在线',
   offline: '离线',
+  reconnecting: '重连中',
   busy: '忙碌',
   error: '异常',
   uninstalled: '已卸载'
@@ -56,6 +57,7 @@ export const AGENT_STATUS_MAP = {
 export const AGENT_STATUS_TYPE_MAP = {
   online: 'success',
   offline: 'info',
+  reconnecting: 'warning',
   busy: 'warning',
   error: 'danger',
   uninstalled: 'warning'
@@ -650,6 +652,16 @@ export const getTaskEventScopeText = (scope) => {
   if (!scope) return '任务'
   const key = String(scope).toLowerCase()
   return TASK_EVENT_SCOPE_MAP[key] || scope
+}
+
+/** 时间线事件关联的游戏账号展示名（gamertag）；无映射时回退短 ID */
+export const resolveTaskEventAccountLabel = (ev, nameMap = {}) => {
+  const id = ev?.gameAccountId
+  if (!id) return ''
+  const mapped = nameMap[id]
+  if (mapped) return mapped
+  const shortId = String(id)
+  return shortId.length > 10 ? `${shortId.slice(0, 8)}…` : shortId
 }
 
 export const getTaskEventPhaseText = (phase, scope) => {

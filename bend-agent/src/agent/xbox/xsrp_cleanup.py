@@ -7,6 +7,7 @@ from typing import Any
 from ..core.logger import get_logger
 from .xsrp_access_input_loop import stop_xsrp_access_input_loop
 from .xsrp_stream_keepalive import stop_xsrp_idle_keepalive
+from .stream_liveness_monitor import stop_stream_liveness_monitor
 
 
 async def cleanup_xsrp_stream_context(context: Any, task_logger=None) -> None:
@@ -14,6 +15,7 @@ async def cleanup_xsrp_stream_context(context: Any, task_logger=None) -> None:
     log = task_logger or get_logger("xsrp_cleanup")
     await stop_xsrp_access_input_loop(context)
     await stop_xsrp_idle_keepalive(context)
+    await stop_stream_liveness_monitor(context)
 
     webrtc = getattr(context, "_cloud_webrtc", None)
     if webrtc and hasattr(webrtc, "close"):

@@ -36,6 +36,11 @@ class KeyAction(Enum):
     TAP_SELECT = "TAP_SELECT"
     TAP_L1 = "TAP_L1"
     TAP_R1 = "TAP_R1"
+    TAP_NEXUS = "TAP_NEXUS"
+    TAP_L3 = "TAP_L3"
+    TAP_R3 = "TAP_R3"
+    HOLD_L2 = "HOLD_L2"
+    HOLD_R2 = "HOLD_R2"
     MOVE_UP = "MOVE_UP"
     MOVE_DOWN = "MOVE_DOWN"
     MOVE_LEFT = "MOVE_LEFT"
@@ -53,9 +58,9 @@ _WIN32_VK_BY_BINDING_KEY = {
     "s": 0x53,
     "d": 0x44,
     "j": 0x4A,
-    "b": 0x42,
-    "x": 0x58,
-    "y": 0x59,
+    "k": 0x4B,
+    "l": 0x4C,
+    "i": 0x49,
     "q": 0x51,
     "e": 0x45,
     "return": 0x0D,
@@ -64,6 +69,26 @@ _WIN32_VK_BY_BINDING_KEY = {
     "down": 0x28,
     "left": 0x25,
     "right": 0x27,
+    "left ctrl": 0xA2,
+    "right ctrl": 0xA3,
+    "lctrl": 0xA2,
+    "rctrl": 0xA3,
+    "space": 0x20,
+    "left shift": 0xA0,
+    "right shift": 0xB0,
+    "c": 0x43,
+    "v": 0x56,
+    "t": 0x54,
+    "f": 0x46,
+    "g": 0x47,
+    "h": 0x48,
+}
+
+# F8/F9/F10：SDL 在 Windows 上常收不到功能键，须 Win32 边沿检测
+_WIN32_VK_HOTKEY = {
+    "f8": 0x77,
+    "f9": 0x78,
+    "f10": 0x79,
 }
 
 _PYGAME_KEY_BY_BINDING = {
@@ -72,9 +97,9 @@ _PYGAME_KEY_BY_BINDING = {
     "a": pygame.K_a,
     "d": pygame.K_d,
     "j": pygame.K_j,
-    "b": pygame.K_b,
-    "x": pygame.K_x,
-    "y": pygame.K_y,
+    "k": pygame.K_k,
+    "l": pygame.K_l,
+    "i": pygame.K_i,
     "q": pygame.K_q,
     "e": pygame.K_e,
     "return": pygame.K_RETURN,
@@ -83,6 +108,19 @@ _PYGAME_KEY_BY_BINDING = {
     "down": pygame.K_DOWN,
     "left": pygame.K_LEFT,
     "right": pygame.K_RIGHT,
+    "left ctrl": pygame.K_LCTRL,
+    "right ctrl": pygame.K_RCTRL,
+    "lctrl": pygame.K_LCTRL,
+    "rctrl": pygame.K_RCTRL,
+    "space": pygame.K_SPACE,
+    "left shift": pygame.K_LSHIFT,
+    "right shift": pygame.K_RSHIFT,
+    "c": pygame.K_c,
+    "v": pygame.K_v,
+    "t": pygame.K_t,
+    "f": pygame.K_f,
+    "g": pygame.K_g,
+    "h": pygame.K_h,
 }
 
 
@@ -111,7 +149,40 @@ def _action_button_map():
         KeyAction.TAP_SELECT: XboxButtonFlag.VIEW,
         KeyAction.TAP_L1: XboxButtonFlag.L1,
         KeyAction.TAP_R1: XboxButtonFlag.R1,
+        KeyAction.TAP_NEXUS: XboxButtonFlag.NEXUS,
+        KeyAction.TAP_L3: XboxButtonFlag.L3,
+        KeyAction.TAP_R3: XboxButtonFlag.R3,
     }
+
+
+# split 模式：WASD 固定左摇杆，方向键固定十字键（FC 场中 DPad=战术）
+_WASD_STICK_KEYS = frozenset({"w", "a", "s", "d"})
+_ARROW_DPAD_KEYS = frozenset({"up", "down", "left", "right"})
+_LOOK_STICK_KEYS = frozenset({"t", "f", "g", "h"})
+
+_SKIP_BUTTON_ACTIONS = frozenset({
+    KeyAction.MOVE_UP,
+    KeyAction.MOVE_DOWN,
+    KeyAction.MOVE_LEFT,
+    KeyAction.MOVE_RIGHT,
+    KeyAction.LOOK_UP,
+    KeyAction.LOOK_DOWN,
+    KeyAction.LOOK_LEFT,
+    KeyAction.LOOK_RIGHT,
+    KeyAction.HOLD_L2,
+    KeyAction.HOLD_R2,
+})
+
+
+def _arrow_key_to_dpad(key_name: str):
+    from .controller_protocol import XboxButtonFlag
+
+    return {
+        "up": XboxButtonFlag.DPAD_UP,
+        "down": XboxButtonFlag.DPAD_DOWN,
+        "left": XboxButtonFlag.DPAD_LEFT,
+        "right": XboxButtonFlag.DPAD_RIGHT,
+    }.get(str(key_name).lower())
 
 
 @dataclass
@@ -137,20 +208,35 @@ class KeyboardMapper:
     - 调用 stop() 停止监听
     """
 
-    # WASD → 方向键；J/B/X/Y → 手柄面键（A 不与左方向共用 a，pygame 键名为小写单字母）
+    # WASD → 方向键；I/J/K/L → 手柄 Y/X/A/B 面键
     DEFAULT_BINDINGS = {
-        'j': KeyAction.TAP_A,
-        'b': KeyAction.TAP_B,
-        'x': KeyAction.TAP_X,
-        'y': KeyAction.TAP_Y,
+        'k': KeyAction.TAP_A,
+        'l': KeyAction.TAP_B,
+        'j': KeyAction.TAP_X,
+        'i': KeyAction.TAP_Y,
         'return': KeyAction.TAP_START,
         'escape': KeyAction.TAP_SELECT,
         'q': KeyAction.TAP_L1,
         'e': KeyAction.TAP_R1,
+        'left ctrl': KeyAction.TAP_NEXUS,
+        'right ctrl': KeyAction.TAP_NEXUS,
+        'left shift': KeyAction.HOLD_L2,
+        'right shift': KeyAction.HOLD_L2,
+        'space': KeyAction.HOLD_R2,
+        'c': KeyAction.TAP_L3,
+        'v': KeyAction.TAP_R3,
+        't': KeyAction.LOOK_UP,
+        'g': KeyAction.LOOK_DOWN,
+        'f': KeyAction.LOOK_LEFT,
+        'h': KeyAction.LOOK_RIGHT,
         'w': KeyAction.MOVE_UP,
         's': KeyAction.MOVE_DOWN,
         'a': KeyAction.MOVE_LEFT,
         'd': KeyAction.MOVE_RIGHT,
+        'up': KeyAction.MOVE_UP,
+        'down': KeyAction.MOVE_DOWN,
+        'left': KeyAction.MOVE_LEFT,
+        'right': KeyAction.MOVE_RIGHT,
     }
 
     def __init__(
@@ -173,20 +259,28 @@ class KeyboardMapper:
         # F8 人工接管且串流窗口获焦时启用 Win32 轮询（绕过 IME；无焦点时不轮询防误触）
         self._allow_focused_win32_poll = False
         self._manual_face_hold = False
-        self._manual_wasd_stick = True
+        self._physical_mapping_enabled = False
+        self._manual_in_match_checker: Optional[Callable[[], bool]] = None
+        self._manual_face_a_hold_checker: Optional[Callable[[], bool]] = None
+        self._task_context: Optional[Any] = None
+        self._hotkey_win32_down: Set[str] = set()
+        self._hotkey_last_at: Dict[str, float] = {}
+        self._hotkey_debounce_sec = 0.35
         self._pygame_poll_map: Dict[int, str] = {}
         self._overlay_refresh_fn: Optional[Callable[[], None]] = None
         self._holdable_actions: set = {
             KeyAction.MOVE_UP, KeyAction.MOVE_DOWN,
             KeyAction.MOVE_LEFT, KeyAction.MOVE_RIGHT,
             KeyAction.LOOK_UP, KeyAction.LOOK_DOWN,
-            KeyAction.LOOK_LEFT, KeyAction.LOOK_RIGHT
+            KeyAction.LOOK_LEFT, KeyAction.LOOK_RIGHT,
+            KeyAction.HOLD_L2, KeyAction.HOLD_R2,
         }
         self._face_hold_actions: set = {
             KeyAction.TAP_A, KeyAction.TAP_B,
             KeyAction.TAP_X, KeyAction.TAP_Y,
             KeyAction.TAP_START, KeyAction.TAP_SELECT,
             KeyAction.TAP_L1, KeyAction.TAP_R1,
+            KeyAction.TAP_L3, KeyAction.TAP_R3,
         }
         self._load_bindings()
 
@@ -278,18 +372,44 @@ class KeyboardMapper:
         """
         合并按键状态供 InputPump 采样。
 
-        SDL 窗口转发路径（external_event_pump）仅信任 feed_pygame_event 写入的
-        _pressed_keys；禁止 Win32/pygame 全局轮询，否则焦点外误报 W/S 导致菜单乱跳。
+        SDL 窗口转发路径（external_event_pump）默认仅信任 feed_pygame_event；
+        F8 人工接管（_manual_face_hold）时始终启用 Win32 轮询，避免 Windows 上
+        is_foreground 误判导致 WASD 完全无输入。
         """
         keys = {str(k).lower() for k in self._pressed_keys if str(k).lower() in self._bindings}
         if not self._external_event_pump:
             keys |= self._poll_win32_binding_keys()
             keys |= self._poll_pygame_binding_keys()
-        elif self._allow_focused_win32_poll:
+        elif self._manual_face_hold or self._allow_focused_win32_poll:
             keys |= self._poll_win32_binding_keys()
+            if self._allow_focused_win32_poll:
+                keys |= self._poll_pygame_binding_keys()
         for hotkey in self._hotkey_callbacks:
             keys.discard(hotkey.lower())
         return keys
+
+    def set_physical_mapping_enabled(self, enabled: bool) -> None:
+        """
+        InputPump 调用：F8/平台暂停为 True；否则忽略映射键（F8/F9/F10 热键仍有效）。
+        """
+        enabled = bool(enabled)
+        if enabled == self._physical_mapping_enabled:
+            return
+        self._physical_mapping_enabled = enabled
+        if not enabled:
+            self._clear_binding_pressed_keys()
+
+    def _clear_binding_pressed_keys(self) -> None:
+        hotkeys = {k.lower() for k in self._hotkey_callbacks}
+        self._pressed_keys = {
+            k for k in self._pressed_keys if str(k).lower() in hotkeys
+        }
+
+    def _binding_key_allowed(self, key_name: str) -> bool:
+        key = str(key_name).lower()
+        if key in self._hotkey_callbacks:
+            return True
+        return self._physical_mapping_enabled
 
     def set_manual_face_hold(self, enabled: bool) -> None:
         """F8 人工接管：J/B/X/Y 等面键随物理键按住，不再 100ms 自动松键。"""
@@ -302,17 +422,96 @@ class KeyboardMapper:
             for key in to_clear:
                 self._pressed_keys.discard(key)
 
-    def set_manual_wasd_stick(self, enabled: bool) -> None:
-        """F8 人工：WASD 映射左摇杆（比赛内）；False 时映射 DPad（菜单）。"""
-        self._manual_wasd_stick = bool(enabled)
+    def set_manual_in_match_checker(
+        self, checker: Optional[Callable[[], bool]]
+    ) -> None:
+        """人工输入：按比赛场景切换 stick/dpad 与面键长按。"""
+        self._manual_in_match_checker = checker
 
-    def _resolve_manual_wasd_stick(self) -> bool:
-        if not self._manual_face_hold:
+    def set_task_context(self, context: Optional[Any]) -> None:
+        """绑定任务 context，checker 异常时仍可判定场中左摇杆。"""
+        self._task_context = context
+
+    def set_manual_face_a_hold_checker(
+        self, checker: Optional[Callable[[], bool]]
+    ) -> None:
+        """F8 下 K（TAP_A）过场/比赛 sustained 长按判定（独立于 in_match 摇杆）。"""
+        self._manual_face_a_hold_checker = checker
+
+    def _manual_in_match(self) -> bool:
+        if self._manual_in_match_checker is not None:
+            try:
+                if bool(self._manual_in_match_checker()):
+                    return True
+            except Exception:
+                pass
+        ctx = self._task_context
+        if ctx is not None:
+            from .manual_nav import is_manual_in_match
+
+            return is_manual_in_match(ctx)
+        return False
+
+    def _manual_face_a_hold_allowed(self) -> bool:
+        if self._manual_face_a_hold_checker is None:
+            return self._manual_in_match()
+        try:
+            return bool(self._manual_face_a_hold_checker())
+        except Exception:
             return False
-        return self._manual_wasd_stick
+
+    def _manual_input_active(self) -> bool:
+        """F8 人工接管或平台暂停（physical_mapping_enabled）。"""
+        return bool(self._manual_face_hold or self._physical_mapping_enabled)
+
+    def _movement_mode(self) -> str:
+        if not self._manual_input_active():
+            return "off"
+        from ..core.config import config as app_config
+
+        return str(
+            app_config.get("debug.manual_keyboard_movement", "split")
+        ).lower().strip()
+
+    def _apply_split_movement(self, signal, active: Set[str]) -> None:
+        """WASD → 左摇杆；↑↓←→ → 十字键（不依赖场中 scene 判定）。"""
+        lx = ly = 0.0
+        for key in active:
+            kl = str(key).lower()
+            if kl not in _WASD_STICK_KEYS:
+                continue
+            action = self._bindings.get(kl)
+            if action == KeyAction.MOVE_UP:
+                ly = 1.0
+            elif action == KeyAction.MOVE_DOWN:
+                ly = -1.0
+            elif action == KeyAction.MOVE_LEFT:
+                lx = -1.0
+            elif action == KeyAction.MOVE_RIGHT:
+                lx = 1.0
+        if lx and ly:
+            lx *= 0.70710678
+            ly *= 0.70710678
+        if lx or ly:
+            signal.set_thumb("left", lx, ly)
+
+        for key in active:
+            kl = str(key).lower()
+            if kl not in _ARROW_DPAD_KEYS:
+                continue
+            btn = _arrow_key_to_dpad(kl)
+            if btn is not None:
+                signal.set_button(btn, True)
 
     def _apply_movement_from_actions(self, signal, active: Set[str]) -> None:
-        """WASD/方向键 → 左摇杆或 DPad（由 manual_wasd_stick 决定）。"""
+        """WASD/方向键 → 左摇杆或 DPad（split 默认：WASD 摇杆、方向键十字键）。"""
+        mode = self._movement_mode()
+        if mode == "off":
+            return
+        if mode == "split":
+            self._apply_split_movement(signal, active)
+            return
+
         lx = ly = 0.0
         for key in active:
             action = self._bindings.get(key)
@@ -328,7 +527,10 @@ class KeyboardMapper:
             lx *= 0.70710678
             ly *= 0.70710678
 
-        if self._resolve_manual_wasd_stick():
+        use_stick = mode == "stick" or (
+            mode == "auto" and self._resolve_manual_wasd_stick_legacy()
+        )
+        if use_stick:
             if lx or ly:
                 signal.set_thumb("left", lx, ly)
             return
@@ -345,34 +547,86 @@ class KeyboardMapper:
         if dpad_btn is not None:
             signal.set_button(dpad_btn, True)
 
+    def _apply_look_stick_from_actions(self, signal, active: Set[str]) -> None:
+        """T/F/G/H → 右摇杆（与 WASD 同向：T 上 G 下 F 左 H 右）。"""
+        if not self._manual_input_active():
+            return
+        rx = ry = 0.0
+        for key in active:
+            kl = str(key).lower()
+            if kl not in _LOOK_STICK_KEYS:
+                continue
+            action = self._bindings.get(kl)
+            if action == KeyAction.LOOK_UP:
+                ry = 1.0
+            elif action == KeyAction.LOOK_DOWN:
+                ry = -1.0
+            elif action == KeyAction.LOOK_LEFT:
+                rx = -1.0
+            elif action == KeyAction.LOOK_RIGHT:
+                rx = 1.0
+        if rx and ry:
+            rx *= 0.70710678
+            ry *= 0.70710678
+        if rx or ry:
+            signal.set_thumb("right", rx, ry)
+
+    def _apply_triggers_from_actions(self, signal, active: Set[str]) -> None:
+        """Shift → LT，Space → RT（冲刺 / 射门）。"""
+        if not self._manual_input_active():
+            return
+        for key in active:
+            action = self._bindings.get(str(key).lower())
+            if action == KeyAction.HOLD_L2:
+                signal.set_trigger("left", 1.0)
+            elif action == KeyAction.HOLD_R2:
+                signal.set_trigger("right", 1.0)
+
+    def _resolve_manual_wasd_stick_legacy(self) -> bool:
+        if not self._manual_input_active():
+            return False
+        from .manual_nav import resolve_manual_keyboard_stick
+
+        return resolve_manual_keyboard_stick(in_match=self._manual_in_match())
+
     def _is_holdable_action(self, action: Optional[KeyAction]) -> bool:
         if action is None:
             return False
+        if action in (KeyAction.HOLD_L2, KeyAction.HOLD_R2):
+            return self._manual_input_active()
+        if action in (
+            KeyAction.LOOK_UP,
+            KeyAction.LOOK_DOWN,
+            KeyAction.LOOK_LEFT,
+            KeyAction.LOOK_RIGHT,
+        ):
+            return self._manual_input_active()
         if action in self._holdable_actions:
             return True
-        if self._manual_face_hold and action in self._face_hold_actions:
-            return True
+        if action in self._face_hold_actions:
+            if not self._manual_input_active():
+                return False
+            if action == KeyAction.TAP_A:
+                return self._manual_face_a_hold_allowed()
+            return self._manual_in_match()
         return False
 
     def set_overlay_refresh(self, callback: Optional[Callable[[], None]]) -> None:
-        """InputPump 轮询时全量重建 overlay（WASD→DPAD + 面键）。"""
+        """InputPump 轮询时全量重建 overlay（split：WASD 摇杆 + 方向键 DPad）。"""
         self._overlay_refresh_fn = callback
 
     def apply_active_keys_to_signal(self, signal) -> None:
         """将当前按下的映射键写入 ControllerSignal。"""
         active = self._iter_active_binding_keys()
         self._apply_movement_from_actions(signal, active)
+        self._apply_look_stick_from_actions(signal, active)
+        self._apply_triggers_from_actions(signal, active)
         action_map = _action_button_map()
         for key in active:
             action = self._bindings.get(key)
             if not action:
                 continue
-            if action in (
-                KeyAction.MOVE_UP,
-                KeyAction.MOVE_DOWN,
-                KeyAction.MOVE_LEFT,
-                KeyAction.MOVE_RIGHT,
-            ):
+            if action in _SKIP_BUTTON_ACTIONS:
                 continue
             btn = action_map.get(action)
             if btn is not None:
@@ -410,6 +664,56 @@ class KeyboardMapper:
     def register_hotkey(self, key_name: str, callback: Callable[[], None]) -> None:
         """注册调试/功能热键（不参与手柄映射，单次 KEYDOWN 触发）。"""
         self._hotkey_callbacks[key_name.lower()] = callback
+
+    def _invoke_hotkey(self, name: str) -> None:
+        """热键统一入口：防抖 + 同步 Win32 边沿状态，避免 SDL/Win32 双触发。"""
+        import time
+
+        key = str(name).lower()
+        now = time.monotonic()
+        last = float(self._hotkey_last_at.get(key, 0.0) or 0.0)
+        if now - last < self._hotkey_debounce_sec:
+            return
+        self._hotkey_last_at[key] = now
+        self._hotkey_win32_down.add(key)
+        callback = self._hotkey_callbacks.get(key)
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception as exc:
+            self.logger.error("热键回调异常 (%s): %s", key, exc)
+
+    def poll_win32_hotkeys(self, *, stream_foreground: bool = False) -> None:
+        """
+        Windows：轮询 F8/F9/F10 边沿触发（SDL KEYDOWN 常丢失功能键）。
+
+        串流窗口获焦且走 SDL 转发时跳过，避免与 feed_pygame_event 双触发（ON→OFF）。
+        """
+        if sys.platform != "win32" or not self._hotkey_callbacks:
+            return
+        if stream_foreground and self._external_event_pump:
+            return
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+        except Exception:
+            return
+
+        for name, callback in self._hotkey_callbacks.items():
+            vk = _WIN32_VK_HOTKEY.get(name.lower())
+            if vk is None:
+                continue
+            try:
+                down = bool(user32.GetAsyncKeyState(vk) & 0x8000)
+            except Exception:
+                continue
+            was_down = name.lower() in self._hotkey_win32_down
+            if down and not was_down:
+                self._invoke_hotkey(name.lower())
+            elif not down and was_down:
+                self._hotkey_win32_down.discard(name.lower())
 
     def set_window_close_handler(self, handler: Optional[Callable[[], None]]) -> None:
         """用户点击 SDL 窗口关闭按钮时调用（隐藏，非退出进程）。"""
@@ -449,27 +753,35 @@ class KeyboardMapper:
 
             if event.type == pygame.KEYDOWN:
                 key_name = pygame.key.name(event.key).lower()
+                if key_name.lower() in self._hotkey_callbacks:
+                    if key_name not in self._pressed_keys:
+                        self._pressed_keys.add(key_name)
+                        self._invoke_hotkey(key_name)
+                    return True
+                if not self._binding_key_allowed(key_name):
+                    return True
                 if key_name not in self._pressed_keys:
                     self._pressed_keys.add(key_name)
-                    if key_name.lower() in self._hotkey_callbacks:
-                        self._schedule_key_handler(self._handle_key_press(key_name))
-                    else:
-                        self._apply_action_sync(key_name, True)
-                        action = self._bindings.get(key_name.lower())
-                        if action and not self._is_holdable_action(action):
-                            self._schedule_key_handler(
-                                self._auto_tap_release(key_name, action)
-                            )
+                    self._apply_action_sync(key_name, True)
+                    action = self._bindings.get(key_name.lower())
+                    if action and not self._is_holdable_action(action):
+                        self._schedule_key_handler(
+                            self._auto_tap_release(key_name, action)
+                        )
                 return True
 
             if event.type == pygame.KEYUP:
                 key_name = pygame.key.name(event.key).lower()
+                if key_name.lower() in self._hotkey_callbacks:
+                    if key_name in self._pressed_keys:
+                        self._pressed_keys.discard(key_name)
+                        self._schedule_key_handler(self._handle_key_release(key_name))
+                    return True
+                if not self._binding_key_allowed(key_name):
+                    return True
                 if key_name in self._pressed_keys:
                     self._pressed_keys.discard(key_name)
-                    if key_name.lower() not in self._hotkey_callbacks:
-                        self._apply_action_sync(key_name, False)
-                    else:
-                        self._schedule_key_handler(self._handle_key_release(key_name))
+                    self._apply_action_sync(key_name, False)
                 return True
         except Exception as exc:
             self.logger.error("转发键盘事件异常: %s", exc)
@@ -495,11 +807,13 @@ class KeyboardMapper:
                 self.logger.error("同步键位回调异常 (%s): %s", key_name, exc)
 
     async def _auto_tap_release(self, key_name: str, action: KeyAction) -> None:
-        """面键短按：保持约 100ms 后释放。"""
+        """面键短按：保持约 100ms 后释放（物理键仍按住则不发 release）。"""
         await asyncio.sleep(0.1)
         if key_name in self._pressed_keys:
             self._pressed_keys.discard(key_name)
-        self._apply_action_sync(key_name, False)
+        active = self._iter_active_binding_keys()
+        if str(key_name).lower() not in active:
+            self._apply_action_sync(key_name, False)
 
     def register_action_callback(self, callback: Callable[[KeyAction, bool], None]):
         """

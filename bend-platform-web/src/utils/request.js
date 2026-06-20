@@ -27,6 +27,9 @@ const removePendingRequest = (config) => {
 }
 
 const addPendingRequest = (config) => {
+  if (config.skipPendingDedupe) {
+    return
+  }
   removePendingRequest(config)
   const controller = new AbortController()
   config.signal = controller.signal
@@ -101,7 +104,11 @@ request.interceptors.request.use(
 
 request.interceptors.response.use(
   (response) => {
-    removePendingRequest(response.config)
+    if (response.config?.skipPendingDedupe) {
+      // skipPendingDedupe 未注册 pending，无需 remove
+    } else {
+      removePendingRequest(response.config)
+    }
     const res = response.data
     if (res.code !== 200 && res.code !== 0) {
       console.log('Response with error code:', res.code, res.message)
@@ -128,7 +135,9 @@ request.interceptors.response.use(
   async (error) => {
     const authStore = useAuthStore()
 
-    removePendingRequest(error.config || {})
+    if (!error.config?.skipPendingDedupe) {
+      removePendingRequest(error.config || {})
+    }
 
     if (isRequestCanceled(error)) {
       return Promise.reject(error)

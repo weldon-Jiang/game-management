@@ -136,6 +136,9 @@ async def step3_execute_xsrp_init(
         install_task_input_recovery(context, task_logger)
         _bind_xsrp_input_close_handler(context, task_logger)
         await start_xsrp_access_input_loop(context, task_logger)
+        from ..xbox.stream_liveness_monitor import start_stream_liveness_monitor
+
+        await start_stream_liveness_monitor(context, task_logger)
         await _start_input_pump_if_ready(context, task_logger)
 
         success_msg = "xsrp 串流环境初始化完成"
@@ -176,9 +179,9 @@ def is_xsrp_stream_media_ready(context: AgentTaskContext) -> bool:
 
 
 def _bind_xsrp_input_close_handler(context: AgentTaskContext, task_logger) -> None:
-    from ..xbox.stream_recovery import bind_input_close_handler
+    from ..xbox.stream_recovery import bind_stream_health_handlers
 
-    bind_input_close_handler(context, task_logger)
+    bind_stream_health_handlers(context, task_logger)
 
 
 async def _validate_xsrp_stream_readiness(context, task_logger, stream_logger) -> tuple:

@@ -3,6 +3,7 @@ package com.bend.platform.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.bend.platform.dto.AgentInstancePageRequest;
 import com.bend.platform.dto.ApiResponse;
+import com.bend.platform.dto.AgentKeyboardMappingChartResponse;
 import com.bend.platform.dto.AgentKeyboardMappingResponse;
 import com.bend.platform.dto.UpdateAgentKeyboardMappingRequest;
 import com.bend.platform.dto.UpdateAgentNameRequest;
@@ -260,6 +261,15 @@ public class AgentController {
     @GetMapping("/{agentId}/keyboard-mapping")
     public ApiResponse<AgentKeyboardMappingResponse> getAgentKeyboardMapping(@PathVariable String agentId) {
         return ApiResponse.success(agentKeyboardMappingService.getMappingForAgent(agentId));
+    }
+
+    /**
+     * F8 人工接管键盘映射图（只读，含 Agent 扩展键位与调试热键说明）。
+     */
+    @GetMapping("/{agentId}/keyboard-mapping/chart")
+    public ApiResponse<AgentKeyboardMappingChartResponse> getAgentKeyboardMappingChart(
+            @PathVariable String agentId) {
+        return ApiResponse.success(agentKeyboardMappingService.getChartForAgent(agentId));
     }
 
     /**

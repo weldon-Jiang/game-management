@@ -15,6 +15,7 @@
         >
           <div class="entry-row">
             <span class="scope-tag">{{ scopeLabel(ev.scope) }}</span>
+            <span v-if="accountLabel(ev)" class="account-tag">{{ accountLabel(ev) }}</span>
             <span v-if="ev.phase" class="phase">{{ phaseLabel(ev.phase, ev.scope) }}</span>
             <span class="msg">{{ displayMessage(ev) }}</span>
           </div>
@@ -40,11 +41,14 @@ import {
   getTaskEventScopeText,
   getTaskEventPhaseText,
   getTaskEventMessageText,
-  formatHostAttemptsSummary
+  formatHostAttemptsSummary,
+  resolveTaskEventAccountLabel
 } from '@/utils/constants'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
+  /** gameAccountId → gamertag，来自任务详情 gameAccountStatuses */
+  accountNameMap: { type: Object, default: () => ({}) },
   /** 嵌入任务详情侧栏时为 true，取消右下角悬浮 */
   embedded: { type: Boolean, default: false }
 })
@@ -67,6 +71,8 @@ const formatTime = (t) => {
 }
 
 const scopeLabel = (scope) => getTaskEventScopeText(scope)
+
+const accountLabel = (ev) => resolveTaskEventAccountLabel(ev, props.accountNameMap)
 
 const phaseLabel = (phase, scope) => getTaskEventPhaseText(phase, scope)
 
@@ -197,6 +203,20 @@ onMounted(() => scrollToBottom())
   padding: 1px 6px;
   border-radius: 4px;
   flex-shrink: 0;
+}
+
+.account-tag {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--el-color-warning);
+  background: rgba(230, 162, 60, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .phase {

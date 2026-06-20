@@ -53,20 +53,15 @@ async def start_xsrp_access_input_loop(context: Any, task_logger=None) -> None:
             if session is None or not getattr(session, "is_connected", False):
                 break
 
-            # xsrpd：auto_play/auto_graph 期间不在 access 环写手柄
-            runtime = getattr(context, "_stream_runtime", None)
-            if runtime is not None:
-                ctx = runtime._context
-                if not runtime.is_manual_input_allowed():
-                    await asyncio.sleep(interval)
-                    continue
-                # F8 人工接管 / 平台暂停：InputPump 独占 WriteControllerData（对齐 xsrp.py hid_controller）
-                if getattr(ctx, "_manual_takeover", False):
-                    await asyncio.sleep(interval)
-                    continue
-                if ctx is not None and hasattr(ctx, "is_paused") and ctx.is_paused():
-                    await asyncio.sleep(interval)
-                    continue
+            # 仅 F8 / 平台暂停由 InputPump 独占写入；Step4 自动化期间仍须 neutral 保活
+            ctx = getattr(context, "_stream_runtime", None)
+            ctx = ctx._context if ctx is not None else context
+            if getattr(ctx, "_manual_takeover", False):
+                await asyncio.sleep(interval)
+                continue
+            if ctx is not None and hasattr(ctx, "is_paused") and ctx.is_paused():
+                await asyncio.sleep(interval)
+                continue
 
             gamepad = dict(NEUTRAL_GAMEPAD)
             now = time.time()

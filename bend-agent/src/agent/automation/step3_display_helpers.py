@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional
 from ..core.task_logger import get_task_logger
 from ..core.account_logger import get_stream_logger
 from ..task.task_context import AgentTaskContext
+from ..vision.frame_utils import frame_to_bgr_ndarray
 
 
 def _load_window_settings() -> Dict[str, Any]:
@@ -92,9 +93,16 @@ async def _start_sdl_display_pump(context: AgentTaskContext, task_logger) -> Non
                     context.sdl_window.process_events()
 
                 frame_data = None
-                latest = runtime.get_latest_frame()
+                if getattr(context, "_stream_video_stale", False):
+                    latest = None
+                else:
+                    latest = runtime.get_latest_frame()
                 if latest is not None:
-                    frame_data = getattr(latest, "data", latest)
+                    frame_data = frame_to_bgr_ndarray(latest)
+                    if frame_data is None:
+                        frame_data = frame_to_bgr_ndarray(
+                            getattr(latest, "data", latest)
+                        )
                     if not first_frame_logged:
                         task_logger.info(
                             "SDL 显示泵首帧: %sx%s",
@@ -105,7 +113,7 @@ async def _start_sdl_display_pump(context: AgentTaskContext, task_logger) -> Non
                 elif context.frame_capture is not None and not runtime.is_capture_running:
                     frame = await context.frame_capture.capture_frame()
                     if frame is not None:
-                        frame_data = getattr(frame, "data", frame)
+                        frame_data = frame_to_bgr_ndarray(frame)
 
                 if frame_data is not None:
                     if hasattr(frame_data, "copy"):
@@ -404,12 +412,16 @@ async def _init_keyboard_mapper(
         task_logger.info("正在初始化键盘映射器...")
         stream_logger.info("正在初始化键盘映射器...")
 
-        keyboard = KeyboardMapper(bindings=get_effective_keyboard_bindings())
+        keyboard = KeyboardMapper(bindings=get_effective_keyboard_bindings(context))
         await keyboard.start()
 
         from ..debug.manual_debug_controls import attach_manual_debug_controls
 
         attach_manual_debug_controls(context, keyboard, task_logger)
+
+        from ..input.manual_nav import wire_manual_in_match_checker
+
+        wire_manual_in_match_checker(context, keyboard)
 
         if hasattr(context, "_controller_protocol") and context._controller_protocol:
             context._keyboard_overlay_signal = ControllerSignal.zero()

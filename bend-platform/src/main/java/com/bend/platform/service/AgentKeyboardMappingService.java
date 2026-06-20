@@ -1,5 +1,6 @@
 package com.bend.platform.service;
 
+import com.bend.platform.dto.AgentKeyboardMappingChartResponse;
 import com.bend.platform.dto.AgentKeyboardMappingResponse;
 import com.bend.platform.dto.UpdateAgentKeyboardMappingRequest;
 
@@ -18,4 +19,7 @@ public interface AgentKeyboardMappingService {
     Map<String, String> getEffectiveBindingsForAgent(String agentId);
 
     AgentKeyboardMappingResponse buildDefaultResponse();
+
+    /** F8 人工接管键盘映射图（含 Agent 扩展键位，只读） */
+    AgentKeyboardMappingChartResponse getChartForAgent(String agentId);
 }

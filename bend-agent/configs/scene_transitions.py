@@ -155,6 +155,17 @@ SCENE_TRANSITIONS = [
         ],
         'target_scenes': [149]
     },
+    {
+        'scene_id': 147,
+        'transition_id': 2,
+        'description': 'UT主菜单 -> 转会Tab（152）',
+        'controller_options': [
+            [50, 1, 4096, 0, 255, 0, 0, 0, 0],
+            [50, 2, 4096, 0, 255, 0, 0, 0, 0],
+            [50, 3, 4096, 0, 255, 0, 0, 0, 0],
+        ],
+        'target_scenes': [152]
+    },
 
     # 场景149
     {
@@ -165,6 +176,17 @@ SCENE_TRANSITIONS = [
             [50, 1, 16, 0, 0, 0, 0, 0, 0],
         ],
         'target_scenes': [155]
+    },
+    {
+        'scene_id': 149,
+        'transition_id': 2,
+        'description': 'UT开始游戏Tab -> 转会Tab（152）',
+        'controller_options': [
+            [50, 1, 4096, 0, 255, 0, 0, 0, 0],
+            [50, 2, 4096, 0, 255, 0, 0, 0, 0],
+            [50, 3, 4096, 0, 255, 0, 0, 0, 0],
+        ],
+        'target_scenes': [152]
     },
 
     # 场景155
@@ -348,6 +370,83 @@ SQB_NAVIGATION_SCENES = [
 ]
 
 SQB_COMPLETE_SCENES = {189}
+
+# SQB 189 开赛后 → 进入场中：轮询识别 + A/场景转移
+SQB_PREMATCH_TARGETS = [102, 190]
+SQB_PREMATCH_PROBE_SCENES = [
+    189, 190, 102,
+    127, 147, 149, 155, 156,
+    *range(168, 176),
+    177, 183,
+    184, 185, 186, 187, 188, 193, 194,
+]
+SQB_PREMATCH_DISMISS_TIMEOUT = 90.0
+
+# 「按住 A 跳过」类过场/庆祝：自动化须 sustained A（短按无效）
+HOLD_A_SKIP_SCENE_IDS = frozenset({101, 102, 189, 190})
+DISMISS_A_TAP_SEC = 0.12
+HOLD_A_SKIP_PRESS_SEC = 2.0
+# dismiss_until_scenes 模板未匹配时仍尝试长按 A 的 label（如 SQB 开球前过场）
+DISMISS_HOLD_A_UNMATCHED_LABELS = frozenset({"SQB-PREMATCH"})
+
+
+def resolve_automation_a_press_sec(
+    scene_id: Optional[int],
+    *,
+    force_hold: bool = False,
+) -> float:
+    """
+    自动化按 A 时长：过场/庆祝 scene 用长按，普通弹窗用短按。
+
+    可通过 agent.yaml step4.hold_a_skip_sec / dismiss_a_tap_sec 覆盖。
+    """
+    hold = HOLD_A_SKIP_PRESS_SEC
+    tap = DISMISS_A_TAP_SEC
+    try:
+        from agent.core.config import config as app_config
+
+        hold = float(app_config.get("step4.hold_a_skip_sec", hold))
+        tap = float(app_config.get("step4.dismiss_a_tap_sec", tap))
+    except Exception:
+        pass
+    if force_hold:
+        return hold
+    if scene_id is not None and int(scene_id) in HOLD_A_SKIP_SCENE_IDS:
+        return hold
+    return tap
+
+
+# 转会导航链（UT 主菜单 → 转会 Tab 152）
+AUCTION_UT_CHAIN: List[Tuple[int, int]] = [
+    (147, 2),
+]
+
+AUCTION_NAVIGATION_SCENES = [
+    127, 147, 149, 150, 151, 152, 153, 154,
+]
+
+AUCTION_COMPLETE_SCENES = {152}
+
+# 152 按 A 进入转会中心后占位等待（子界面 scene 实机补录前用 sleep）
+AUCTION_ENTRY_DWELL_SEC = 3.0
+AUCTION_EXIT_DISMISS_TIMEOUT = 45.0
+
+
+def trim_auction_navigation_chain(
+    current_scene: Optional[int],
+) -> List[Tuple[int, int]]:
+    """根据当前 scene 裁剪转会导航链。"""
+    if current_scene in AUCTION_COMPLETE_SCENES:
+        return []
+
+    if current_scene == 149:
+        return [(149, 2)]
+    if current_scene == 147:
+        return list(AUCTION_UT_CHAIN)
+    if current_scene == 127:
+        return [(127, 1), (147, 2)]
+
+    return [(127, 1), (147, 2)]
 
 
 def get_transition(scene_id: int, transition_id: int) -> Optional[dict]:

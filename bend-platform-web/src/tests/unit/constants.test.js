@@ -11,7 +11,8 @@ import {
   getTaskTypeText,
   getAgentStatusText,
   getAgentStatusType,
-  getRoleType
+  getRoleType,
+  resolveTaskEventAccountLabel
 } from '@/utils/constants'
 
 describe('constants.js - 状态映射常量', () => {
@@ -71,6 +72,7 @@ describe('constants.js - 状态映射常量', () => {
     it('应该包含所有 Agent 状态', () => {
       expect(AGENT_STATUS_MAP).toHaveProperty('online')
       expect(AGENT_STATUS_MAP).toHaveProperty('offline')
+      expect(AGENT_STATUS_MAP).toHaveProperty('reconnecting')
       expect(AGENT_STATUS_MAP).toHaveProperty('uninstalled')
     })
   })
@@ -181,6 +183,7 @@ describe('constants.js - 工具函数', () => {
     it('应该返回正确的 Agent 状态文本', () => {
       expect(getAgentStatusText('online')).toBe('在线')
       expect(getAgentStatusText('offline')).toBe('离线')
+      expect(getAgentStatusText('reconnecting')).toBe('重连中')
       expect(getAgentStatusText('uninstalled')).toBe('已卸载')
     })
 
@@ -193,6 +196,7 @@ describe('constants.js - 工具函数', () => {
     it('应该返回正确的 Agent 状态类型', () => {
       expect(getAgentStatusType('online')).toBe('success')
       expect(getAgentStatusType('offline')).toBe('info')
+      expect(getAgentStatusType('reconnecting')).toBe('warning')
       expect(getAgentStatusType('uninstalled')).toBe('danger')
     })
 
@@ -220,6 +224,23 @@ describe('constants.js - 工具函数', () => {
     it('对于 null 或 undefined 应该返回 "info"', () => {
       expect(getRoleType(null)).toBe('info')
       expect(getRoleType(undefined)).toBe('info')
+    })
+  })
+
+  describe('resolveTaskEventAccountLabel', () => {
+    it('无 gameAccountId 时返回空字符串', () => {
+      expect(resolveTaskEventAccountLabel({})).toBe('')
+      expect(resolveTaskEventAccountLabel(null)).toBe('')
+    })
+
+    it('优先使用 nameMap 中的 gamertag', () => {
+      const ev = { gameAccountId: 'abc123' }
+      expect(resolveTaskEventAccountLabel(ev, { abc123: 'MyGamer' })).toBe('MyGamer')
+    })
+
+    it('无映射时回退短 ID', () => {
+      const ev = { gameAccountId: '0123456789abcdef' }
+      expect(resolveTaskEventAccountLabel(ev)).toBe('01234567…')
     })
   })
 })

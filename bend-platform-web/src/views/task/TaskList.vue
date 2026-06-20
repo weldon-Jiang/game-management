@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="header-left">
         <h2>任务管理</h2>
-        <span class="header-desc">查看自动化任务执行情况</span>
+        <span class="header-desc">查看自动化任务执行情况；复用任务以最近活跃时间为准</span>
       </div>
     </div>
 
@@ -73,6 +73,9 @@
           <el-option label="已取消" value="cancelled" />
           <el-option label="已停止" value="stopped" />
         </el-select>
+        <el-checkbox v-model="filterActiveToday" @change="handleSearch">
+          今日活跃
+        </el-checkbox>
         <el-button @click="handleSearch">
           <el-icon><Refresh /></el-icon>
         </el-button>
@@ -142,9 +145,20 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdTime" label="创建时间" width="168" show-overflow-tooltip>
+        <el-table-column prop="createdTime" label="创建时间" width="148" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.createdTime ? formatDate(row.createdTime) : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="updatedTime" label="最近活跃" width="168" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.updatedTime" class="active-time-cell">
+              <el-tag v-if="isToday(row.updatedTime)" size="small" type="success" class="today-tag">
+                今日
+              </el-tag>
+              {{ formatDate(row.updatedTime) }}
+            </span>
+            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right" :style="{ backgroundColor: '#0f0f1a' }">
@@ -342,6 +356,7 @@ const filterMerchantId = ref('')
 const filterAgentId = ref('')
 const filterStreamingAccountId = ref('')
 const filterStatus = ref('')
+const filterActiveToday = ref(true)
 const loading = ref(false)
 const tableData = ref([])
 const onlineAgents = ref([])
@@ -380,6 +395,18 @@ const formatDate = (dateStr) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+/** 判断时间戳是否为本地当天（用于「今日活跃」高亮） */
+const isToday = (dateStr) => {
+  if (!dateStr) return false
+  const date = new Date(dateStr)
+  const now = new Date()
+  return (
+    date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate()
+  )
 }
 
 const formatAgentLabel = (agent) => getAgentDisplayName(agent)
@@ -434,6 +461,9 @@ const loadData = async () => {
     }
     if (filterStreamingAccountId.value) {
       params.streamingAccountId = filterStreamingAccountId.value
+    }
+    if (filterActiveToday.value) {
+      params.activeToday = true
     }
     const res = await taskApi.list(params)
     if (res.code === 0 || res.code === 200) {
@@ -811,6 +841,16 @@ onMounted(async () => {
 :deep(.el-table td.el-table__cell) {
   font-size: 13px;
   padding: 14px 0;
+}
+
+.active-time-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.today-tag {
+  flex-shrink: 0;
 }
 
 .text-muted {
