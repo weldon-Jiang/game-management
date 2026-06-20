@@ -1,7 +1,7 @@
 package com.bend.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.TaskPageRequest;
@@ -668,6 +668,7 @@ public class TaskServiceImpl implements TaskService {
 
         task.setStatus("pending");
         task.setRetryCount(0);
+        task.setErrorMessage(null);
         taskMapper.updateById(task);
         clearErrorMessage(taskId);
 
@@ -1126,8 +1127,9 @@ public class TaskServiceImpl implements TaskService {
         if (!StringUtils.hasText(taskId)) {
             return;
         }
-        LambdaUpdateWrapper<Task> wrapper = new LambdaUpdateWrapper<>();
-        wrapper.eq(Task::getId, taskId).set(Task::getErrorMessage, null);
+        // 使用字符串列名而非 Lambda，避免单测环境缺少 MyBatis-Plus 元数据缓存
+        UpdateWrapper<Task> wrapper = new UpdateWrapper<>();
+        wrapper.eq("id", taskId).set("error_message", null);
         taskMapper.update(null, wrapper);
     }
 
