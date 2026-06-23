@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import os
-import time
+from datetime import datetime
 from typing import Any, Optional, Tuple
 
 import cv2
@@ -102,7 +102,8 @@ def save_manual_capture(
     seq = getattr(context, "_manual_capture_seq", 0) + 1
     context._manual_capture_seq = seq
     safe_note = "".join(c if c.isalnum() or c in "-_" else "_" for c in (note or "manual"))[:24]
-    filename = f"{seq:03d}_{safe_note}_{int(time.time())}.png"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{seq:03d}_{safe_note}_{timestamp}.png"
     path = os.path.join(base_dir, filename)
 
     if not cv2.imwrite(path, frame):

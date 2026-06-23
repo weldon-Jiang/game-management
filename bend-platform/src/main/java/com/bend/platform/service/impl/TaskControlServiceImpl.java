@@ -131,7 +131,8 @@ public class TaskControlServiceImpl implements TaskControlService {
         }
 
         Map<String, Object> taskParams = buildStreamingTaskParams(
-                streamingAccount, gameAccounts, selectedHost, merchantId);
+                streamingAccount, gameAccounts, selectedHost, merchantId,
+                request.getNewOnHostGameAccountIds());
 
         Task reusable = taskService.findReusableTaskByStreamingAccountAndAgent(streamingAccountId, agentId);
         final Task task;
@@ -600,7 +601,8 @@ public class TaskControlServiceImpl implements TaskControlService {
             StreamingAccount account,
             List<GameAccount> gameAccounts,
             XboxHost host,
-            String merchantId) {
+            String merchantId,
+            List<String> newOnHostGameAccountIds) {
         Map<String, Object> params = new HashMap<>();
         params.put("phase", "streaming_only");
         params.put("merchantId", merchantId);
@@ -609,7 +611,7 @@ public class TaskControlServiceImpl implements TaskControlService {
         params.put("autoMatchHost", host == null);
         params.put("streamMode", "lan_direct");
         params.put("streamingAccount", buildStreamingInfo(account));
-        params.put("gameAccounts", buildGameAccountsInfo(gameAccounts));
+        params.put("gameAccounts", buildGameAccountsInfo(gameAccounts, newOnHostGameAccountIds));
         if (host != null) {
             params.put("host", buildHostInfo(host));
             params.put("xboxInfo", buildHostInfo(host));
@@ -629,13 +631,19 @@ public class TaskControlServiceImpl implements TaskControlService {
         return info;
     }
 
-    private List<Map<String, Object>> buildGameAccountsInfo(List<GameAccount> accounts) {
+    private List<Map<String, Object>> buildGameAccountsInfo(
+            List<GameAccount> accounts,
+            List<String> newOnHostGameAccountIds) {
+        Set<String> newOnHost = newOnHostGameAccountIds == null
+                ? Set.of()
+                : new HashSet<>(newOnHostGameAccountIds);
         List<Map<String, Object>> result = new ArrayList<>();
         for (GameAccount ga : accounts) {
             Map<String, Object> info = new HashMap<>();
             info.put("id", ga.getId());
             info.put("gameName", ga.getGameName());
             info.put("email", ga.getEmail());
+            info.put("isNewUser", newOnHost.contains(ga.getId()));
             info.put("dailyMatchLimit", ga.getDailyMatchLimit());
             info.put("todayMatchCount", ga.getTodayMatchCount());
             info.put("cooldownHours", ga.getCooldownHours());

@@ -196,6 +196,11 @@ def schedule_input_reconnect(context: Any, *, force: bool = False) -> None:
     if context is None:
         return
 
+    from ..core.agent_shutdown import is_agent_shutting_down
+
+    if is_agent_shutting_down():
+        return
+
     # Step3 未完成：仅轻量 handshake，避免 reconnect 清掉 xbox_session
     if not getattr(context, "_step3_init_completed", False):
         from .stream_recovery import request_input_recovery

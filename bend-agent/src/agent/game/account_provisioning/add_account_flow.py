@@ -87,25 +87,34 @@ class AddAccountFlow:
         ]
         try:
             switcher = self._build_switcher()
+            from ..account_switcher import GameAccount
+            from ..scenes.add_account import AddAccountScene
+
             for idx, msg in steps:
                 if check_cancel():
                     return False
                 if on_step:
                     on_step(idx, msg)
-            result = await switcher.add_new_user_with_credentials(
+            target = GameAccount(
+                account_id=game_account.id or "",
+                gamertag=game_account.gamertag or "",
                 email=game_account.email,
                 password=game_account.password,
-                check_cancel=check_cancel,
-                account_id=game_account.id,
             )
-            if result.success and result.host_gamertag:
-                game_account.gamertag = result.host_gamertag
-                self.logger.info(
-                    "主机昵称已回写平台: %s (id=%s)",
-                    result.host_gamertag,
-                    game_account.id,
-                )
-            return result.success if hasattr(result, "success") else bool(result)
+            if check_cancel():
+                return False
+            async with switcher._stream_keepalive_loop():
+                await switcher._ensure_input_ready()
+                if not await switcher._open_guide_menu():
+                    await switcher._navigate_to_accounts_system()
+                elif not await switcher._run_scene_transition(2, 2):
+                    await switcher._navigate_to_accounts_system()
+                if not await switcher._wait_for_scene(3):
+                    raise RuntimeError("未进入档案和系统页面（场景3）")
+                await AddAccountScene(switcher).run(target)
+            if target.gamertag:
+                game_account.gamertag = target.gamertag
+            return True
         except Exception as exc:
             self.logger.error("Add account flow failed: %s", exc)
             return False

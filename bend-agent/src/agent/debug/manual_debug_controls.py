@@ -215,6 +215,8 @@ def attach_manual_debug_controls(
         _log(msg)
         if path:
             context._last_manual_capture_path = path
+        else:
+            _log(f"F9 截图失败: {msg}")
 
     def on_help() -> None:
         task_id = getattr(context, "task_id", "") or ""

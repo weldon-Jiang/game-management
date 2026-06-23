@@ -115,6 +115,8 @@ class CentralManager:
         self.agent_secret = agent_secret            # Agent密钥
         self.registration_code = registration_code or config.get('agent.registration_code', '')  # 注册码
         self._running = False                       # Agent运行状态标志
+        self._shutdown_in_progress = False
+        self._shutdown_event = asyncio.Event()
         self._heartbeat_task: Optional[asyncio.Task] = None    # 心跳任务
         self._ws_task: Optional[asyncio.Task] = None            # WebSocket监听任务
         self._update_check_task: Optional[asyncio.Task] = None  # 版本检查任务
@@ -262,30 +264,28 @@ class CentralManager:
 
     def _signal_handler(self, signum, frame):
         """
-        处理系统信号
-
-        参数说明：
-        - signum: 信号编号
-        - frame: 当前栈帧
-
-        处理逻辑：
-        - 收到信号后，设置运行状态为False
-        - 创建停止任务（不等待，让事件循环自然处理）
-        - 停止事件循环，触发main()中的KeyboardInterrupt处理
+        处理系统信号：调度异步 shutdown，勿调用 loop.stop()（会打断未完成的清理）。
         """
         self.logger.info(f"Received signal {signum}, initiating graceful shutdown...")
-        
-        # 创建停止任务（不等待，让事件循环自然处理）
-        asyncio.create_task(self.stop(
-            uninstall=self._uninstall_requested,
-            clear_registry=self._clear_registry_requested
-        ))
-        
-        # 停止事件循环，这会触发KeyboardInterrupt被main()捕获
-        # main()的finally块会确保stop_manager被调用
-        loop = asyncio.get_event_loop()
-        if not loop.is_closed():
-            loop.stop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if self._shutdown_in_progress:
+            return
+        loop.create_task(self._begin_shutdown_from_signal())
+
+    async def _begin_shutdown_from_signal(self):
+        if self._shutdown_in_progress:
+            return
+        self._shutdown_in_progress = True
+        try:
+            await self.stop(
+                uninstall=self._uninstall_requested,
+                clear_registry=self._clear_registry_requested,
+            )
+        finally:
+            self._shutdown_event.set()
 
     async def _notify_offline(self):
         """
@@ -409,6 +409,9 @@ class CentralManager:
         5. 断开WebSocket和API连接
         """
         self.logger.info("Stopping Bend Agent...")
+        from .agent_shutdown import mark_agent_shutting_down
+
+        mark_agent_shutting_down()
         self._running = False
 
         if uninstall:
@@ -436,9 +439,14 @@ class CentralManager:
             except Exception as e:
                 self.logger.debug(f"Task cancellation completed: {e}")
 
-        # 停止任务执行器
+        # 停止任务执行器（先停调度器内任务，再等待 executor 协程结束）
         try:
+            from ..task.automation_scheduler import get_active_scheduler
             from ..task.task_executor import task_executor
+
+            scheduler = get_active_scheduler()
+            if scheduler is not None:
+                await scheduler.stop_all_tasks()
             await task_executor.stop()
         except Exception as e:
             self.logger.error(f"Error stopping task executor: {e}")

@@ -89,6 +89,13 @@ automation:
 # Step4：false=走 switch_to（内含主页 OCR 匹配则自动跳过切换）；true=强制跳过切换（仅调试）
 step4:
   skip_account_switch: false
+  # 账号门禁：主页 OCR 轮播重试（空文本或不匹配均重试，全部失败才切档）
+  home_ocr_max_attempts: 3
+  home_ocr_retry_interval_sec: 1.5
+  # 场景6 列表扫描
+  scene6_max_down_steps: 50
+  scene6_focus_unchanged_threshold: 2
+  post_switch_home_wait_sec: 25
   # 自动化「按住 A 跳过」过场/庆祝（scene 101/102/189/190 等）
   hold_a_skip_sec: 2.0
   dismiss_a_tap_sec: 0.12
@@ -168,6 +175,11 @@ gssv:
   input_stale_sec: 28                # GSSV ~35s 无 input 会断，提前恢复
   video_stale_sec: 45                 # 视频轨无新帧则重连
   liveness_reconnect_after_failures: 3
+  # Xbox 空闲变暗 / 屏保主动唤醒（串流活性监控）
+  xbox_wake_cooldown_sec: 45          # 两次唤醒最短间隔
+  xbox_idle_dim_ratio: 0.55           # 当前亮度 / 会话峰值 < 此值 → 认为变暗
+  xbox_idle_dim_mean: 32               # 灰度均值低于此值 → 认为过暗
+  xbox_idle_dim_min_peak: 50           # 峰值过低时不判变暗（避免误判黑屏加载）
   xsrp_idle_keepalive_sec: 3          # legacy idle keepalive（已由 access 环取代）
   xsrp_idle_pulse_every_sec: 15
   xsrp_idle_pulse_sec: 0.05

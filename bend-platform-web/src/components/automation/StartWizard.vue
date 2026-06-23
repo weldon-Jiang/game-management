@@ -15,21 +15,30 @@
       </p>
       <p class="label">选择游戏账号（可多选）</p>
       <el-checkbox-group v-model="form.gameAccountIds" class="ga-list">
-        <el-checkbox
-          v-for="ga in gameAccounts"
-          :key="ga.id"
-          :label="ga.id"
-          :value="ga.id"
-          :disabled="isGameAccountOccupied(ga)"
-        >
-          {{ ga.gameName || ga.email }}
-          <span v-if="ga.positionIndex != null && ga.positionIndex >= 0" class="meta">
-            位置 {{ ga.positionIndex }}
-          </span>
-          <span v-if="isGameAccountOccupied(ga)" class="meta warning">
-            已被 {{ ga.agentName || ga.agentId || '其他任务' }} 占用
-          </span>
-        </el-checkbox>
+        <div v-for="ga in gameAccounts" :key="ga.id" class="ga-row">
+          <el-checkbox
+            :label="ga.id"
+            :value="ga.id"
+            :disabled="isGameAccountOccupied(ga)"
+          >
+            {{ ga.gameName || ga.email }}
+            <span v-if="ga.positionIndex != null && ga.positionIndex >= 0" class="meta">
+              位置 {{ ga.positionIndex }}
+            </span>
+            <span v-if="isGameAccountOccupied(ga)" class="meta warning">
+              已被 {{ ga.agentName || ga.agentId || '其他任务' }} 占用
+            </span>
+          </el-checkbox>
+          <el-checkbox
+            v-if="form.gameAccountIds.includes(ga.id)"
+            v-model="form.newOnHostGameAccountIds"
+            :label="ga.id"
+            :value="ga.id"
+            class="new-on-host"
+          >
+            本主机新用户
+          </el-checkbox>
+        </div>
       </el-checkbox-group>
       <p v-if="!gameAccounts.length" class="text-muted">该串流账号下暂无绑定游戏账号</p>
     </div>
@@ -155,7 +164,8 @@ const form = reactive({
   agentId: '',
   hostId: '',
   gameActionType: 'squad_battle',
-  gameAccountIds: []
+  gameAccountIds: [],
+  newOnHostGameAccountIds: []
 })
 
 const accountPlatform = computed(() => normalizePlatformType(props.account?.platform))
@@ -275,6 +285,7 @@ const reset = () => {
   form.agentId = ''
   form.hostId = ''
   form.gameAccountIds = []
+  form.newOnHostGameAccountIds = []
   boundHosts.value = []
 }
 
@@ -300,7 +311,8 @@ const startStreaming = async () => {
   try {
     const payload = {
       agentId: form.agentId,
-      gameAccountIds: form.gameAccountIds
+      gameAccountIds: form.gameAccountIds,
+      newOnHostGameAccountIds: form.newOnHostGameAccountIds
     }
     if (form.hostId) {
       payload.xboxHostId = form.hostId
@@ -367,7 +379,9 @@ const startAutomation = async () => {
 .label { font-size: 13px; margin-bottom: 8px; color: var(--el-text-color-regular); }
 .host-label { margin-top: 16px; }
 .host-hint { margin-top: 12px; }
-.ga-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+.ga-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
+.ga-row { display: flex; flex-direction: column; gap: 2px; padding-left: 4px; }
+.new-on-host { margin-left: 24px; font-size: 12px; }
 .meta { color: var(--el-text-color-secondary); font-size: 12px; margin-left: 6px; }
 .meta.warning { color: var(--el-color-warning); }
 .platform-tag { margin-left: 8px; vertical-align: middle; }

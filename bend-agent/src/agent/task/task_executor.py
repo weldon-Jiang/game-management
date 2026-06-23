@@ -341,10 +341,19 @@ class HighConcurrencyTaskExecutor:
 
         清理内容：
         1. 取消所有运行中的任务
-        2. 关闭所有 Xbox 会话
+        2. 等待任务协程结束（带超时）
         3. 取消清理定时器
         """
         self.cancel_all()
+        running = list(self._running_tasks.values())
+        if running:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*running, return_exceptions=True),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("部分任务未在 30s 内结束，继续关闭")
         if self._cleanup_task:
             self._cleanup_task.cancel()
             try:

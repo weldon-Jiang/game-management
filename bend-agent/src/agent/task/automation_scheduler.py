@@ -699,6 +699,15 @@ class AutomationScheduler:
     async def _cleanup_task_resources(self, task_id: str) -> None:
         context = self._task_contexts.get(task_id)
         if context:
+            bg = getattr(context, "_input_reconnect_bg_task", None)
+            if bg is not None and not bg.done():
+                bg.cancel()
+            try:
+                from ..xbox.stream_liveness_monitor import stop_stream_liveness_monitor
+
+                await stop_stream_liveness_monitor(context)
+            except Exception as exc:
+                self.logger.debug("stop liveness monitor: %s", exc)
             try:
                 from ..input.agent_keyboard_config import clear_task_keyboard_mapping
 

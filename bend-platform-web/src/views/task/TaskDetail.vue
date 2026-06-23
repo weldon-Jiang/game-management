@@ -420,9 +420,10 @@ const handleReconnect = async () => {
 }
 
 .overview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 24px;
 }
 
 .overview-item {
@@ -431,6 +432,7 @@ const handleReconnect = async () => {
   gap: 6px;
   font-size: 13px;
   min-width: 0;
+  flex: 0 1 auto;
 }
 
 .overview-item .label {
@@ -445,14 +447,17 @@ const handleReconnect = async () => {
   white-space: nowrap;
 }
 
-/* 日期时间需完整展示，避免 grid 列宽不足时被 ellipsis 截断 */
+/* 日期时间需完整展示；固定最小宽度并在空间不足时换行，避免与相邻项重叠 */
 .overview-item--time {
-  min-width: max-content;
+  flex: 0 0 auto;
+  min-width: 192px;
 }
 
 .overview-item--time .value {
   overflow: visible;
   text-overflow: unset;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .alert-strip {

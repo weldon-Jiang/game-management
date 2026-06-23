@@ -78,6 +78,10 @@ async def start_stream_liveness_monitor(context: Any, task_logger=None) -> None:
         consecutive_input_stale = 0
         while True:
             await asyncio.sleep(_check_interval_sec())
+            from ..core.agent_shutdown import is_agent_shutting_down
+
+            if is_agent_shutting_down():
+                break
             if not getattr(context, "_step3_init_completed", False):
                 continue
 
@@ -118,7 +122,33 @@ async def start_stream_liveness_monitor(context: Any, task_logger=None) -> None:
             )
             video_stale = last_video > 0 and video_age > _video_stale_sec()
 
+            # 屏保变暗时视频轨可能仍在推静态暗帧，先尝试 Guide+A 唤醒
+            if not video_stale:
+                from .xbox_sleep_wake import try_wake_if_frame_dim
+
+                if await try_wake_if_frame_dim(context, log):
+                    await asyncio.sleep(3.0)
+                    last_video = get_last_video_frame_at(context)
+                    video_age = (
+                        now - last_video if last_video > 0 else 0.0
+                    )
+
             if video_stale:
+                from .xbox_sleep_wake import try_wake_xbox_from_sleep
+
+                await try_wake_xbox_from_sleep(context, log, reason="video_stale")
+                await asyncio.sleep(5.0)
+                last_video = get_last_video_frame_at(context)
+                video_age = now - last_video if last_video > 0 else 999.0
+                if last_video > 0 and video_age <= _video_stale_sec():
+                    log.info(
+                        "唤醒后视频帧已恢复 (age=%.1fs)，跳过重连",
+                        video_age,
+                    )
+                    context._stream_video_stale = False
+                    consecutive_input_stale = 0
+                    continue
+
                 log.warning(
                     "视频帧超时 %.0fs（阈值 %ss），丢弃缓存帧并调度重连",
                     video_age,

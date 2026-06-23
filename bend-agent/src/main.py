@@ -113,8 +113,7 @@ class AgentRunner:
 
             self.logger.info("Agent is running. Press Ctrl+C to stop.")
 
-            while True:
-                await asyncio.sleep(1)
+            await self.manager._shutdown_event.wait()
 
         except asyncio.CancelledError:
             self.logger.info("Received cancellation signal")
@@ -122,7 +121,7 @@ class AgentRunner:
         except KeyboardInterrupt:
             self.logger.info("Keyboard interrupt received")
         finally:
-            # 安全地关闭 manager
+            # signal 路径已在 _begin_shutdown_from_signal 中 stop；此处仅兜底未关闭场景
             try:
                 if self.manager and self.manager._running:
                     await self.stop_manager()

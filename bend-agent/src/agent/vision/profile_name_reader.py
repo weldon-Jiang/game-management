@@ -43,20 +43,98 @@ class HomeProfileIdentity:
         return " ".join(part for part in parts if part)
 
 
+def _as_bgr_ndarray(image: Any) -> Optional[np.ndarray]:
+    """Frame 或 ndarray 统一为 BGR ndarray（勿对 ndarray 误用 .data）。"""
+    if image is None:
+        return None
+    if isinstance(image, np.ndarray):
+        return image
+    data = getattr(image, "data", None)
+    if isinstance(data, np.ndarray):
+        return data
+    return None
+
+
 def normalize_gamertag(name: str) -> str:
     """用于模糊 Gamertag 比对的小写字母数字键。"""
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
 
 
+def _levenshtein_distance(left: str, right: str) -> int:
+    """两串编辑距离（小串长度通常 < 20，无需外部依赖）。"""
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+    prev = list(range(len(right) + 1))
+    for i, ch_left in enumerate(left, 1):
+        curr = [i]
+        for j, ch_right in enumerate(right, 1):
+            cost = 0 if ch_left == ch_right else 1
+            curr.append(
+                min(
+                    prev[j] + 1,
+                    curr[j - 1] + 1,
+                    prev[j - 1] + cost,
+                )
+            )
+        prev = curr
+    return prev[-1]
+
+
+def _ocr_gamertag_variants(normalized: str) -> List[str]:
+    """
+    主页 OCR 常见误读变体：头像边缘多 1 字符（如 y weldo1991）、首尾丢字。
+    """
+    if not normalized:
+        return []
+    variants = [normalized]
+    seen = {normalized}
+    if len(normalized) > 4:
+        stripped = normalized[1:]
+        if stripped not in seen:
+            seen.add(stripped)
+            variants.append(stripped)
+    if len(normalized) > 5:
+        trimmed = normalized[:-1]
+        if trimmed not in seen:
+            seen.add(trimmed)
+            variants.append(trimmed)
+    return variants
+
+
+def _fuzzy_gamertag_distance_limit(target_len: int) -> int:
+    """按目标长度允许的编辑距离（串流小字 OCR 常 1 字误差）。"""
+    if target_len < 6:
+        return 0
+    if target_len < 10:
+        return 1
+    return 2
+
+
 def gamertag_matches(detected: Optional[str], target: str) -> bool:
-    """OCR 文本很可能匹配目标 Gamertag 时返回 True。"""
+    """OCR 文本很可能匹配目标 Gamertag 时返回 True（含子串与轻度模糊）。"""
     if not detected or not target:
         return False
     det = normalize_gamertag(detected)
     tgt = normalize_gamertag(target)
     if not det or not tgt:
         return False
-    return det == tgt or tgt in det or det in tgt
+    if det == tgt or tgt in det or det in tgt:
+        return True
+
+    max_dist = _fuzzy_gamertag_distance_limit(len(tgt))
+    if max_dist == 0:
+        return False
+
+    for variant in _ocr_gamertag_variants(det):
+        if variant == tgt or tgt in variant or variant in tgt:
+            return True
+        if _levenshtein_distance(variant, tgt) <= max_dist:
+            return True
+    return False
 
 
 def email_local_part(email: Optional[str]) -> str:
@@ -64,6 +142,47 @@ def email_local_part(email: Optional[str]) -> str:
     if not email or "@" not in email:
         return (email or "").strip()
     return email.split("@", 1)[0].strip()
+
+
+def _home_ocr_match_candidates(
+    detected_name: Optional[str],
+    detected_email: Optional[str],
+    combined_text: Optional[str],
+) -> List[str]:
+    """
+    主页轮播 OCR 可能一次读出多档案片段，拆成行/词后再参与比对。
+
+    保留整段 combined 以支持子串匹配（gamertag_matches）。
+    """
+    candidates: List[str] = []
+    seen: set = set()
+
+    def _add(text: Optional[str]) -> None:
+        if not text:
+            return
+        cleaned = str(text).strip()
+        if not cleaned:
+            return
+        key = cleaned.lower()
+        if key not in seen:
+            seen.add(key)
+            candidates.append(cleaned)
+
+    for raw in (detected_name, detected_email, combined_text):
+        _add(raw)
+        if not raw:
+            continue
+        for line in re.split(r"[\n\r]+", str(raw)):
+            line = line.strip()
+            if not line:
+                continue
+            _add(line)
+            for token in re.split(r"\s+", line):
+                token = token.strip().strip(",;")
+                if token:
+                    _add(token)
+
+    return candidates
 
 
 def profile_matches_game_account(
@@ -81,11 +200,9 @@ def profile_matches_game_account(
     依次尝试：平台 gamertag、主机显示名 host_display_name、邮箱本地段、完整邮箱。
     返回 (是否匹配, 匹配依据说明)。
     """
-    ocr_texts = [
-        text.strip()
-        for text in (detected_name, detected_email, combined_text)
-        if text and str(text).strip()
-    ]
+    ocr_texts = _home_ocr_match_candidates(
+        detected_name, detected_email, combined_text
+    )
     if not ocr_texts:
         return False, ""
 
@@ -122,6 +239,46 @@ def account_identity_matches(
         host_display_name=host_display_name,
     )
     return matched
+
+
+def _normalize_row_label(text: Optional[str]) -> str:
+    """场景6 列表行 OCR 文本归一化（去空白、小写）。"""
+    return re.sub(r"\s+", "", (text or "").lower())
+
+
+def is_scene6_add_guest_row(text: Optional[str]) -> bool:
+    """焦点行是否为「添加访客」（列表倒数第二项，非触底）。"""
+    norm = _normalize_row_label(text)
+    if not norm:
+        return False
+    markers = (
+        "添加访客",
+        "addguest",
+        "addaguest",
+    )
+    return any(marker in norm for marker in markers) and "新用户" not in norm and "newuser" not in norm
+
+
+def is_scene6_add_new_user_row(text: Optional[str]) -> bool:
+    """焦点行是否为「添加新用户」（列表最后一项）。"""
+    norm = _normalize_row_label(text)
+    if not norm:
+        return False
+    markers = (
+        "添加新用户",
+        "addnewuser",
+        "addnew",
+        "newuser",
+    )
+    return any(marker in norm for marker in markers)
+
+
+def get_scene6_focus_row_y(image: Any) -> Optional[int]:
+    """场景6 档案列表当前绿框焦点行的 Y 中心（960×540）。"""
+    bgr = _as_bgr_ndarray(image)
+    if bgr is None:
+        return None
+    return detect_focused_row_y(bgr)
 
 
 def _green_ratio(hsv_crop: np.ndarray) -> float:
@@ -232,27 +389,150 @@ def _crop_region(image: np.ndarray, left: int, top: int, right: int, bottom: int
 
 
 # 场景 203 Xbox 主页左上角（960×540）：显示名 + 邮箱分两行
-HOME203_NAME_LEFT = 32
-HOME203_NAME_TOP = 14
-HOME203_NAME_RIGHT = 280
-HOME203_NAME_BOTTOM = 52
-HOME203_EMAIL_LEFT = 32
-HOME203_EMAIL_TOP = 44
-HOME203_EMAIL_RIGHT = 400
-HOME203_EMAIL_BOTTOM = 82
+# NAME_LEFT 略右移，避免裁进头像蓝圈（易误读为 y 等噪声）
+HOME203_NAME_LEFT = 95
+HOME203_NAME_TOP = 42
+HOME203_NAME_RIGHT = 215
+HOME203_NAME_BOTTOM = 57
+HOME203_EMAIL_LEFT = 86
+HOME203_EMAIL_TOP = 57
+HOME203_EMAIL_RIGHT = 244
+HOME203_EMAIL_BOTTOM = 69
 HOME203_PROFILE_LEFT = HOME203_NAME_LEFT
 HOME203_PROFILE_TOP = HOME203_NAME_TOP
 HOME203_PROFILE_RIGHT = HOME203_NAME_RIGHT
 HOME203_PROFILE_BOTTOM = HOME203_NAME_BOTTOM
+
+# Xbox 主页绿框焦点探针（960×540）：档案头像 / FC 磁贴 / 顶栏设置
+HOME203_AVATAR_FOCUS_LEFT = 45
+HOME203_AVATAR_FOCUS_TOP = 37
+HOME203_AVATAR_FOCUS_RIGHT = 85
+HOME203_AVATAR_FOCUS_BOTTOM = 76
+HOME203_FC_FOCUS_LEFT = 52
+HOME203_FC_FOCUS_TOP = 264
+HOME203_FC_FOCUS_RIGHT = 184
+HOME203_FC_FOCUS_BOTTOM = 399
+HOME203_SETTINGS_FOCUS_LEFT = 535
+HOME203_SETTINGS_FOCUS_TOP = 36
+HOME203_SETTINGS_FOCUS_RIGHT = 574
+HOME203_SETTINGS_FOCUS_BOTTOM = 75
+# 主页滚到底时「返回顶部」按钮（按 A 后页面回顶且焦点落在 FC 磁贴）
+HOME203_BACK_TO_TOP_FOCUS_LEFT = 47
+HOME203_BACK_TO_TOP_FOCUS_TOP = 439
+HOME203_BACK_TO_TOP_FOCUS_RIGHT = 203
+HOME203_BACK_TO_TOP_FOCUS_BOTTOM = 499
+
+
+def _focus_green_ratio(
+    image: np.ndarray,
+    left: int,
+    top: int,
+    right: int,
+    bottom: int,
+) -> float:
+    """Xbox 系统 UI 绿框焦点在区域内的像素占比。"""
+    crop = _crop_region(image, left, top, right, bottom)
+    if crop.size == 0:
+        return 0.0
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (35, 80, 80), (85, 255, 255))
+    return float(mask.mean()) / 255.0
+
+
+def read_home_focus_state(image: Any) -> dict:
+    """
+    读取 Xbox 主页当前焦点探针（档案头像 / FC 磁贴 / 设置 / 返回顶部）。
+
+    用于主页门禁与 FC 磁贴导航；绿框仅在预标定矩形内检测，非全屏识别。
+    """
+    empty = {
+        "profile_focused": False,
+        "fc_focused": False,
+        "settings_focused": False,
+        "back_to_top_focused": False,
+        "profile_ratio": 0.0,
+        "fc_ratio": 0.0,
+        "settings_ratio": 0.0,
+        "back_to_top_ratio": 0.0,
+    }
+    if image is None:
+        return empty
+    image = _as_bgr_ndarray(image)
+    if image is None:
+        return empty
+
+    profile_ratio = _focus_green_ratio(
+        image,
+        HOME203_AVATAR_FOCUS_LEFT,
+        HOME203_AVATAR_FOCUS_TOP,
+        HOME203_AVATAR_FOCUS_RIGHT,
+        HOME203_AVATAR_FOCUS_BOTTOM,
+    )
+    fc_ratio = _focus_green_ratio(
+        image,
+        HOME203_FC_FOCUS_LEFT,
+        HOME203_FC_FOCUS_TOP,
+        HOME203_FC_FOCUS_RIGHT,
+        HOME203_FC_FOCUS_BOTTOM,
+    )
+    settings_ratio = _focus_green_ratio(
+        image,
+        HOME203_SETTINGS_FOCUS_LEFT,
+        HOME203_SETTINGS_FOCUS_TOP,
+        HOME203_SETTINGS_FOCUS_RIGHT,
+        HOME203_SETTINGS_FOCUS_BOTTOM,
+    )
+    back_to_top_ratio = _focus_green_ratio(
+        image,
+        HOME203_BACK_TO_TOP_FOCUS_LEFT,
+        HOME203_BACK_TO_TOP_FOCUS_TOP,
+        HOME203_BACK_TO_TOP_FOCUS_RIGHT,
+        HOME203_BACK_TO_TOP_FOCUS_BOTTOM,
+    )
+    profile_focused = profile_ratio >= 0.05 and profile_ratio > fc_ratio
+    fc_focused = fc_ratio >= 0.05 and fc_ratio >= profile_ratio
+    settings_focused = settings_ratio >= 0.08
+    back_to_top_focused = (
+        back_to_top_ratio >= 0.05
+        and back_to_top_ratio > fc_ratio
+        and back_to_top_ratio > profile_ratio
+    )
+    return {
+        "profile_focused": profile_focused,
+        "fc_focused": fc_focused,
+        "settings_focused": settings_focused,
+        "back_to_top_focused": back_to_top_focused,
+        "profile_ratio": profile_ratio,
+        "fc_ratio": fc_ratio,
+        "settings_ratio": settings_ratio,
+        "back_to_top_ratio": back_to_top_ratio,
+    }
+
+
+def is_home_profile_avatar_focused(image: Any, *, min_ratio: float = 0.05) -> bool:
+    """主页左上角档案头像是否获焦（绿框探针，且优于 FC 磁贴）。"""
+    state = read_home_focus_state(image)
+    return bool(state["profile_focused"])
+
+
+def is_home_fc_tile_focused(image: Any, *, min_ratio: float = 0.05) -> bool:
+    """主页 FC 磁贴是否获焦（绿框探针）。"""
+    state = read_home_focus_state(image)
+    return bool(state["fc_focused"])
+
+
+def is_home_back_to_top_focused(image: Any) -> bool:
+    """主页底部「返回顶部」是否获焦（绿框探针）。"""
+    state = read_home_focus_state(image)
+    return bool(state["back_to_top_focused"])
 
 
 def read_home_profile_identity(image: Any) -> HomeProfileIdentity:
     """OCR Xbox 主页左上角显示名与邮箱。"""
     if image is None:
         return HomeProfileIdentity("", "")
-    if hasattr(image, "data"):
-        image = image.data
-    if not isinstance(image, np.ndarray):
+    image = _as_bgr_ndarray(image)
+    if image is None:
         return HomeProfileIdentity("", "")
 
     name_crop = _crop_region(
@@ -306,9 +586,8 @@ def read_focused_gamertag(image: Any) -> str:
     """对当前焦点档案行 OCR Gamertag。"""
     if image is None:
         return ""
-    if hasattr(image, "data"):
-        image = image.data
-    if not isinstance(image, np.ndarray):
+    image = _as_bgr_ndarray(image)
+    if image is None:
         return ""
 
     row_y = detect_focused_row_y(image)
@@ -320,9 +599,8 @@ def read_list_gamertags(image: Any) -> List[str]:
     """OCR 左侧列表全部可见 Gamertag（det+rec 兜底）。"""
     if image is None:
         return []
-    if hasattr(image, "data"):
-        image = image.data
-    if not isinstance(image, np.ndarray):
+    image = _as_bgr_ndarray(image)
+    if image is None:
         return []
 
     crop = _crop_region(
@@ -347,9 +625,8 @@ def scene6_list_layout_present(image: Any) -> bool:
     """当前帧是否具备场景 6 档案列表布局（绿框焦点或列表 OCR 有内容）。"""
     if image is None:
         return False
-    if hasattr(image, "data"):
-        image = image.data
-    if not isinstance(image, np.ndarray):
+    image = _as_bgr_ndarray(image)
+    if image is None:
         return False
     if detect_focused_row_y(image) is not None:
         return True

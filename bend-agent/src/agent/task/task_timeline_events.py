@@ -168,6 +168,10 @@ def schedule_task_timeline_event(
     throttle_sec: float = 0.0,
 ) -> None:
     """同步上下文（F8 热键 / DataChannel close 回调）中安全调度上报。"""
+    from ..core.agent_shutdown import is_agent_shutting_down
+
+    if is_agent_shutting_down():
+        return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:

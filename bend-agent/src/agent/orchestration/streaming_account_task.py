@@ -228,10 +228,13 @@ class StreamingAccountTask:
             return AutomationResult(success=False, error_code="EXCEPTION", message=str(exc))
         finally:
             # 最终兜底：任务不得遗留 input 焦点、解码槽或注册表项。
-            input_gate.set_automation_active(False)
-            focus.pop(task_id)
-            release_decode_slot(self._decode_mode)
-            SessionRegistry.get_instance().remove(task_id)
+            try:
+                input_gate.set_automation_active(False)
+                focus.pop(task_id)
+                release_decode_slot(self._decode_mode)
+                SessionRegistry.get_instance().remove(task_id)
+            except (asyncio.CancelledError, GeneratorExit):
+                pass
 
     async def _ensure_display_after_stream(self) -> bool:
         try:

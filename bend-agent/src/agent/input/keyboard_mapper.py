@@ -679,6 +679,7 @@ class KeyboardMapper:
         callback = self._hotkey_callbacks.get(key)
         if callback is None:
             return
+        self.logger.info("[调试热键] %s", key.upper())
         try:
             callback()
         except Exception as exc:
@@ -688,11 +689,10 @@ class KeyboardMapper:
         """
         Windows：轮询 F8/F9/F10 边沿触发（SDL KEYDOWN 常丢失功能键）。
 
-        串流窗口获焦且走 SDL 转发时跳过，避免与 feed_pygame_event 双触发（ON→OFF）。
+        功能键始终走 Win32（全局检测），不因串流窗口获焦 + SDL 转发而跳过。
+        SDL 与 Win32 同时命中时由 _invoke_hotkey 防抖与 _hotkey_win32_down 去重。
         """
         if sys.platform != "win32" or not self._hotkey_callbacks:
-            return
-        if stream_foreground and self._external_event_pump:
             return
         try:
             import ctypes
@@ -701,7 +701,7 @@ class KeyboardMapper:
         except Exception:
             return
 
-        for name, callback in self._hotkey_callbacks.items():
+        for name in self._hotkey_callbacks:
             vk = _WIN32_VK_HOTKEY.get(name.lower())
             if vk is None:
                 continue

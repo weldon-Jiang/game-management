@@ -96,18 +96,10 @@ async def _await_fresh_video_after_reconnect(
 
 
 async def _wake_xbox_after_reconnect(context: Any, task_logger) -> None:
-    """待机/屏保态 Xbox 需 Guide 或 A 唤醒；重连成功后发 Nexus 脉冲。"""
-    from .controller_write import XSRP_NEXUS, send_button_pulse
+    """待机/屏保态 Xbox 需 Guide 或 A 唤醒；重连成功后发唤醒序列。"""
+    from .xbox_sleep_wake import try_wake_xbox_from_sleep
 
-    session = getattr(context, "xbox_session", None)
-    if session is None:
-        return
-    log = task_logger or logger
-    ok = await send_button_pulse(session, XSRP_NEXUS, context=context)
-    if ok:
-        log.info("重连后已发送 Nexus 唤醒脉冲")
-    else:
-        log.warning("重连后 Nexus 唤醒脉冲失败（input 可能未就绪）")
+    await try_wake_xbox_from_sleep(context, task_logger, reason="after_reconnect")
 
 
 async def _verify_input_after_reconnect(context: Any, task_logger) -> bool:
@@ -210,6 +202,10 @@ def bind_stream_health_handlers(context: Any, task_logger=None) -> None:
 
 def request_input_recovery(context: Any, *, force: bool = False) -> None:
     """同步上下文（F8 热键）触发 input 恢复，不阻塞 SDL 事件线程。"""
+    from ..core.agent_shutdown import is_agent_shutting_down
+
+    if is_agent_shutting_down():
+        return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -226,6 +222,10 @@ async def kick_input_recovery(
     """
     人工接管 / 按键无效时恢复 input：先轻量 handshake，失败则调度全量重连。
     """
+    from ..core.agent_shutdown import is_agent_shutting_down
+
+    if is_agent_shutting_down():
+        return False
     log = task_logger or logger
     from .stream_keepalive import is_input_channel_open, try_restore_input_channel
 

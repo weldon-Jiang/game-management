@@ -130,8 +130,25 @@ FC_LAUNCH_MANUAL_REASON = (
     "请手工在主机上启动游戏并进入 UT 界面，完成后在平台点击「恢复任务」继续自动化。"
 )
 
-# Xbox「您是谁」列表最大扫描行数（含「添加新用户」前的档案）
-MAX_PROFILE_LIST_SLOTS = 12
+# Xbox「您是谁」列表向下扫描安全上限（正常触底以绿框 Y 不变为准）
+DEFAULT_SCENE6_MAX_DOWN_STEPS = 50
+DEFAULT_SCENE6_FOCUS_UNCHANGED_THRESHOLD = 2
+DEFAULT_HOME_OCR_MAX_ATTEMPTS = 3
+DEFAULT_HOME_OCR_RETRY_INTERVAL_SEC = 1.5
+# 兼容旧常量名
+MAX_PROFILE_LIST_SLOTS = DEFAULT_SCENE6_MAX_DOWN_STEPS
+
+# 主页门禁 OCR 前：从 FC 磁贴焦点导航至档案头像（十字键一步一 OCR）
+HOME_PROFILE_FOCUS_NAV_SEQUENCE = ("DPAD_UP", "DPAD_LEFT")
+HOME_PROFILE_FOCUS_EXPLORE_SEQUENCE = ("DPAD_UP", "DPAD_LEFT", "DPAD_UP", "DPAD_LEFT")
+
+# 账号门禁完成后进 FC：从头像获焦导航至 FC 磁贴（典型为十字键下）
+HOME_PROFILE_TO_FC_NAV_SEQUENCE = ("DPAD_DOWN",)
+# 探索序列含多次 DPAD_DOWN，在可滚动主页上易滚到底部「返回顶部」；优先 Guide→主页
+HOME_FC_FOCUS_EXPLORE_SEQUENCE = (
+    "DPAD_RIGHT",
+    "DPAD_LEFT",
+)
 
 
 class ManualInterventionRequired(Exception):
@@ -356,13 +373,14 @@ class AccountSwitcher:
         self, target_account_id: str
     ) -> AccountSwitchResult:
         """
-        Step4 账号门禁（固定顺序，自动化路径标准入口）。
+        Step4 账号门禁（分步固化流程）。
 
         1. 回到 Xbox 主页 (203/1/24)
-        2. OCR 判断当前签入档案是否为目标游戏账号
-        3. 已匹配 → 跳过切档；未匹配 → 走 3/5/6 完整切档
+        2. **先 OCR**（不论 FC 磁贴/头像是否获焦；裁剪区待截图标定）
+        3. OCR 与目标游戏账号 **匹配** → 进 FC 分支（磁贴获焦，launch_fc 按 A）
+        4. OCR **不匹配** → 切换账号分支（场景 3/5/6…，本阶段不按 A 进 FC）
 
-        注意：串流账号邮箱仅用于 Step1 连主机，主页显示以 OCR 游戏账号为准。
+        注意：串流账号邮箱仅用于 Step1 连主机，主页档案以 OCR 游戏账号为准。
         """
         start_time = time.time()
         from_account = self._current_account_id
@@ -410,11 +428,18 @@ class AccountSwitcher:
                         "请手动关闭 FC/弹窗回到主页后重试"
                     )
 
+                self.logger.info(
+                    "账号门禁：先 OCR 比对（不依赖磁贴/头像焦点，裁剪区见 profile_name_reader HOME203_*）"
+                )
                 await self._log_home_profile_gate(target_account)
 
                 if await self._is_already_signed_in_as(target_account):
                     self._current_account_id = target_account_id
                     target_account.mark_login()
+                    self.logger.info(
+                        "账号门禁：OCR 匹配 → 进 FC 分支（准备磁贴获焦）"
+                    )
+                    await self._prepare_home_for_fc_launch()
                     time_taken = time.time() - start_time
                     self.logger.info(
                         "账号门禁：主页已是目标 %s，跳过切档 (耗时: %.2fs)",
@@ -430,13 +455,14 @@ class AccountSwitcher:
                     )
 
                 self.logger.info(
-                    "账号门禁：主页档案与目标 %s 不一致，开始 Xbox 系统切档",
+                    "账号门禁：OCR 不匹配目标 %s → 切换账号分支（场景 3/5/6）",
                     target_account.gamertag,
                 )
                 await self._perform_full_account_switch(target_account)
 
             self._current_account_id = target_account_id
             target_account.mark_login()
+            # 切档完成后由 launch_fc_to_ut_menu 进入 FC 分支（不在此处按 A）
 
             time_taken = time.time() - start_time
             self.logger.info(
@@ -474,28 +500,235 @@ class AccountSwitcher:
         """切换至目标游戏账号；实现为 ensure_target_game_account 别名。"""
         return await self.ensure_target_game_account(target_account_id)
 
-    async def _log_home_profile_gate(self, target_account: GameAccount) -> None:
-        """主页门禁：记录当前主页档案与目标游戏账号（OCR，仅日志）。"""
+    async def _log_home_focus_ocr_step(self, step_label: str) -> None:
+        """主页门禁导航：每步十字键后 OCR + 焦点探针，便于调试图与坐标。"""
         norm = await self._get_normalized_frame()
         if norm is None:
-            self.logger.info(
-                "账号门禁：无法截帧，跳过主页档案 OCR 预览"
-            )
+            self.logger.info("主页焦点 OCR [%s]: 无法截帧", step_label)
             return
 
-        from ..vision.profile_name_reader import read_home_profile_identity
+        from ..vision.profile_name_reader import (
+            read_home_focus_state,
+            read_home_profile_identity,
+        )
 
         identity = read_home_profile_identity(norm)
+        focus = read_home_focus_state(norm)
         self.logger.info(
-            "账号门禁：主页档案 name=%r email=%r → 目标 gamertag=%s email=%s",
+            "主页焦点 OCR [%s]: name=%r email=%r profile_focus=%s fc_focus=%s "
+            "settings_focus=%s back_to_top=%s "
+            "probes=(avatar=%.3f fc=%.3f settings=%.3f btt=%.3f)",
+            step_label,
             identity.display_name,
             identity.email_text,
+            focus.get("profile_focused"),
+            focus.get("fc_focused"),
+            focus.get("settings_focused"),
+            focus.get("back_to_top_focused"),
+            focus.get("profile_ratio", 0.0),
+            focus.get("fc_ratio", 0.0),
+            focus.get("settings_ratio", 0.0),
+            focus.get("back_to_top_ratio", 0.0),
+        )
+
+    async def _ensure_profile_avatar_focused_for_ocr(self) -> bool:
+        """
+        将焦点从 FC 磁贴移至左上角档案头像（十字键上 → 左）。
+
+        当前门禁流程 **先 OCR 不调用本方法**；保留供后续切换账号分支细化时使用。
+        """
+        if not await self._is_on_xbox_home():
+            self.logger.debug("非 Xbox 主页，跳过档案头像焦点导航")
+            return False
+
+        if await self._is_profile_avatar_focused():
+            await self._log_home_focus_ocr_step("profile_already_focused")
+            return True
+
+        self.logger.info(
+            "主页门禁：先将焦点移至档案头像（当前 FC磁贴=%s 设置=%s）",
+            await self._is_fc_tile_focused(),
+            await self._is_top_settings_focused(),
+        )
+        await self._log_home_focus_ocr_step("before_nav")
+
+        for label, moves in (
+            ("preset", HOME_PROFILE_FOCUS_NAV_SEQUENCE),
+            ("explore", HOME_PROFILE_FOCUS_EXPLORE_SEQUENCE),
+        ):
+            for move in moves:
+                if await self._is_profile_avatar_focused():
+                    self.logger.info("档案头像已获焦（导航前已到位）")
+                    return True
+                await self._press_button(move, duration=0.1)
+                await asyncio.sleep(0.35)
+                await self._log_home_focus_ocr_step(f"{label}_{move}")
+                if await self._is_profile_avatar_focused():
+                    self.logger.info(
+                        "档案头像已获焦（%s %s 后）", label, move
+                    )
+                    return True
+
+        self.logger.warning(
+            "未能将焦点移至档案头像，仍继续主页 OCR（请检查绿框探针坐标）"
+        )
+        return False
+
+    async def _activate_back_to_top_if_focused(self) -> bool:
+        """
+        主页滚到底时焦点常在「返回顶部」；按 A 后页面回顶且绿框落在 FC 磁贴。
+
+        返回 True 表示 FC 磁贴已获焦，可继续 launch_fc。
+        """
+        norm = await self._get_normalized_frame()
+        if norm is None:
+            return False
+        from ..vision.profile_name_reader import is_home_back_to_top_focused
+
+        if not is_home_back_to_top_focused(norm):
+            return False
+
+        self.logger.info(
+            "检测到「返回顶部」获焦，按 A 滚回顶部（预期 FC 磁贴获焦）"
+        )
+        await self._press_button("A", duration=0.1)
+        await asyncio.sleep(1.0)
+        if await self._is_fc_tile_focused():
+            self.logger.info("返回顶部触发后 FC 磁贴已获焦")
+            return True
+        self.logger.warning("返回顶部触发后 FC 磁贴仍未获焦")
+        return False
+
+    async def _return_home_via_guide_for_fc_tile(self) -> bool:
+        """
+        Guide(NEXUS) → 引导页选「主页」→ 回 Xbox 主页。
+
+        系统默认会将绿框落在 FC 游戏磁贴上（比盲目十字键下滚到底更可靠）。
+        对应 scene_transitions 场景2 transition_id=1 → 场景203。
+        """
+        if await self._is_fc_tile_focused():
+            return True
+
+        self.logger.info(
+            "Guide → 主页：尝试回到 Xbox 主页（预期默认选中 FC 磁贴）"
+        )
+        await self._press_guide_button()
+        if not await self._wait_for_guide(timeout=5.0):
+            self.logger.warning("Guide 未打开引导页 (scene2)")
+            await self._press_button("B", duration=0.08)
+            await asyncio.sleep(0.3)
+            return False
+
+        ok = await self._run_scene_transition(2, 1)
+        await asyncio.sleep(0.8)
+        if not ok and not await self._is_on_xbox_home():
+            self.logger.warning("Guide→主页 转移未确认 (2→203)")
+            await self._press_button("B", duration=0.08)
+            await asyncio.sleep(0.3)
+            return False
+
+        if await self._is_fc_tile_focused():
+            self.logger.info("Guide→主页后 FC 磁贴已获焦")
+            return True
+
+        if await self._is_on_xbox_home():
+            self.logger.warning(
+                "Guide→主页成功但 FC 磁贴探针未确认，请检查 HOME203_FC_FOCUS_*"
+            )
+        return False
+
+    async def _ensure_fc_tile_focused_for_launch(self) -> bool:
+        """
+        进 FC 分支：将焦点从头像/顶栏移至 FC 磁贴绿框。
+
+        典型路径（头像已获焦）：十字键下 → FC 磁贴高亮；每步 OCR+焦点探针。
+        仅在 launch_fc / 按 A 启动前调用，账号切档流程中禁止按 A 进 FC。
+        """
+        if not await self._is_on_xbox_home():
+            self.logger.debug("非 Xbox 主页，跳过 FC 磁贴焦点导航")
+            return False
+
+        if await self._is_fc_tile_focused():
+            await self._log_home_focus_ocr_step("fc_tile_already_focused")
+            return True
+
+        if await self._activate_back_to_top_if_focused():
+            return True
+
+        if await self._return_home_via_guide_for_fc_tile():
+            return True
+
+        self.logger.info(
+            "进 FC 前：将焦点移至 FC 磁贴（profile_focus=%s）",
+            await self._is_profile_avatar_focused(),
+        )
+        await self._log_home_focus_ocr_step("before_fc_nav")
+
+        for label, moves in (
+            ("preset", HOME_PROFILE_TO_FC_NAV_SEQUENCE),
+            ("explore", HOME_FC_FOCUS_EXPLORE_SEQUENCE),
+        ):
+            for move in moves:
+                if await self._is_fc_tile_focused():
+                    return True
+                await self._press_button(move, duration=0.1)
+                await asyncio.sleep(0.35)
+                await self._log_home_focus_ocr_step(f"fc_{label}_{move}")
+                if await self._is_fc_tile_focused():
+                    self.logger.info("FC 磁贴已获焦（%s %s 后）", label, move)
+                    return True
+                if await self._activate_back_to_top_if_focused():
+                    return True
+
+        if await self._activate_back_to_top_if_focused():
+            return True
+
+        if await self._return_home_via_guide_for_fc_tile():
+            return True
+
+        self.logger.warning("未能将焦点移至 FC 磁贴")
+        return False
+
+    async def _prepare_home_for_fc_launch(self) -> None:
+        """
+        账号门禁/切档完成后：确认在主页且 FC 磁贴获焦，供 launch_fc 按 A 启动。
+
+        与账号分支对称：账号 OCR/切档在头像获焦；进 FC 在磁贴获焦后按 A。
+        """
+        if not await self._is_on_xbox_home():
+            self.logger.info("账号门禁后不在主页，尝试 B/Guide 退回")
+            if not await self._ensure_xbox_home_before_account_switch(timeout=30.0):
+                self.logger.warning("账号门禁后未能回到 Xbox 主页，进 FC 可能失败")
+                return
+
+        if await self._is_fc_tile_focused():
+            self.logger.info("账号门禁后 FC 磁贴已获焦，可直接 launch_fc")
+            return
+
+        if await self._ensure_fc_tile_focused_for_launch():
+            return
+
+        self.logger.info("FC 磁贴预设导航未成功，回退通用磁贴导航")
+        await self._navigate_to_fc_tile_on_home()
+
+    async def _log_home_profile_gate(self, target_account: GameAccount) -> None:
+        """主页门禁：当前帧 OCR + 焦点探针（仅日志，不移动焦点）。"""
+        """主页门禁：记录当前主页档案与目标游戏账号（OCR，仅日志）。"""
+        await self._log_home_focus_ocr_step(
+            f"gate_ocr_{target_account.gamertag or 'unknown'}"
+        )
+        self.logger.info(
+            "账号门禁：目标 gamertag=%s email=%s",
             target_account.gamertag,
             self._mask_email(target_account.email),
         )
 
     async def _perform_full_account_switch(self, target_account: GameAccount) -> None:
-        """主页门禁未匹配时，走 Guide → 场景3/5/6 完整切档。"""
+        """
+        主页门禁未匹配时，走 Guide → 场景3/5/6 完整切档。
+
+        进入前焦点应在档案头像（ensure_profile_avatar）；本流程不按 A 启动 FC。
+        """
         if await self._wait_for_scene(3, timeout=2.0, strict=True):
             self.logger.info("已在场景3（档案和系统），跳过引导页")
         else:
@@ -525,17 +758,9 @@ class AccountSwitcher:
             raise RuntimeError("未进入档案和系统页面（场景3）")
 
         if target_account.is_new_user and target_account.needs_credential_login():
-            await self._select_add_switch()
-            if not await self._wait_for_scene(5, timeout=15.0):
-                raise RuntimeError("未进入添加和切换页面（场景5）")
-            await self._select_add_new_user()
-            await self._login_with_credentials(
-                target_account.email, target_account.password
-            )
-            host_tag = await self._read_host_gamertag_from_profile_list()
-            await self._sync_host_gamertag(
-                target_account, host_gamertag=host_tag
-            )
+            from .scenes.add_account import AddAccountScene
+
+            await AddAccountScene(self).run(target_account)
         else:
             if not await self._select_add_switch():
                 raise RuntimeError("未进入添加和切换页面（场景5）")
@@ -560,36 +785,91 @@ class AccountSwitcher:
                     email=target_account.email,
                     host_display_name=target_account.host_display_name,
                 )
-                target_account.position_index = found_index
-                await self._confirm_account_selection()
+                if found_index is None:
+                    self.logger.info(
+                        "场景6列表扫尽未找到 %s，走添加账号",
+                        target_account.gamertag,
+                    )
+                    from .scenes.add_account import AddAccountScene
 
-                if await self._wait_for_scene(10, timeout=10.0):
-                    if target_account.email and target_account.password:
+                    await AddAccountScene(self).run(target_account)
+                else:
+                    target_account.position_index = found_index
+                    await self._confirm_account_selection()
+
+                    if await self._wait_for_scene(10, timeout=10.0):
+                        if target_account.email and target_account.password:
+                            self.logger.info(
+                                "切换后出现登录页，使用凭据登录 (%s)",
+                                target_account.gamertag,
+                            )
+                            await self._login_with_credentials(
+                                target_account.email, target_account.password
+                            )
+                            host_tag = await self._read_host_gamertag_from_profile_list()
+                            await self._sync_host_gamertag(
+                                target_account, host_gamertag=host_tag
+                            )
+                        else:
+                            raise RuntimeError(
+                                f"档案 {target_account.gamertag} 需重新登录，"
+                                "但未配置邮箱/密码凭据"
+                            )
+                    else:
                         self.logger.info(
-                            "切换后出现登录页，使用凭据登录 (%s)",
+                            "档案切换完成，未出现登录页 (%s)",
                             target_account.gamertag,
-                        )
-                        await self._login_with_credentials(
-                            target_account.email, target_account.password
                         )
                         host_tag = await self._read_host_gamertag_from_profile_list()
                         await self._sync_host_gamertag(
                             target_account, host_gamertag=host_tag
                         )
-                    else:
-                        raise RuntimeError(
-                            f"档案 {target_account.gamertag} 需重新登录，"
-                            "但未配置邮箱/密码凭据"
-                        )
-                else:
-                    self.logger.info(
-                        "档案切换完成，未出现登录页 (%s)",
-                        target_account.gamertag,
-                    )
-                    host_tag = await self._read_host_gamertag_from_profile_list()
-                    await self._sync_host_gamertag(
-                        target_account, host_gamertag=host_tag
-                    )
+
+        from ..core.config import config as app_config
+
+        post_home_wait = float(
+            app_config.get("step4.post_switch_home_wait_sec", 25.0)
+        )
+        if not await self._ensure_xbox_home_before_account_switch(
+            timeout=post_home_wait
+        ):
+            self.logger.warning(
+                "切档/添加完成后未能确认回到 Xbox 主页，交由 launch_fc 兜底"
+            )
+
+    async def run_add_account_flow(self, target_account: GameAccount) -> None:
+        """
+        添加新用户场景（scene5/6 → 添加新用户 → scene10 凭据登录）。
+
+        供 is_new_user、scene6 列表扫尽等分支统一调用。
+        """
+        if not target_account.email or not target_account.password:
+            raise RuntimeError(
+                f"档案 {target_account.gamertag or target_account.account_id} "
+                "需在主机添加，但未配置邮箱/密码凭据"
+            )
+
+        on_scene6 = await self._wait_for_scene6_confirmed(timeout=1.5, strict=False)
+        if on_scene6:
+            if not await self._ensure_scene6_add_new_user_focused():
+                raise RuntimeError("未能定位「添加新用户」行")
+            await self._press_button("A", duration=0.1)
+            await asyncio.sleep(2.0)
+        else:
+            if not await self._select_add_switch():
+                raise RuntimeError("未进入添加和切换页面（场景5）")
+            if not await self._wait_for_scene(5, timeout=15.0):
+                raise RuntimeError("未进入添加和切换页面（场景5）")
+            await self._select_add_new_user()
+
+        await self._login_with_credentials(
+            target_account.email, target_account.password
+        )
+        host_tag = await self._read_host_gamertag_from_profile_list()
+        await self._sync_host_gamertag(target_account, host_gamertag=host_tag)
+        if host_tag:
+            target_account.gamertag = host_tag
+            target_account.host_display_name = host_tag
 
     async def launch_fc_to_ut_menu(self, timeout: float = 90.0) -> bool:
         """切换账号后从 Xbox 主页启动 FC 并进入 UT 相关界面。"""
@@ -675,35 +955,35 @@ class AccountSwitcher:
             return True
         return False
 
-    async def _is_already_signed_in_as(self, target_account: GameAccount) -> bool:
-        """
-        主页左上角 OCR 显示名/邮箱，与 gamertag、host_display_name、邮箱本地段比对。
+    def _scene6_max_down_steps(self) -> int:
+        from ..core.config import config as app_config
 
-        匹配则跳过引导切换；OCR 失败时保存裁剪 debug 图便于调区域。
-        """
-        current_ut = await self._detect_any_scene(list(FC_UT_TARGET_SCENES), strict=False)
-        if current_ut in FC_UT_TARGET_SCENES:
-            return False
-
-        norm = await self._get_normalized_frame()
-        if norm is None:
-            self.logger.debug("主页档案 OCR 跳过：无法截帧")
-            return False
-
-        from ..vision.profile_name_reader import (
-            profile_matches_game_account,
-            read_home_profile_identity,
+        return int(
+            app_config.get(
+                "step4.scene6_max_down_steps", DEFAULT_SCENE6_MAX_DOWN_STEPS
+            )
         )
 
-        identity = read_home_profile_identity(norm)
-        if not identity.display_name and not identity.email_text:
-            on_home = await self._detect_any_scene([203, 1, 24], strict=False)
-            self.logger.info(
-                "主页左上角 OCR 未识别档案 (scene=%s)，继续账号切换流程",
-                on_home,
+    def _scene6_focus_unchanged_threshold(self) -> int:
+        from ..core.config import config as app_config
+
+        return int(
+            app_config.get(
+                "step4.scene6_focus_unchanged_threshold",
+                DEFAULT_SCENE6_FOCUS_UNCHANGED_THRESHOLD,
             )
-            await self._save_home_ocr_debug(norm, identity, target_account.gamertag)
-            return False
+        )
+
+    def _home_profile_matches_target(
+        self, identity: Any, target_account: GameAccount
+    ) -> Tuple[bool, str]:
+        """主页 OCR 结果是否与目标游戏账号一致（含短 gamertag 邮箱交叉确认）。"""
+        from ..vision.profile_name_reader import (
+            email_local_part,
+            gamertag_matches,
+            normalize_gamertag,
+            profile_matches_game_account,
+        )
 
         matched, reason = profile_matches_game_account(
             identity.display_name,
@@ -714,12 +994,6 @@ class AccountSwitcher:
             combined_text=identity.combined,
         )
         if matched and reason == "gamertag":
-            from ..vision.profile_name_reader import (
-                email_local_part,
-                gamertag_matches,
-                normalize_gamertag,
-            )
-
             if len(normalize_gamertag(target_account.gamertag)) < 4:
                 email_ok = False
                 if target_account.email:
@@ -739,35 +1013,171 @@ class AccountSwitcher:
                         "短 gamertag 匹配但邮箱未交叉确认，仍执行账号切换"
                     )
                     matched = False
-        if not matched:
-            self.logger.info(
-                "主页 OCR name=%r email=%r 与目标 gamertag=%s host=%s email=%s 不一致，需切换",
-                identity.display_name,
-                identity.email_text,
-                target_account.gamertag,
-                target_account.host_display_name or "(none)",
-                self._mask_email(target_account.email),
-            )
-            await self._save_home_ocr_debug(norm, identity, target_account.gamertag)
+        return matched, reason
+
+    async def _read_scene6_focus_y(self) -> Optional[int]:
+        """场景6 当前绿框焦点行 Y 中心。"""
+        frame = await self._frame_getter() if self._frame_getter else None
+        if frame is None:
+            return None
+        image = _extract_frame_image(frame)
+        if self._scene_detector and hasattr(self._scene_detector, "_normalize_frame"):
+            image = self._scene_detector._normalize_frame(image, 6)
+        from ..vision.profile_name_reader import get_scene6_focus_row_y
+
+        return get_scene6_focus_row_y(image)
+
+    async def _ensure_scene6_add_new_user_focused(self) -> bool:
+        """将绿框移至「添加新用户」行（已在则直接返回）。"""
+        from ..vision.profile_name_reader import is_scene6_add_new_user_row
+
+        detected = await self._read_focused_gamertag_from_frame()
+        if is_scene6_add_new_user_row(detected):
+            return True
+        return await self._scroll_scene6_to_add_new_user()
+
+    async def _scroll_scene6_to_add_new_user(self) -> bool:
+        """
+        在场景6 列表中向下滚动，直到「添加新用户」获焦或绿框 Y 触底。
+        """
+        from ..vision.profile_name_reader import is_scene6_add_new_user_row
+
+        unchanged_steps = 0
+        threshold = self._scene6_focus_unchanged_threshold()
+        max_steps = self._scene6_max_down_steps()
+        prev_y = await self._read_scene6_focus_y()
+
+        for step in range(max_steps):
+            detected = await self._read_focused_gamertag_from_frame()
+            if is_scene6_add_new_user_row(detected):
+                self.logger.info("已定位「添加新用户」行（step=%s）", step)
+                return True
+
+            await self._press_button("DPAD_DOWN", duration=0.1)
+            await asyncio.sleep(0.18)
+            new_y = await self._read_scene6_focus_y()
+            if new_y is not None and prev_y is not None and new_y == prev_y:
+                unchanged_steps += 1
+                if unchanged_steps >= threshold:
+                    detected = await self._read_focused_gamertag_from_frame()
+                    if is_scene6_add_new_user_row(detected):
+                        return True
+                    self.logger.warning(
+                        "场景6 绿框触底但 OCR 未识别「添加新用户」"
+                    )
+                    return False
+            else:
+                unchanged_steps = 0
+            prev_y = new_y
+
+        return is_scene6_add_new_user_row(
+            await self._read_focused_gamertag_from_frame()
+        )
+
+    async def _is_already_signed_in_as(self, target_account: GameAccount) -> bool:
+        """
+        主页左上角 OCR 显示名/邮箱，与 gamertag、host_display_name、邮箱本地段比对。
+
+        匹配则跳过引导切换。左上角文案会轮播（仅 gamertag / gamertag+邮箱 / 多档案），
+        故 **未命中也重试** 至 home_ocr_max_attempts，全部轮次均未命中才走切档。
+        """
+        from ..core.config import config as app_config
+        from ..vision.profile_name_reader import read_home_profile_identity
+
+        current_ut = await self._detect_any_scene(list(FC_UT_TARGET_SCENES), strict=False)
+        if current_ut in FC_UT_TARGET_SCENES:
             return False
 
-        on_home = await self._detect_any_scene([203, 1, 24], strict=False)
-        home_like = on_home in XBOX_HOME_SCENES or await self._is_home_203_dominant()
-        if home_like:
+        max_attempts = int(
+            app_config.get(
+                "step4.home_ocr_max_attempts", DEFAULT_HOME_OCR_MAX_ATTEMPTS
+            )
+        )
+        interval = float(
+            app_config.get(
+                "step4.home_ocr_retry_interval_sec",
+                DEFAULT_HOME_OCR_RETRY_INTERVAL_SEC,
+            )
+        )
+
+        last_identity = None
+        last_norm = None
+        for attempt in range(1, max_attempts + 1):
+            norm = await self._get_normalized_frame()
+            if norm is None:
+                self.logger.debug(
+                    "主页档案 OCR 第 %s/%s 次：无法截帧", attempt, max_attempts
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(interval)
+                continue
+
+            identity = read_home_profile_identity(norm)
+            last_identity = identity
+            last_norm = norm
+
+            if not identity.display_name and not identity.email_text:
+                self.logger.info(
+                    "主页 OCR 第 %s/%s 次未读到档案，等待轮播",
+                    attempt,
+                    max_attempts,
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(interval)
+                    continue
+                break
+
+            matched, reason = self._home_profile_matches_target(
+                identity, target_account
+            )
+            if matched:
+                on_home = await self._detect_any_scene([203, 1, 24], strict=False)
+                home_like = on_home in XBOX_HOME_SCENES or await self._is_home_203_dominant()
+                if home_like:
+                    self.logger.info(
+                        "主页 OCR 匹配目标 (name=%r, email=%r, by=%s, attempt=%s)，跳过账号切换",
+                        identity.display_name,
+                        identity.email_text,
+                        reason,
+                        attempt,
+                    )
+                else:
+                    self.logger.info(
+                        "主页 OCR 匹配目标 (name=%r, by=%s, scene=%s, attempt=%s)，跳过账号切换",
+                        identity.display_name,
+                        reason,
+                        on_home,
+                        attempt,
+                    )
+                return True
+
             self.logger.info(
-                "主页 OCR 匹配目标 (name=%r, email=%r, by=%s)，跳过账号切换",
+                "主页 OCR 第 %s/%s 次未匹配目标 %s (name=%r email=%r)，等待轮播",
+                attempt,
+                max_attempts,
+                target_account.gamertag,
                 identity.display_name,
                 identity.email_text,
-                reason,
             )
-        else:
+            if attempt < max_attempts:
+                await asyncio.sleep(interval)
+
+        if last_norm is not None and last_identity is not None:
             self.logger.info(
-                "主页 OCR 匹配目标 (name=%r, by=%s, scene=%s)，跳过账号切换",
-                identity.display_name,
-                reason,
+                "主页 OCR %s 次均未匹配目标 %s，继续账号切换流程",
+                max_attempts,
+                target_account.gamertag,
+            )
+            await self._save_home_ocr_debug(
+                last_norm, last_identity, target_account.gamertag
+            )
+        elif last_identity is not None:
+            on_home = await self._detect_any_scene([203, 1, 24], strict=False)
+            self.logger.info(
+                "主页左上角 OCR 未识别档案 (scene=%s)，继续账号切换流程",
                 on_home,
             )
-        return True
+        return False
 
     async def _verify_scene6_layout(self) -> bool:
         """场景 6 除模板外，要求左侧档案列表布局（绿框或列表 OCR）。"""
@@ -920,10 +1330,22 @@ class AccountSwitcher:
         return f"{local[:2]}***@{domain}"
 
     async def _navigate_to_fc_tile_on_home(self):
-        """从 Xbox 主页（顶栏可能聚焦「设置」）移焦到 FC 游戏磁贴。"""
+        """从 Xbox 主页移焦到 FC 游戏磁贴（进 FC 分支，磁贴获焦后才按 A）。"""
         if await self._is_fc_tile_focused():
             self.logger.info("FC 磁贴已获焦，跳过磁贴导航")
             return
+
+        if await self._activate_back_to_top_if_focused():
+            return
+
+        if await self._return_home_via_guide_for_fc_tile():
+            return
+
+        if await self._is_profile_avatar_focused():
+            self.logger.info("从头像获焦导航至 FC 磁贴（十字键下）")
+            if await self._ensure_fc_tile_focused_for_launch():
+                return
+
         self.logger.info("导航至 FC 游戏磁贴（离开顶栏设置焦点）")
         for _ in range(4):
             await self._press_button('B', duration=0.08)
@@ -933,15 +1355,20 @@ class AccountSwitcher:
             for _ in range(2):
                 await self._press_button('B', duration=0.08)
                 await asyncio.sleep(0.25)
-        for _ in range(3):
+
+        if await self._return_home_via_guide_for_fc_tile():
+            return
+
+        # 从头像区单次下移至 FC；避免多次 DOWN 滚到页面底部
+        if await self._is_profile_avatar_focused() or await self._is_on_xbox_home():
             await self._press_button('DPAD_DOWN', duration=0.1)
-            await asyncio.sleep(0.25)
-        for _ in range(6):
+            await asyncio.sleep(0.35)
             if await self._is_fc_tile_focused():
-                self.logger.info("FC 磁贴绿框焦点已确认")
+                self.logger.info("FC 磁贴绿框焦点已确认（单次 DPAD_DOWN）")
                 return
-            await self._press_button('DPAD_LEFT', duration=0.1)
-            await asyncio.sleep(0.2)
+            if await self._activate_back_to_top_if_focused():
+                return
+
         if await self._detect_any_scene([203], strict=False) == 203:
             self.logger.info("scene203 校验通过（FC 磁贴可见）")
         else:
@@ -950,9 +1377,40 @@ class AccountSwitcher:
     async def _is_on_xbox_home(self) -> bool:
         """当前帧是否为 Xbox 主机主页（203/1/24 或 scene203 高置信）。"""
         home = await self._detect_any_scene(list(XBOX_HOME_SCENES), strict=False)
-        if home in XBOX_HOME_SCENES:
-            return True
-        return await self._is_home_203_dominant()
+        on_home = home in XBOX_HOME_SCENES or await self._is_home_203_dominant()
+        if not on_home:
+            return False
+
+        # 设置/档案页常误匹配 scene 24；账号 UI 模板置信更高时先 B 退回真主页
+        if self._scene_detector and self._frame_getter:
+            frame = await self._frame_getter()
+            image = _extract_frame_image(frame) if frame else None
+            if image is not None:
+                home_best = 0.0
+                account_best = 0.0
+                for scene_id in XBOX_HOME_SCENES:
+                    result = self._scene_detector.recognize_scene(
+                        image,
+                        scene_id=scene_id,
+                        threshold=self._scene_match_threshold(scene_id),
+                    )
+                    home_best = max(home_best, result.confidence)
+                for scene_id in (3, 4, 5, 6):
+                    result = self._scene_detector.recognize_scene(
+                        image,
+                        scene_id=scene_id,
+                        threshold=self._scene_match_threshold(scene_id),
+                    )
+                    account_best = max(account_best, result.confidence)
+                if account_best >= 0.75 and account_best > home_best + 0.05:
+                    self.logger.debug(
+                        "账号 UI 置信度高于主页模板 (account=%.3f home=%.3f)，"
+                        "不视为 Xbox 主页",
+                        account_best,
+                        home_best,
+                    )
+                    return False
+        return True
 
     async def _ensure_xbox_home_before_account_switch(
         self,
@@ -1245,14 +1703,27 @@ class AccountSwitcher:
             return False
 
     async def _launch_fc_from_home_tile(self) -> bool:
-        """在主页 FC 磁贴获焦后按 A 启动，仍停 203 则重试。"""
+        """在主页 FC 磁贴获焦后按 A 启动；头像获焦时先下移至磁贴，禁止在头像上按 A。"""
         for attempt in range(1, FC_LAUNCH_203_MAX_ATTEMPTS + 1):
             if await self._detect_any_scene(list(FC_UT_TARGET_SCENES), strict=False):
                 return True
 
+            if await self._is_profile_avatar_focused() and not await self._is_fc_tile_focused():
+                self.logger.info(
+                    "启动 FC 前焦点在档案头像，先移至 FC 磁贴（不按 A）"
+                )
+                await self._ensure_fc_tile_focused_for_launch()
+
             if not await self._is_fc_tile_focused():
                 self.logger.info("启动 FC 前确认磁贴焦点")
                 await self._navigate_to_fc_tile_on_home()
+
+            if not await self._is_fc_tile_focused():
+                self.logger.warning(
+                    "FC 磁贴仍未获焦，跳过本轮 A（避免在头像/顶栏误启动）"
+                )
+                await self._save_debug_frame(203)
+                continue
 
             if not await self._recover_input_if_closed():
                 self.logger.error("启动 FC 时 input 通道不可用")
@@ -1306,26 +1777,48 @@ class AccountSwitcher:
         self, region: Tuple[int, int, int, int], *, min_ratio: float = 0.04
     ) -> bool:
         """检测 960x540 坐标系内 Xbox 绿框焦点（streaming 风格区域探针）。"""
-        import cv2
-        import numpy as np
+        from ..vision.profile_name_reader import _focus_green_ratio
 
         norm = await self._get_normalized_frame()
         if norm is None:
             return False
         left, top, right, bottom = region
-        crop = norm[top:bottom, left:right]
-        if crop.size == 0:
-            return False
-        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, (35, 80, 80), (85, 255, 255))
-        ratio = float(mask.mean()) / 255.0
+        ratio = _focus_green_ratio(norm, left, top, right, bottom)
         return ratio >= min_ratio
 
+    async def _is_profile_avatar_focused(self) -> bool:
+        norm = await self._get_normalized_frame()
+        if norm is None:
+            return False
+        from ..vision.profile_name_reader import is_home_profile_avatar_focused
+
+        return is_home_profile_avatar_focused(norm)
+
     async def _is_top_settings_focused(self) -> bool:
-        return await self._green_ratio_in_region((518, 32, 582, 82), min_ratio=0.08)
+        from ..vision.profile_name_reader import (
+            HOME203_SETTINGS_FOCUS_BOTTOM,
+            HOME203_SETTINGS_FOCUS_LEFT,
+            HOME203_SETTINGS_FOCUS_RIGHT,
+            HOME203_SETTINGS_FOCUS_TOP,
+        )
+
+        return await self._green_ratio_in_region(
+            (
+                HOME203_SETTINGS_FOCUS_LEFT,
+                HOME203_SETTINGS_FOCUS_TOP,
+                HOME203_SETTINGS_FOCUS_RIGHT,
+                HOME203_SETTINGS_FOCUS_BOTTOM,
+            ),
+            min_ratio=0.08,
+        )
 
     async def _is_fc_tile_focused(self) -> bool:
-        return await self._green_ratio_in_region((14, 396, 38, 484), min_ratio=0.05)
+        norm = await self._get_normalized_frame()
+        if norm is None:
+            return False
+        from ..vision.profile_name_reader import is_home_fc_tile_focused
+
+        return is_home_fc_tile_focused(norm)
 
     def _scene_match_threshold(self, scene_id: int) -> float:
         """Xbox 系统 UI / 小键盘场景允许略低于 schema 默认阈值的匹配。"""
@@ -1800,22 +2293,16 @@ class AccountSwitcher:
                 if not await self._wait_for_scene(3):
                     raise RuntimeError("未进入档案和系统页面（场景3）")
 
-                await self._select_add_switch()
-                if not await self._wait_for_scene(5, timeout=15.0):
-                    raise RuntimeError("未进入添加和切换页面（场景5）")
+                stub = GameAccount(
+                    account_id=account_id or "",
+                    gamertag="",
+                    email=email,
+                    password=password,
+                )
+                from .scenes.add_account import AddAccountScene
 
-                await self._select_add_new_user()
-                await self._login_with_credentials(email, password)
-                host_tag = await self._read_host_gamertag_from_profile_list()
-                if account_id and host_tag:
-                    stub = GameAccount(
-                        account_id=account_id,
-                        gamertag=host_tag,
-                        email=email,
-                    )
-                    await self._sync_host_gamertag(
-                        stub, host_gamertag=host_tag
-                    )
+                await AddAccountScene(self).run(stub)
+                host_tag = stub.host_display_name or stub.gamertag or None
 
             return AccountSwitchResult(
                 success=True,
@@ -1832,12 +2319,11 @@ class AccountSwitcher:
             )
 
     async def _select_add_new_user(self):
-        """场景5 滚到底部选中「添加新用户」。"""
+        """场景5/6 滚到底部选中「添加新用户」（绿框 Y 触底探针）。"""
         self.logger.info("选择「添加新用户」")
-        for i in range(12):
-            await self._press_button('DPAD_DOWN', duration=0.1)
-            await asyncio.sleep(0.18)
-        await self._press_button('A', duration=0.1)
+        if not await self._ensure_scene6_add_new_user_focused():
+            self.logger.warning("未能确认「添加新用户」获焦，仍尝试按 A")
+        await self._press_button("A", duration=0.1)
         await asyncio.sleep(2.0)
 
     async def _scroll_profile_list_to_top(self) -> None:
@@ -1862,15 +2348,17 @@ class AccountSwitcher:
         *,
         email: Optional[str] = None,
         host_display_name: Optional[str] = None,
-        max_slots: int = MAX_PROFILE_LIST_SLOTS,
-    ) -> int:
+        max_slots: Optional[int] = None,
+    ) -> Optional[int]:
         """
         在场景6列表中按 gamertag / 邮箱 / 主机显示名 查找档案。
 
-        返回匹配到的列表索引（0=最上方）。
+        返回匹配到的列表索引（0=最上方）；扫尽未找到返回 None。
         """
         from ..vision.profile_name_reader import (
             account_identity_matches,
+            is_scene6_add_guest_row,
+            is_scene6_add_new_user_row,
             read_list_gamertags,
         )
 
@@ -1884,9 +2372,23 @@ class AccountSwitcher:
         await self._scroll_profile_list_to_top()
         await asyncio.sleep(0.35)
 
+        if max_slots is None:
+            max_slots = self._scene6_max_down_steps()
+        unchanged_steps = 0
+        threshold = self._scene6_focus_unchanged_threshold()
+        prev_y = await self._read_scene6_focus_y()
+
         for slot in range(max_slots):
             detected = await self._read_focused_gamertag_from_frame()
-            if account_identity_matches(
+
+            if is_scene6_add_new_user_row(detected):
+                self.logger.info(
+                    "场景6 已到达「添加新用户」行，未找到档案 %s", gamertag
+                )
+                await self._save_debug_frame(6)
+                return None
+
+            if not is_scene6_add_guest_row(detected) and account_identity_matches(
                 detected,
                 gamertag=gamertag,
                 email=email,
@@ -1905,7 +2407,7 @@ class AccountSwitcher:
                 if frame is not None:
                     image = _extract_frame_image(frame)
                     if self._scene_detector and hasattr(
-                        self._scene_detector, '_normalize_frame'
+                        self._scene_detector, "_normalize_frame"
                     ):
                         image = self._scene_detector._normalize_frame(image, 6)
                     for line in read_list_gamertags(image):
@@ -1923,14 +2425,28 @@ class AccountSwitcher:
                             )
                             return slot
 
-            if slot < max_slots - 1:
-                await self._press_button('DPAD_DOWN', duration=0.1)
-                await asyncio.sleep(0.35)
+            await self._press_button("DPAD_DOWN", duration=0.1)
+            await asyncio.sleep(0.35)
+            new_y = await self._read_scene6_focus_y()
+            if new_y is not None and prev_y is not None and new_y == prev_y:
+                unchanged_steps += 1
+                if unchanged_steps >= threshold:
+                    self.logger.info(
+                        "场景6 绿框 Y 连续 %s 次未变，列表扫尽（slot=%s）",
+                        threshold,
+                        slot,
+                    )
+                    await self._save_debug_frame(6)
+                    return None
+            else:
+                unchanged_steps = 0
+            prev_y = new_y
 
         await self._save_debug_frame(6)
-        raise RuntimeError(
-            f"场景6未找到档案 gamertag={gamertag}（已扫描 {max_slots} 行）"
+        self.logger.info(
+            "场景6 达到最大 DOWN 步数 (%s)，未找到档案 %s", max_slots, gamertag
         )
+        return None
 
     async def _confirm_account_selection(self):
         if not await self._verify_scene6_layout():
