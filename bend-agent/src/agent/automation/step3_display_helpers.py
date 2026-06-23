@@ -13,6 +13,14 @@ from ..task.task_context import AgentTaskContext
 from ..vision.frame_utils import frame_to_bgr_ndarray
 
 
+def is_window_display_enabled() -> bool:
+    """agent.yaml window.default_mode：full 默认开窗，headless 跳过 SDL。"""
+    from ..core.config import config as app_config
+
+    mode = str(app_config.get("window.default_mode", "full")).lower()
+    return mode != "headless"
+
+
 def _load_window_settings() -> Dict[str, Any]:
     """读取 agent.yaml window.* 与 close_terminates_task 映射。"""
     from ..core.config import config as app_config

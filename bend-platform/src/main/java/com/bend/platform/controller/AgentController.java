@@ -55,6 +55,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AgentController {
 
+    private static final int MAX_CONCURRENT_TASKS_CEILING = 200;
+
     private final AgentInstanceService agentInstanceService;
     private final MerchantRegistrationCodeService registrationCodeService;
     private final TaskService taskService;
@@ -99,6 +101,14 @@ public class AgentController {
         if (codeEntity.getExpireTime() != null && codeEntity.getExpireTime().isBefore(LocalDateTime.now())) {
             log.warn("Agent注册失败 - 注册码已过期: {}", registrationCode);
             return ApiResponse.error(400, "注册码已过期");
+        }
+
+        if (maxConcurrentTasks != null) {
+            if (maxConcurrentTasks < 1 || maxConcurrentTasks > MAX_CONCURRENT_TASKS_CEILING) {
+                return ApiResponse.error(
+                        400,
+                        "maxConcurrentTasks must be between 1 and " + MAX_CONCURRENT_TASKS_CEILING);
+            }
         }
 
         String merchantId = codeEntity.getMerchantId();

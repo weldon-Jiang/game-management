@@ -35,6 +35,7 @@ Run migrations in lexicographic (filename) order on an existing database. For fr
 - `V20260609_003_xbox_host_merchant_unique.sql` — replace global uk_xbox_id with uk_merchant_xbox (merchant_id, xbox_id).
 - `V20260612_001_streaming_account_auth_cache.sql` — xblive token_doc platform cache for cross-Agent Step1 reuse.
 - `V20260614_001_agent_keyboard_mapping.sql` — per-Agent keyboard-to-gamepad mapping JSON on agent_instance.
+- `V20260623_001_agent_max_concurrent_default.sql` — raise agent_instance.max_concurrent_tasks default from 5 to 20 (SLA baseline).
 
 ## Legacy locations (removed)
 

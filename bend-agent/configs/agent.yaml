@@ -193,10 +193,11 @@ vision:
 # 任务执行器配置（高并发支持）
 # ----------------------------------------------
 task:
-  # 0=不限制，压测后按实测写入正整数
-  max_concurrent: 0
-  max_concurrent_gpu: 0
-  max_xbox_sessions: 0
+  min_concurrent: 20              # SLA 底线（串流+Step4）；硬件不足时启动告警
+  capacity_cap: 50                # 首期配置封顶；0=仅硬件测算
+  max_concurrent: 50              # 调度器 Semaphore，与 capacity_cap 对齐
+  max_concurrent_gpu: 12          # GPU 解码槽；超出 auto 降级 CPU
+  max_xbox_sessions: 50
   result_ttl: 3600
   cleanup_interval: 300
 
@@ -218,7 +219,7 @@ window:
   min_width: 800
   min_height: 600
   fit_aspect: true
-  default_mode: headless       # Phase A 无头；focus 时升 full
+  default_mode: full              # full=默认开窗；headless=跳过 SDL（显式 opt-in）
   display_fps_max: 30           # 对齐 streaming XsrpConfig.DECODE_VIDEO_FPS
   title_template: "{email}"     # 对齐 Worker.window_tile
   close_terminates_task: true   # 关窗确认后终止串流+自动化并上报平台

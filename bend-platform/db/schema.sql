@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS `agent_instance` (
     `port` INT DEFAULT 8888 COMMENT 'Agent监听端口',
     `version` VARCHAR(32) DEFAULT NULL COMMENT 'Agent版本号',
     `status` VARCHAR(16) DEFAULT 'offline' COMMENT '状态：online-在线,offline-离线,uninstalled-已卸载',
-    `max_concurrent_tasks` INT DEFAULT 5 COMMENT '最大并发任务数',
+    `max_concurrent_tasks` INT DEFAULT 20 COMMENT '最大并发任务数',
     `last_heartbeat` DATETIME DEFAULT NULL COMMENT '最后心跳时间',
     `last_online_time` DATETIME DEFAULT NULL COMMENT '最后上线时间',
     `uninstall_reason` VARCHAR(255) DEFAULT NULL COMMENT '卸载原因',

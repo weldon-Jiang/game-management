@@ -146,45 +146,15 @@ class SystemResourceDetector:
         return recommended
 
     @classmethod
-    def recommend_max_concurrent_tasks(
-        cls,
-        browser_memory_per_instance: int = 150,  # MB
-        cpu_cores_per_task: float = 0.2,  # 每个任务使用的CPU核心比例
-        safety_factor: float = 0.7  # 安全系数
-    ) -> int:
+    def recommend_max_concurrent_tasks(cls) -> int:
         """
-        根据系统资源推荐最大并发任务数（不依赖账号数量）
-        
-        参数：
-        - browser_memory_per_instance: 每个浏览器实例预估内存（MB）
-        - cpu_cores_per_task: 每个任务使用的CPU核心比例
-        - safety_factor: 安全系数（预留资源给系统）
-        
-        返回：
-        - 推荐的最大并发任务数
-        
-        说明：
-        - 使用总内存（物理内存配置）计算，而非可用内存
-        - 这样最大并发数是固定的，不会随系统运行而变化
+        根据系统资源推荐最大并发任务数（串流 + Step4，见 streaming_capacity）。
+
+        返回 declared_capacity：max(min_concurrent, min(hardware, capacity_cap))。
         """
-        cpu_count = cls.get_cpu_count()
-        total_mem_mb, _ = cls.get_memory_info()
-        
-        # 基于CPU计算
-        max_by_cpu = int(cpu_count / cpu_cores_per_task * safety_factor)
-        
-        # 基于总内存计算（预留2GB给系统和其他应用）
-        # 使用总内存而非可用内存，确保并发数固定
-        available_for_browsers = max(0, total_mem_mb - 2048)
-        max_by_memory = int(available_for_browsers / browser_memory_per_instance)
-        
-        # 取最小值
-        recommended = min(max_by_cpu, max_by_memory)
-        
-        # 确保至少1个并发，最多50个
-        recommended = max(1, min(50, recommended))
-        
-        return recommended
+        from .concurrency_limits import resolve_declared_capacity_from_config
+
+        return resolve_declared_capacity_from_config()
     
     @classmethod
     def get_system_info(cls) -> Dict[str, any]:

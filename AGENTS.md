@@ -385,6 +385,7 @@ task:
 
 ## 📚 相关文档
 
+- [需求计划索引与编号登记表](docs/PLAN_INDEX.md) · [计划命名规范](.cursor/plans/NAMING.md)
 - [Step4 场景设计与新增手册](bend-agent/docs/STEP4_SCENE_DESIGN.md)
 - [架构合理性评审](docs/review/01_architecture_review.md)
 - [Agent 并发设计分析](docs/review/02_agent_concurrency.md)

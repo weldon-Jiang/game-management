@@ -227,6 +227,10 @@ class AgentTaskContext:
         if self.pause_event is None:
             self.pause_event = asyncio.Event()
             self.pause_event.set()
+        from ..automation.step3_display_helpers import is_window_display_enabled
+
+        if not is_window_display_enabled():
+            self.enable_window_display = False
 
     def update_step_status(self, step_name: str, status: TaskStepStatus,
                           message: str = "", error: Optional[str] = None):

@@ -22,7 +22,7 @@ public class AgentLoadControlServiceImpl implements AgentLoadControlService {
     private static final Logger log = LoggerFactory.getLogger(AgentLoadControlServiceImpl.class);
     private static final String AGENT_TASK_COUNT_PREFIX = "agent:task:count:";
     private static final String REDIS_PROBE_KEY = "agent:load:redis_probe";
-    private static final int DEFAULT_MAX_CONCURRENT_TASKS = 5;
+    private static final int DEFAULT_MAX_CONCURRENT_TASKS = 20;
 
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;

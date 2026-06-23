@@ -15,6 +15,7 @@ from ..core.machine_identity import machine_identity
 from ..core.install_guard import assert_single_install
 from ..core.paths import get_agent_root
 from ..core.system_resource_detector import SystemResourceDetector
+from ..core.concurrency_limits import resolve_declared_capacity_from_config
 
 
 @dataclass
@@ -107,7 +108,7 @@ class RegistrationActivator:
         detector = SystemResourceDetector()
         info = detector.get_system_info()
         
-        max_concurrent = detector.recommend_concurrent_tasks(50)
+        max_concurrent = resolve_declared_capacity_from_config()
 
         return AgentSystemInfo(
             os_type=info['platform'],

@@ -468,6 +468,42 @@ class CentralManager:
 
         self.logger.info("Bend Agent stopped")
 
+    def _log_capacity_sla(self) -> None:
+        """注册后记录 declared_capacity；硬件低于 SLA 底线时 ERROR。"""
+        from .system_resource_detector import SystemResourceDetector
+        from .concurrency_limits import (
+            get_task_capacity_cap,
+            get_task_min_concurrent,
+            resolve_declared_capacity_from_config,
+        )
+        from .streaming_capacity import CapacityInputs, estimate_hardware_capacity
+        from ..vision.decode_strategy import get_max_gpu_decodes
+
+        total_mem_mb, _ = SystemResourceDetector.get_memory_info()
+        inputs = CapacityInputs(
+            cpu_count=SystemResourceDetector.get_cpu_count(),
+            total_memory_mb=total_mem_mb,
+            max_gpu_slots=get_max_gpu_decodes(),
+        )
+        estimate = estimate_hardware_capacity(inputs)
+        declared = resolve_declared_capacity_from_config()
+        min_sla = get_task_min_concurrent()
+        if estimate.hardware_estimate < min_sla:
+            self.logger.error(
+                "硬件测算 %s 路 < SLA 底线 %s 路（串流+Step4）；"
+                "declared_capacity=%s 由 min_concurrent 兜底，压测可能失败",
+                estimate.hardware_estimate,
+                min_sla,
+                declared,
+            )
+        else:
+            self.logger.info(
+                "容量: hardware=%s declared=%s capacity_cap=%s",
+                estimate.hardware_estimate,
+                declared,
+                get_task_capacity_cap(),
+            )
+
     async def register(self) -> bool:
         """
         向后端注册Agent
@@ -485,13 +521,16 @@ class CentralManager:
             self._agent_info.port = config.get('agent.port', 8888)
             
             from .system_resource_detector import SystemResourceDetector
+            from .concurrency_limits import resolve_declared_capacity_from_config
+
             sys_info = SystemResourceDetector.get_system_info()
-            max_tasks = SystemResourceDetector.recommend_max_concurrent_tasks()
+            max_tasks = resolve_declared_capacity_from_config()
             
             self._agent_info.os_type = sys_info.get('platform')
             self._agent_info.os_version = sys_info.get('platform_version')
             self._agent_info.cpu_count = sys_info.get('cpu_count')
             self._agent_info.max_concurrent_tasks = max_tasks
+            self._log_capacity_sla()
             
             result = await self.api.register(
                 registration_code=self.registration_code,
