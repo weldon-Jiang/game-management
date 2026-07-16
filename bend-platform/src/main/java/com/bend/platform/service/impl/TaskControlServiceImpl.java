@@ -160,12 +160,11 @@ public class TaskControlServiceImpl implements TaskControlService {
 
         markStreamingAccountsBusy(streamingAccountId, agentId, gameAccounts);
 
-        if (!reused) {
-            automationUsageService.deductPointsAndRecordUsage(
-                    merchantId, userId, task.getId(),
-                    streamingAccountId, streamingAccount.getDisplayLabel(),
-                    gameAccounts.size(), hostsForBilling.size(), billingValidation);
-        }
+        // 每次启动串流都计费——新建或复用任务均产生新的自动化会话，应独立扣点
+        automationUsageService.deductPointsAndRecordUsage(
+                merchantId, userId, task.getId(),
+                streamingAccountId, streamingAccount.getDisplayLabel(),
+                gameAccounts.size(), hostsForBilling.size(), billingValidation);
 
         final Task taskToDispatch = task;
         taskWsDispatchService.dispatchAfterCommit(() -> taskExecutorService.executeTask(taskToDispatch));

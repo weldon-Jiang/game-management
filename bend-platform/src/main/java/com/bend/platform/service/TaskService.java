@@ -151,17 +151,6 @@ public interface TaskService {
     Task fail(String taskId, String errorMessage, boolean idempotent);
 
     /**
-     * 取消任务
-     *
-     * <p>仅 pending 状态的任务可以取消，转为 cancelled 终态。
-     *
-     * @param taskId 任务ID
-     * @return 取消后的任务
-     * @throws BusinessException 任务不存在或状态不允许取消
-     */
-    Task cancel(String taskId);
-
-    /**
      * 重试失败任务
      *
      * <p>将 failed 状态的任务重置为 pending，清空错误信息和重试计数。
@@ -171,36 +160,6 @@ public interface TaskService {
      * @throws BusinessException 任务不存在或状态不允许重试
      */
     Task retry(String taskId);
-
-    /**
-     * 暂停任务
-     *
-     * <p>将 running 状态的任务转为 paused 状态。
-     *
-     * @param taskId 任务ID
-     * @return 暂停后的任务
-     */
-    void pause(String taskId);
-
-    /**
-     * 恢复任务
-     *
-     * <p>将 paused 状态的任务转为 running 状态。
-     *
-     * @param taskId 任务ID
-     * @return 恢复后的任务
-     */
-    void resume(String taskId);
-
-    /**
-     * 停止任务
-     *
-     * <p>将 running 或 paused 状态的任务强制停止，转为 stopped 状态。
-     *
-     * @param taskId 任务ID
-     * @return 停止后的任务
-     */
-    void stop(String taskId);
 
     /**
      * 删除任务（软删除）

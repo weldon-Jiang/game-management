@@ -5,7 +5,6 @@ import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.*;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
-import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.*;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
@@ -37,7 +36,7 @@ public class BillingController {
     private final MerchantBalanceService balanceService;
     private final SubscriptionService subscriptionService;
     private final RechargeCardService rechargeCardService;
-    private final MerchantMapper merchantMapper;
+    private final MerchantService merchantService;
 
     /**
      * 获取商户余额信息
@@ -57,7 +56,7 @@ public class BillingController {
         result.put("totalConsumed", balance.getTotalConsumed());
         result.put("version", balance.getVersion());
 
-        Merchant merchant = merchantMapper.selectById(merchantId);
+        Merchant merchant = merchantService.findById(merchantId);
         if (merchant != null) {
             result.put("vipLevel", merchant.getVipLevel() != null ? merchant.getVipLevel() : 0);
             result.put("totalAmount", merchant.getTotalAmount());

@@ -12,6 +12,9 @@
 
 # Docker
 docker/.env
+docker/.env.dev
+docker/.env.sit
+docker/.env.prod
 
 # 日志
 *.log

@@ -39,6 +39,11 @@ public interface MerchantService {
     Merchant findById(String id);
 
     /**
+     * 批量根据ID查询商户名称映射。
+     */
+    java.util.List<Merchant> findByIds(java.util.Collection<String> ids);
+
+    /**
      * 分页查询所有商户
      *
      * @param request 分页请求参数
@@ -60,6 +65,11 @@ public interface MerchantService {
      * @param status 新状态 (active/expired/suspended)
      */
     void updateStatus(String id, String status);
+
+    /**
+     * 通用全字段更新（Controller 禁直调 Mapper，必须经此入口）。
+     */
+    void updateMerchant(Merchant merchant);
 
     /**
      * 删除商户

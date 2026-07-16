@@ -253,75 +253,6 @@
       @started="onWizardStarted"
     />
 
-    <!-- 遗留单步对话框（保留兼容，默认隐藏） -->
-    <el-dialog
-      v-if="false"
-      v-model="automationDialogVisible"
-      title="启动自动化"
-      width="500px"
-      :close-on-click-modal="false"
-    >
-      <el-form label-width="100px">
-        <!-- 流媒体账号（只读显示） -->
-        <el-form-item label="流媒体账号">
-          <span class="automation-account-name">{{ selectedAccount?.email }}</span>
-        </el-form-item>
-        <!-- Agent选择 -->
-        <el-form-item label="选择Agent" required>
-          <el-select
-            v-model="selectedAgentId"
-            placeholder="请选择在线Agent"
-            style="width: 100%"
-            filterable
-          >
-            <el-option
-              v-for="agent in onlineAgents"
-              :key="agent.agentId"
-              :label="formatAgentLabel(agent)"
-              :value="agent.agentId"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="主机（可选）">
-          <el-select
-            v-model="selectedHostId"
-            placeholder="不指定，由 Agent 自动匹配"
-            style="width: 100%"
-            clearable
-            filterable
-          >
-            <el-option
-              v-for="host in boundHosts"
-              :key="host.id"
-              :label="`${host.name || host.xboxId} (${host.ipAddress || '-'})`"
-              :value="host.id"
-            />
-          </el-select>
-        </el-form-item>
-        <!-- 游戏操作类型 -->
-        <el-form-item label="游戏操作类型" required>
-          <el-select
-            v-model="selectedGameActionType"
-            placeholder="请选择游戏操作类型"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="type in visibleGameActionTypes"
-              :key="type.code"
-              :label="type.name"
-              :value="type.code"
-            />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="automationDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="automationLoading" @click="handleStartAutomation">
-          启动
-        </el-button>
-      </template>
-    </el-dialog>
-
     <!-- 批量导入对话框 -->
     <el-dialog
       v-model="importDialogVisible"
@@ -482,8 +413,8 @@ import StartWizard from '@/components/automation/StartWizard.vue'
 import StreamingAccountHostDialog from '@/components/streaming/StreamingAccountHostDialog.vue'
 import { Plus, Monitor, Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, merchantGroupApi, subscriptionApi, xboxApi } from '@/api'
-import { getAgentDisplayName, getStreamingAccountStatusText, getStreamingAccountStatusType, getAccountTaskStatusText, getAccountTaskStatusType, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag, isPlatformAutomationSupported, getVisibleGameActionTypes, isSamePlatformType } from '@/utils/constants'
+import { streamingApi, merchantApi, agentApi, automationApi, gameAccountApi, subscriptionApi, xboxApi } from '@/api'
+import { getAgentDisplayName, getStreamingAccountStatusText, getStreamingAccountStatusType, PLATFORM_TYPES, getPlatformTypeText, getPlatformTypeTag, isPlatformAutomationSupported, getVisibleGameActionTypes, isSamePlatformType } from '@/utils/constants'
 
 // ==================== 状态定义 ====================
 
@@ -522,10 +453,6 @@ const loading = ref(false)
  */
 const submitLoading = ref(false)
 
-/**
- * 自动化操作loading状态
- */
-const automationLoading = ref(false)
 
 /**
  * 账号列表数据
@@ -569,10 +496,6 @@ const dialogVisible = ref(false)
  */
 const recordsDialogVisible = ref(false)
 
-/**
- * 启动自动化对话框可见性
- */
-const automationDialogVisible = ref(false)
 
 /**
  * 对话框类型
@@ -953,56 +876,6 @@ const loadBoundHosts = async (streamingAccountId, accountPlatform = 'xbox') => {
  * - 生成Agent下拉选项的显示文本
  * - 格式：短ID... - 商户名 (在线状态)
  *
- * 参数说明：
- * - agent: Agent对象
- *
- * 返回值：
- * - 格式化的显示文本
- */
-const formatAgentLabel = (agent) => {
-  const name = getAgentDisplayName(agent)
-  const status = agent.status === 'online' ? '在线' : '离线'
-  return `${name} (${status})`
-}
-
-/**
- * 启动自动化任务
- *
- * 功能说明：
- * - 验证是否已选择Agent
- * - 调用启动自动化API
- * - 成功后关闭对话框并刷新列表
- */
-const handleStartAutomation = async () => {
-  if (!selectedAgentId.value) {
-    ElMessage.warning('请选择Agent')
-    return
-  }
-
-  automationLoading.value = true
-  try {
-    const res = await automationApi.start({
-      streamingAccountIds: [selectedAccount.value.id],
-      agentId: selectedAgentId.value,
-      hostId: selectedHostId.value || undefined,
-      gameActionType: selectedGameActionType.value,
-      description: `为账号 ${selectedAccount.value.email} 启动自动化`
-    })
-
-    if (res.code === 0 || res.code === 200) {
-      const data = res.data || {}
-      ElMessage.success(`已创建${data.total || 1}个自动化任务`)
-      automationDialogVisible.value = false
-      loadData()
-    } else {
-      ElMessage.error(res.message || '启动自动化失败')
-    }
-  } catch (error) {
-    ElMessage.error('启动自动化失败')
-  } finally {
-    automationLoading.value = false
-  }
-}
 
 /**
  * 停止自动化任务

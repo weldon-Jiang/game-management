@@ -1,16 +1,14 @@
 package com.bend.platform.controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.dto.MerchantRegistrationCodeDto;
 import com.bend.platform.dto.MerchantRegistrationCodePageRequest;
-import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.MerchantRegistrationCode;
-import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.MerchantRegistrationCodeService;
+import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.MerchantRegistrationCodeService.ActivationResult;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
@@ -45,7 +43,7 @@ import java.util.stream.Collectors;
 public class MerchantRegistrationCodeController {
 
     private final MerchantRegistrationCodeService registrationCodeService;
-    private final MerchantMapper merchantMapper;
+    private final MerchantService merchantService;
     private final AgentInstanceService agentInstanceService;
 
     /**
@@ -234,9 +232,7 @@ public class MerchantRegistrationCodeController {
 
         Map<String, String> merchantNameMap = new HashMap<>();
         if (!CollectionUtils.isEmpty(merchantIds)) {
-            LambdaQueryWrapper<Merchant> wrapper = new LambdaQueryWrapper<>();
-            wrapper.in(Merchant::getId, merchantIds);
-            merchantMapper.selectList(wrapper).forEach(m -> merchantNameMap.put(m.getId(), m.getName()));
+            merchantService.findByIds(merchantIds).forEach(m -> merchantNameMap.put(m.getId(), m.getName()));
         }
 
         List<String> agentIds = records.stream()

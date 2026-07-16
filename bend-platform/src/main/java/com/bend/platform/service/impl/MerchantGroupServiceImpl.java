@@ -52,8 +52,13 @@ public class MerchantGroupServiceImpl implements MerchantGroupService {
             return null;
         }
 
+        return getByVipLevel(merchantVipLevel);
+    }
+
+    @Override
+    public MerchantGroup getByVipLevel(int vipLevel) {
         LambdaQueryWrapper<MerchantGroup> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(MerchantGroup::getVipLevel, merchantVipLevel)
+        wrapper.eq(MerchantGroup::getVipLevel, vipLevel)
                .eq(MerchantGroup::getStatus, "active")
                .last("LIMIT 1");
         return merchantGroupMapper.selectOne(wrapper);

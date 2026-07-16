@@ -15,6 +15,11 @@ public interface MerchantGroupService {
 
     MerchantGroup findByMerchantId(String merchantId);
 
+    /**
+     * 根据 VIP 等级查询定价组。
+     */
+    MerchantGroup getByVipLevel(int vipLevel);
+
     MerchantGroup create(MerchantGroup group);
 
     void update(String id, MerchantGroup group);

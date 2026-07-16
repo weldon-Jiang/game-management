@@ -59,14 +59,18 @@ public class TaskEventServiceImpl implements TaskEventService {
         return taskEventMapper.selectList(wrapper);
     }
 
-    /** 写入单条任务事件（架构红线：回调/控制面统一入口，禁止 Mapper 直连）。 */
+    /**
+     * 写入单条任务事件（架构红线：回调/控制面统一入口，禁止 Mapper 直连）。
+     * 写入失败不向上抛异常——不能因为事件记录失败中断 Agent 回调主流程，
+     * 但必须以 ERROR 级别记录便于排障和监控告警。
+     */
     @Override
     public void record(TaskEvent event) {
         try {
             taskEventMapper.insert(event);
         } catch (Exception e) {
-            log.warn("TaskEvent 写入失败 - taskId: {}, scope: {}, message: {}",
-                    event.getTaskId(), event.getScope(), event.getMessage(), e);
+            log.error("TaskEvent 写入失败(事件将丢失) - taskId: {}, scope: {}, phase: {}, message: {}",
+                    event.getTaskId(), event.getScope(), event.getPhase(), event.getMessage(), e);
         }
     }
 }

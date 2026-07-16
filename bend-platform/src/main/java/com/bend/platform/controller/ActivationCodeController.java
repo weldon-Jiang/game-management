@@ -1,6 +1,5 @@
 package com.bend.platform.controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.bend.platform.dto.ActivationCodeDto;
 import com.bend.platform.dto.ApiResponse;
@@ -8,11 +7,9 @@ import com.bend.platform.entity.ActivationCode;
 import com.bend.platform.entity.ActivationCodeBatch;
 import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.MerchantGroup;
-import com.bend.platform.repository.ActivationCodeBatchMapper;
-import com.bend.platform.repository.ActivationCodeMapper;
-import com.bend.platform.repository.MerchantGroupMapper;
-import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.ActivationCodeService;
+import com.bend.platform.service.MerchantGroupService;
+import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.impl.VipLevelService;
 import com.bend.platform.util.UserContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -51,11 +48,9 @@ import org.springframework.beans.BeanUtils;
 @RequiredArgsConstructor
 public class ActivationCodeController {
 
-    private final ActivationCodeMapper activationCodeMapper;
-    private final ActivationCodeBatchMapper activationCodeBatchMapper;
-    private final MerchantMapper merchantMapper;
-    private final MerchantGroupMapper merchantGroupMapper;
     private final ActivationCodeService activationCodeService;
+    private final MerchantService merchantService;
+    private final MerchantGroupService merchantGroupService;
     private final VipLevelService vipLevelService;
     private final ObjectMapper objectMapper;
 
@@ -107,9 +102,7 @@ public class ActivationCodeController {
 
         Map<String, String> merchantNameMap = new HashMap<>();
         if (!merchantIds.isEmpty()) {
-            List<Merchant> merchants = merchantMapper.selectList(
-                new LambdaQueryWrapper<Merchant>().in(Merchant::getId, merchantIds)
-            );
+            List<Merchant> merchants = merchantService.findByIds(merchantIds);
             for (Merchant merchant : merchants) {
                 merchantNameMap.put(merchant.getId(), merchant.getName());
             }
@@ -143,10 +136,7 @@ public class ActivationCodeController {
     public ApiResponse<Map<String, Object>> previewCode(@RequestParam String code) {
         String merchantId = UserContext.getMerchantId();
 
-        ActivationCode activationCode = activationCodeMapper.selectOne(
-            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ActivationCode>()
-                .eq(ActivationCode::getCode, code)
-        );
+        ActivationCode activationCode = activationCodeService.getByCode(code);
 
         if (activationCode == null) {
             return ApiResponse.error(404, "激活码不存在");
@@ -200,15 +190,10 @@ public class ActivationCodeController {
             merchantId = (String) request.get("merchantId");
         }
 
-        Merchant merchant = merchantMapper.selectById(merchantId);
+        Merchant merchant = merchantService.findById(merchantId);
         int vipLevel = merchant != null && merchant.getVipLevel() != null ? merchant.getVipLevel() : 0;
 
-        MerchantGroup group = merchantGroupMapper.selectOne(
-            new LambdaQueryWrapper<MerchantGroup>()
-                .eq(MerchantGroup::getVipLevel, vipLevel)
-                .eq(MerchantGroup::getStatus, "active")
-                .last("LIMIT 1")
-        );
+        MerchantGroup group = merchantGroupService.getByVipLevel(vipLevel);
 
         int originalPrice = 0;
         int discountPrice = 0;
@@ -290,7 +275,7 @@ public class ActivationCodeController {
             if (newVipLevel != merchant.getVipLevel()) {
                 merchant.setVipLevel(newVipLevel);
             }
-            merchantMapper.updateById(merchant);
+            merchantService.updateMerchant(merchant);
         }
 
         Map<String, Object> result = new HashMap<>();
@@ -334,15 +319,10 @@ public class ActivationCodeController {
     public ApiResponse<Map<String, Object>> getPrices(
             @RequestParam(required = false) String merchantId) {
         String currentMerchantId = merchantId != null ? merchantId : UserContext.getMerchantId();
-        Merchant merchant = merchantMapper.selectById(currentMerchantId);
+        Merchant merchant = merchantService.findById(currentMerchantId);
         int vipLevel = merchant != null && merchant.getVipLevel() != null ? merchant.getVipLevel() : 0;
 
-        MerchantGroup group = merchantGroupMapper.selectOne(
-            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<MerchantGroup>()
-                .eq(MerchantGroup::getVipLevel, vipLevel)
-                .eq(MerchantGroup::getStatus, "active")
-                .last("LIMIT 1")
-        );
+        MerchantGroup group = merchantGroupService.getByVipLevel(vipLevel);
 
         Map<String, Object> prices = new HashMap<>();
         prices.put("vipLevel", vipLevel);

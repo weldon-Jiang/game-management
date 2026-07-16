@@ -557,91 +557,6 @@ public class TaskServiceImpl implements TaskService {
     }
 
     /**
-     * 取消任务
-     *
-     * 功能说明：
-     * - 将任务状态改为cancelled
-     * - 仅pending状态的任务可以取消
-     *
-     * 参数说明：
-     * - taskId: 任务ID
-     *
-     * 返回值：
-     * - 更新后的任务对象
-     *
-     * 异常说明：
-     * - 任务不存在时抛出BusinessException
-     * - 任务状态不是pending时抛出BusinessException
-     */
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public Task cancel(String taskId) {
-        Task task = taskMapper.selectById(taskId);
-        if (task == null) {
-            throw new BusinessException(ResultCode.Task.NOT_FOUND, "任务不存在");
-        }
-
-        if ("pending".equals(task.getStatus())) {
-            task.setStatus("cancelled");
-            task.setCompletedTime(LocalDateTime.now());
-            taskMapper.updateById(task);
-            log.info("任务已取消 - TaskID: {}", taskId);
-            
-            // 更新子任务状态为取消
-            List<TaskGameAccountStatus> subtasks = taskGameAccountStatusMapper.findByTaskId(taskId);
-            for (TaskGameAccountStatus subtask : subtasks) {
-                subtask.setStatus("cancelled");
-                subtask.setCompletedTime(LocalDateTime.now());
-                taskGameAccountStatusMapper.updateById(subtask);
-            }
-            
-            // 重置账号状态
-            String streamingAccountId = task.getStreamingAccountId();
-            if (streamingAccountId != null) {
-                streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
-                streamingAccountService.updateAgentId(streamingAccountId, null);
-                
-                List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-                for (GameAccount ga : gameAccounts) {
-                    gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
-                    gameAccountService.updateAgentId(ga.getId(), null);
-                }
-            }
-            releaseTaskHostLease(task);
-        } else if ("running".equals(task.getStatus())) {
-            String targetAgentId = task.getTargetAgentId();
-            if (targetAgentId != null) {
-                Map<String, Object> cancelData = new HashMap<>();
-                cancelData.put("taskId", taskId);
-                AgentWebSocketEndpoint.sendMessageToAgent(targetAgentId, "cancel_task", cancelData);
-            }
-            task.setStatus("cancelled");
-            task.setErrorMessage("用户取消执行");
-            task.setCompletedTime(LocalDateTime.now());
-            taskMapper.updateById(task);
-            log.info("运行中任务已取消并通知Agent - TaskID: {}, AgentID: {}", taskId, targetAgentId);
-            
-            // 重置账号状态
-            String streamingAccountId = task.getStreamingAccountId();
-            if (streamingAccountId != null) {
-                streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
-                streamingAccountService.updateAgentId(streamingAccountId, null);
-                
-                List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-                for (GameAccount ga : gameAccounts) {
-                    gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
-                    gameAccountService.updateAgentId(ga.getId(), null);
-                }
-            }
-            releaseTaskHostLease(task);
-        } else {
-            throw new BusinessException(ResultCode.Task.INVALID_STATUS, "当前状态不允许取消");
-        }
-
-        return task;
-    }
-
-    /**
      * 重试任务
      *
      * 功能说明：
@@ -676,61 +591,6 @@ public class TaskServiceImpl implements TaskService {
         return task;
     }
 
-    /**
-     * 暂停任务
-     *
-     * 功能说明：
-     * - 将running状态的任务转为paused状态
-     * - 通过WebSocket通知Agent暂停任务
-     *
-     * 参数说明：
-     * - taskId: 任务ID
-     */
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void pause(String taskId) {
-        Task task = taskMapper.selectById(taskId);
-        if (task == null) {
-            throw new BusinessException(ResultCode.Task.NOT_FOUND, "任务不存在");
-        }
-
-        if (!"running".equals(task.getStatus())) {
-            throw new BusinessException(ResultCode.Task.INVALID_STATUS, "只有运行中的任务才能暂停");
-        }
-
-        task.setStatus("paused");
-        taskMapper.updateById(task);
-
-        log.info("任务已暂停 - TaskID: {}", taskId);
-    }
-
-    /**
-     * 恢复任务
-     *
-     * 功能说明：
-     * - 将paused状态的任务转为running状态
-     * - 通过WebSocket通知Agent恢复任务
-     *
-     * 参数说明：
-     * - taskId: 任务ID
-     */
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void resume(String taskId) {
-        Task task = taskMapper.selectById(taskId);
-        if (task == null) {
-            throw new BusinessException(ResultCode.Task.NOT_FOUND, "任务不存在");
-        }
-
-        if (!"paused".equals(task.getStatus())) {
-            throw new BusinessException(ResultCode.Task.INVALID_STATUS, "只有暂停的任务才能恢复");
-        }
-
-        task.setStatus("running");
-        taskMapper.updateById(task);
-
-        log.info("任务已恢复 - TaskID: {}", taskId);
-    }
 
     /**
      * 停止任务
@@ -742,54 +602,6 @@ public class TaskServiceImpl implements TaskService {
      * 参数说明：
      * - taskId: 任务ID
      */
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void stop(String taskId) {
-        Task task = taskMapper.selectById(taskId);
-        if (task == null) {
-            throw new BusinessException(ResultCode.Task.NOT_FOUND, "任务不存在");
-        }
-
-        if (!"running".equals(task.getStatus()) && !"paused".equals(task.getStatus()) && !"pending".equals(task.getStatus())) {
-            throw new BusinessException(ResultCode.Task.INVALID_STATUS, "当前状态不允许停止");
-        }
-
-        String targetAgentId = task.getTargetAgentId();
-        if (targetAgentId != null && ("running".equals(task.getStatus()) || "paused".equals(task.getStatus()))) {
-            Map<String, Object> stopData = new HashMap<>();
-            stopData.put("taskId", taskId);
-            AgentWebSocketEndpoint.sendMessageToAgent(targetAgentId, "stop_task", stopData);
-        }
-
-        task.setStatus("stopped");
-        task.setErrorMessage("用户手动停止");
-        task.setCompletedTime(LocalDateTime.now());
-        taskMapper.updateById(task);
-
-        // 更新子任务状态为停止
-        List<TaskGameAccountStatus> subtasks = taskGameAccountStatusMapper.findByTaskId(taskId);
-        for (TaskGameAccountStatus subtask : subtasks) {
-            subtask.setStatus("cancelled");
-            subtask.setCompletedTime(LocalDateTime.now());
-            taskGameAccountStatusMapper.updateById(subtask);
-        }
-
-        // 重置账号状态
-        String streamingAccountId = task.getStreamingAccountId();
-        if (streamingAccountId != null) {
-            streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.IDLE.getCode());
-            streamingAccountService.updateAgentId(streamingAccountId, null);
-
-            List<GameAccount> gameAccounts = gameAccountService.findByStreamingId(streamingAccountId);
-            for (GameAccount ga : gameAccounts) {
-                gameAccountService.updateStatus(ga.getId(), AccountStatusEnum.IDLE.getCode());
-                gameAccountService.updateAgentId(ga.getId(), null);
-            }
-        }
-
-        log.info("任务已停止 - TaskID: {}, AgentID: {}", taskId, targetAgentId);
-    }
-
     /**
      * 删除任务（软删除）
      *

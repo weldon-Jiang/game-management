@@ -11,8 +11,8 @@ import com.bend.platform.entity.GameAccount;
 import com.bend.platform.entity.StreamingAccount;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
-import com.bend.platform.repository.StreamingAccountMapper;
 import com.bend.platform.service.GameAccountService;
+import com.bend.platform.service.StreamingAccountService;
 import com.bend.platform.util.AesUtil;
 import com.bend.platform.util.UserContext;
 import jakarta.validation.Valid;
@@ -44,7 +44,7 @@ import java.util.List;
 public class GameAccountController {
 
     private final GameAccountService gameAccountService;
-    private final StreamingAccountMapper streamingAccountMapper;
+    private final StreamingAccountService streamingAccountService;
     private final AesUtil aesUtil;
 
     /**
@@ -58,7 +58,7 @@ public class GameAccountController {
     @GetMapping
     public ApiResponse<IPage<GameAccount>> list(GameAccountPageRequest request) {
         if (StringUtils.isNotBlank(request.getStreamingId())) {
-            StreamingAccount streaming = streamingAccountMapper.selectById(request.getStreamingId());
+            StreamingAccount streaming = streamingAccountService.findById(request.getStreamingId());
             if (streaming == null) {
                 throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
             }
@@ -196,7 +196,7 @@ public class GameAccountController {
 
     @PostMapping("/bind/{streamingAccountId}")
     public ApiResponse<Void> bindToStreamingAccount(@PathVariable String streamingAccountId, @Valid @RequestBody BindGameAccountRequest request) {
-        StreamingAccount streaming = streamingAccountMapper.selectById(streamingAccountId);
+        StreamingAccount streaming = streamingAccountService.findById(streamingAccountId);
         if (streaming == null) {
             throw new BusinessException(ResultCode.StreamingAccount.NOT_FOUND);
         }

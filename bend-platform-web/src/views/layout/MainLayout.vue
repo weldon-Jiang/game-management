@@ -176,7 +176,6 @@ const authStore = useAuthStore()
 const isCollapse = ref(false)
 
 const showUserManagementGroup = computed(() => authStore.hasManagementPermission)
-const showPlatformGroup = computed(() => authStore.isPlatformAdmin)
 const showAccountGroup = computed(() => authStore.hasManagementPermission || authStore.isOperator)
 const showAgentGroup = computed(() => authStore.hasManagementPermission || authStore.isOperator)
 const showBillingGroup = computed(() => authStore.hasManagementPermission)

@@ -100,17 +100,6 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async fetchCurrentUser() {
-      try {
-        const res = await authApi.getCurrentUser()
-        this.user = res.data
-        localStorage.setItem('user', JSON.stringify(this.user))
-      } catch (error) {
-        this.logout()
-        throw error
-      }
-    },
-
     logout() {
       this.token = ''
       this.user = null

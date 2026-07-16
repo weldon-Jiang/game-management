@@ -1,20 +1,17 @@
 package com.bend.platform.controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.ActivationCode;
 import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.MerchantBalance;
 import com.bend.platform.entity.Subscription;
-import com.bend.platform.repository.ActivationCodeBatchMapper;
-import com.bend.platform.repository.ActivationCodeMapper;
-import com.bend.platform.repository.MerchantMapper;
+import com.bend.platform.service.ActivationCodeService;
 import com.bend.platform.service.AutomationUsageService;
 import com.bend.platform.service.MerchantBalanceService;
+import com.bend.platform.service.MerchantService;
 import com.bend.platform.service.SubscriptionService;
 import com.bend.platform.service.impl.VipLevelService;
 import com.bend.platform.util.UserContext;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -53,13 +50,11 @@ import java.util.*;
 @RequiredArgsConstructor
 public class MerchantSubscriptionController {
 
-    private final ActivationCodeMapper activationCodeMapper;
-    private final ActivationCodeBatchMapper activationCodeBatchMapper;
-    private final MerchantMapper merchantMapper;
+    private final ActivationCodeService activationCodeService;
+    private final MerchantService merchantService;
     private final MerchantBalanceService balanceService;
     private final SubscriptionService subscriptionService;
     private final VipLevelService vipLevelService;
-    private final ObjectMapper objectMapper;
     private final AutomationUsageService automationUsageService;
 
     /**
@@ -82,7 +77,7 @@ public class MerchantSubscriptionController {
             return ApiResponse.success(adminStatus);
         }
 
-        Merchant merchant = merchantMapper.selectById(merchantId);
+        Merchant merchant = merchantService.findById(merchantId);
         if (merchant == null) {
             return ApiResponse.error(404, "商户不存在");
         }
@@ -128,10 +123,7 @@ public class MerchantSubscriptionController {
     public ApiResponse<Map<String, Object>> previewActivation(@RequestParam String code) {
         String merchantId = UserContext.getMerchantId();
 
-        ActivationCode activationCode = activationCodeMapper.selectOne(
-            new LambdaQueryWrapper<ActivationCode>()
-                .eq(ActivationCode::getCode, code)
-        );
+        ActivationCode activationCode = activationCodeService.getByCode(code);
 
         if (activationCode == null) {
             return ApiResponse.error(404, "激活码不存在");
@@ -204,10 +196,7 @@ public class MerchantSubscriptionController {
 
         log.info("开始激活激活码 - code: {}, merchantId: {}, userId: {}", code, merchantId, userId);
 
-        ActivationCode activationCode = activationCodeMapper.selectOne(
-            new LambdaQueryWrapper<ActivationCode>()
-                .eq(ActivationCode::getCode, code)
-        );
+        ActivationCode activationCode = activationCodeService.getByCode(code);
 
         if (activationCode == null) {
             log.warn("激活码不存在 - code: {}", code);
@@ -292,10 +281,10 @@ public class MerchantSubscriptionController {
         activationCode.setStatus("used");
         activationCode.setUsedBy(userId);
         activationCode.setUsedTime(LocalDateTime.now());
-        int updatedRows = activationCodeMapper.updateById(activationCode);
-        log.info("更新激活码状态 - code: {}, updatedRows: {}", code, updatedRows);
+        activationCodeService.updateActivationCode(activationCode);
+        log.info("更新激活码状态 - code: {}, updated", code);
         // 返回商户当前信息
-        Merchant merchant = merchantMapper.selectById(merchantId);
+        Merchant merchant = merchantService.findById(merchantId);
         result.put("totalAmount", merchant.getTotalAmount());
         result.put("vipLevel", merchant.getVipLevel());
 

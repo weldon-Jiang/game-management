@@ -5,13 +5,11 @@ import request from '@/utils/request'
 
 export const streamingApi = {
   list: (params) => request.get('/api/streaming-accounts', { params }),
-  listAll: () => request.get('/api/streaming-accounts', { params: { pageSize: 10000 } }),
   getById: (id) => request.get(`/api/streaming-accounts/${id}`),
   getPasswordById: (id) => request.get(`/api/streaming-accounts/${id}/password`),
   create: (data) => request.post('/api/streaming-accounts', data),
   update: (id, data) => request.put(`/api/streaming-accounts/${id}`, data),
   delete: (id) => request.delete(`/api/streaming-accounts/${id}`),
-  getXboxHosts: (id) => request.get(`/api/streaming-accounts/${id}/xbox-hosts`),
   getBoundHosts: (id) => request.get(`/api/streaming-accounts/${id}/bound-hosts`),
   bindHost: (accountId, hostId, gamertag) =>
     request.put(`/api/streaming-accounts/${accountId}/bound-hosts/${hostId}`, null, {

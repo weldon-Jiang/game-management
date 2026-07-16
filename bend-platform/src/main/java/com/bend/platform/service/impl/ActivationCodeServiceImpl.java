@@ -142,6 +142,14 @@ public class ActivationCodeServiceImpl implements ActivationCodeService {
                 beforeTotalAmount, afterTotalAmount, beforeVipLevel, afterVipLevel);
     }
 
+    /** 通用全字段更新（架构红线：Controller 禁直调 Mapper，必须经此入口）。 */
+    @Override
+    public void updateActivationCode(ActivationCode activationCode) {
+        activationCodeMapper.updateById(activationCode);
+        log.info("更新激活码 - id: {}, code: {}, status: {}",
+                activationCode.getId(), activationCode.getCode(), activationCode.getStatus());
+    }
+
     private String generateUniqueCode() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
     }

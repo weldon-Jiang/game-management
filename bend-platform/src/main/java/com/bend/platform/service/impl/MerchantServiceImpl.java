@@ -86,6 +86,14 @@ public class MerchantServiceImpl implements MerchantService {
         return merchantMapper.selectById(id);
     }
 
+    @Override
+    public List<Merchant> findByIds(java.util.Collection<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        return merchantMapper.selectBatchIds(ids);
+    }
+
     /**
      * 分页查询所有商户
      *
@@ -178,6 +186,13 @@ public class MerchantServiceImpl implements MerchantService {
         merchantMapper.updateById(merchant);
 
         log.info("更新商户 - ID: {}, 名称: {}, 系统商户: {}", id, name, merchant.getIsSystem());
+    }
+
+    /** 通用全字段更新（架构红线：Controller 禁直调 Mapper，必须经此入口）。 */
+    @Override
+    public void updateMerchant(Merchant merchant) {
+        merchantMapper.updateById(merchant);
+        log.info("更新商户(通用) - ID: {}", merchant.getId());
     }
 
     /**

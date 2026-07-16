@@ -47,4 +47,9 @@ public interface ActivationCodeService {
      * 根据ID删除激活码（仅未使用的可以删除）
      */
     void deleteById(String id);
+
+    /**
+     * 更新激活码（通用全字段更新，Controller 禁直接调 Mapper，必须经此入口）。
+     */
+    void updateActivationCode(ActivationCode activationCode);
 }
