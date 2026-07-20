@@ -25,6 +25,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/api/auth/**",
                         "/api/agents/register",
+                        "/api/agents/auto-register",
                         "/api/agents/heartbeat",
                         "/api/agents/uninstall",
                         "/api/agents/offline",
@@ -45,7 +46,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/**/game-account/*/complete",
                         "/api/**/game-account/*/status",
                         "/api/daily-match-count/reset",
-                        "/api/agent/credentials/**"
+                        "/api/agent/credentials/**",
+                        "/api/licenses/verify",
+                        "/api/tenant-metrics/report",
+                        "/api/install/**",
+                        "/api/platform/config"
                 );
     }
 }

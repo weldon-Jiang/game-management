@@ -15,6 +15,7 @@ package com.bend.platform.exception;
  * - 17xxx: 点卡/激活码相关异常
  * - 18xxx: 游戏账号相关异常
  * - 19xxx: 自动化任务相关异常
+ * - 25xxx: 授权(License)相关异常
  */
 public interface ResultCode {
 
@@ -504,6 +505,39 @@ public interface ResultCode {
         private final String message;
 
         MerchantGroup(int code, String message) {
+            this.code = code;
+            this.message = message;
+        }
+
+        @Override
+        public int getCode() {
+            return code;
+        }
+
+        @Override
+        public String getMessage() {
+            return message;
+        }
+    }
+
+    enum License implements ResultCode {
+        NOT_FOUND(25001, "授权不存在"),
+        LICENSE_KEY_INVALID(25002, "授权密钥无效"),
+        EXPIRED(25003, "授权已过期"),
+        REVOKED(25004, "授权已被吊销"),
+        NOT_ACTIVE(25005, "授权未激活"),
+        MACHINE_FINGERPRINT_MISMATCH(25006, "授权与当前机器不匹配"),
+        CREATE_FAILED(25007, "创建授权失败"),
+        REVOKE_FAILED(25008, "吊销授权失败"),
+        UPDATE_FAILED(25009, "更新授权失败"),
+        VERIFY_UNAVAILABLE(25010, "总控不可达且超出离线宽限期"),
+        SIGNATURE_INVALID(25011, "授权校验签名无效"),
+        MERCHANT_NOT_FOUND(25012, "授权关联的商户不存在");
+
+        private final int code;
+        private final String message;
+
+        License(int code, String message) {
             this.code = code;
             this.message = message;
         }

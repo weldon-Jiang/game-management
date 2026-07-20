@@ -25,24 +25,14 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 商户注册码服务实现类
+ * 分控安装注册码服务实现。
  *
- * 功能说明：
- * - 管理Agent注册码
- * - 用于Agent首次注册到系统
- *
- * 主要功能：
- * - 生成注册码
- * - 验证注册码
- * - 激活注册码
- * - 分页查询注册码
- * - 删除注册码
+ * <p>总控为商户签发 {@code BEND-INSTALL-*} 注册码，分控安装器激活时一次性消费。
+ * 历史 {@code AGENT-*} 码为 Agent 注册遗留，不再生成。
  */
 @Slf4j
 @Service
@@ -63,8 +53,8 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
         this.agentInstanceMapper = agentInstanceMapper;
     }
 
-    private static final String CODE_PREFIX = "AGENT";
-    private static final int CODE_LENGTH = 12;
+    /** 分控安装注册码前缀（总控下发，安装激活时消费） */
+    public static final String INSTALL_CODE_PREFIX = "BEND-INSTALL-";
     private static final String FAILED_ATTEMPT_KEY_PREFIX = "reg_code:failed:";
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final int FAILED_ATTEMPT_WINDOW_MINUTES = 30;
@@ -72,28 +62,53 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
     @Override
     @Transactional(rollbackFor = Exception.class)
     public List<String> generateCodes(String merchantId, int count) {
+        log.warn("generateCodes 已废弃(count={}), 转为 generateInstallCode", count);
+        return List.of(generateInstallCode(merchantId));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String generateInstallCode(String merchantId) {
         Merchant merchant = merchantMapper.selectById(merchantId);
         if (merchant == null) {
             throw new BusinessException(ResultCode.Merchant.NOT_FOUND);
         }
 
-        List<String> codes = new ArrayList<>();
-
-        for (int i = 0; i < count; i++) {
-            MerchantRegistrationCode registrationCode = new MerchantRegistrationCode();
-            registrationCode.setMerchantId(merchantId);
-            registrationCode.setCode(generateUniqueCode());
-            registrationCode.setStatus("unused");
-            registrationCode.setCreatedTime(LocalDateTime.now());
-
-            registrationCodeMapper.insert(registrationCode);
-            codes.add(registrationCode.getCode());
+        // 若该商户已有未使用的安装激活码，直接返回（一个商户一个码）
+        LambdaQueryWrapper<MerchantRegistrationCode> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(MerchantRegistrationCode::getMerchantId, merchantId)
+                .eq(MerchantRegistrationCode::getStatus, "unused")
+                .likeRight(MerchantRegistrationCode::getCode, INSTALL_CODE_PREFIX)
+                .last("limit 1");
+        MerchantRegistrationCode existing = registrationCodeMapper.selectOne(wrapper);
+        if (existing != null) {
+            log.info("商户已有未使用的安装激活码,复用: merchantId={} code={}", merchantId, existing.getCode());
+            return existing.getCode();
         }
 
-        log.info("生成注册码成功 - 商户ID: {}, 数量: {}, 第一个码: {}",
-                merchantId, count, CollectionUtils.isEmpty(codes) ? "N/A" : codes.get(0));
+        // 生成新的永久激活码
+        String code = INSTALL_CODE_PREFIX + generateRandomCode();
+        MerchantRegistrationCode registrationCode = new MerchantRegistrationCode();
+        registrationCode.setMerchantId(merchantId);
+        registrationCode.setCode(code);
+        registrationCode.setStatus("unused");
+        registrationCode.setCreatedTime(LocalDateTime.now());
+        // expireTime 留空 = 永久有效
+        registrationCodeMapper.insert(registrationCode);
 
-        return codes;
+        log.info("生成分控安装激活码成功 - 商户ID: {}, 激活码: {}", merchantId, code);
+        return code;
+    }
+
+    /** 生成随机码部分(8位大写字母+数字) */
+    private String generateRandomCode() {
+        String chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 排除易混淆字符 0/O/1/I
+        java.util.Random rng = new java.util.Random();
+        StringBuilder sb = new StringBuilder(8);
+        for (int i = 0; i < 8; i++) {
+            sb.append(chars.charAt(rng.nextInt(chars.length())));
+        }
+        return sb.toString();
     }
 
     @Override
@@ -262,6 +277,12 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
             return ActivationResult.failure("注册码不存在");
         }
 
+        if (!isInstallCode(registrationCode.getCode())) {
+            log.warn("注册码验证失败 - 非分控安装注册码: {}", code);
+            recordFailedAttempt(code);
+            return ActivationResult.failure("注册码格式无效，请使用总控下发的分控安装注册码");
+        }
+
         if ("used".equals(registrationCode.getStatus())) {
             log.warn("注册码验证失败 - 已被使用: {}", code);
             recordFailedAttempt(code);
@@ -320,6 +341,7 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
         if (StringUtils.hasText(keyword)) {
             wrapper.like(MerchantRegistrationCode::getCode, keyword);
         }
+        wrapper.likeRight(MerchantRegistrationCode::getCode, INSTALL_CODE_PREFIX);
         wrapper.orderByDesc(MerchantRegistrationCode::getCreatedTime);
         Page<MerchantRegistrationCode> page = new Page<>(request.getPageNum(), request.getPageSize(), true);
         return registrationCodeMapper.selectPage(page, wrapper);
@@ -377,12 +399,8 @@ public class MerchantRegistrationCodeServiceImpl implements MerchantRegistration
         log.info("注册码重置成功 - ID: {}, 注册码: {}", id, code.getCode());
     }
 
-    private String generateUniqueCode() {
-        String uuid = UUID.randomUUID().toString().replace("-", "").toUpperCase();
-        String part1 = uuid.substring(0, 4);
-        String part2 = uuid.substring(4, 8);
-        String part3 = uuid.substring(8, 12);
-        return CODE_PREFIX + "-" + part1 + "-" + part2 + "-" + part3;
+    private boolean isInstallCode(String code) {
+        return StringUtils.hasText(code) && code.startsWith(INSTALL_CODE_PREFIX);
     }
 
     @Override

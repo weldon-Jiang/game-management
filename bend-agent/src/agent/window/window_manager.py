@@ -7,7 +7,7 @@ StreamingWindowManager — 仅显示层窗口 API（show/hide/focus）。
 from typing import Any, Dict, Optional
 
 from ..core.logger import get_logger
-from ..windows.task_window_manager import TaskWindowManager
+from .task_window_manager import TaskWindowManager
 
 
 class StreamingWindowManager:

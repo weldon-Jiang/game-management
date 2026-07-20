@@ -20,7 +20,7 @@ from ..core.config import config
 from ..core.logger import get_logger
 from ..gssv.base_uri import DEFAULT_GSSV_BASE_URI, normalize_gssv_base_uri
 from ..gssv.device_info import build_x_ms_device_info
-from ..lan.network_util import is_blocked_scan_ip, pick_local_lan_ip
+from ..discovery.lan_network_util import is_blocked_scan_ip, pick_local_lan_ip
 
 
 @dataclass

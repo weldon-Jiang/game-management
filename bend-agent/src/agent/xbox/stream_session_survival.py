@@ -70,7 +70,7 @@ async def ensure_stream_subsystems_alive(
     if getattr(context, "enable_window_display", False) and getattr(
         context, "sdl_window", None
     ):
-        from ..automation.step3_display_helpers import _start_sdl_display_pump
+        from ..automation.step3.display_helpers import _start_sdl_display_pump
 
         await _start_sdl_display_pump(context, log)
 

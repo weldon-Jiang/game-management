@@ -10,7 +10,12 @@ import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.util.UserContext;
+import com.bend.platform.config.MasterModeCondition;
+import com.bend.platform.service.impl.MerchantDataExportService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Conditional;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -32,9 +37,11 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/merchants")
 @RequiredArgsConstructor
+@Conditional(MasterModeCondition.class)
 public class MerchantController {
 
     private final MerchantService merchantService;
+    private final MerchantDataExportService dataExportService;
 
     /**
      * 创建商户
@@ -147,5 +154,25 @@ public class MerchantController {
         }
         merchantService.deleteById(id);
         return ApiResponse.success("删除成功", null);
+    }
+
+    /**
+     * 导出商户全量数据为 SQL(打分控包时由打包脚本调用)。
+     * 仅平台管理员。返回 SQL 文本,打包脚本保存为 merchant_data.sql。
+     */
+    @GetMapping("/{id}/export-data")
+    public ResponseEntity<String> exportData(@PathVariable String id) {
+        if (!UserContext.isPlatformAdmin()) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+        Merchant merchant = merchantService.findById(id);
+        if (merchant == null) {
+            throw new BusinessException(ResultCode.Merchant.NOT_FOUND);
+        }
+        String sql = dataExportService.export(id);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/sql; charset=UTF-8"))
+                .header("Content-Disposition", "attachment; filename=merchant_data.sql")
+                .body(sql);
     }
 }

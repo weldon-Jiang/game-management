@@ -23,24 +23,24 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location -Path $PSScriptRoot
 
-$EnvFile = '.env.prod'
+$EnvFiles = @('.env', '.env.prod')
 $Tag = 'prod'
 $Color = 'Yellow'
 
 # Block production deployment when CHANGE_ME placeholders remain.
-$envPath = Join-Path $PSScriptRoot $EnvFile
+$envPath = Join-Path $PSScriptRoot $EnvFiles[1]
 if (-not (Test-Path $envPath)) {
-    Write-Host "[prod] $EnvFile not found. Create it with real secrets first." -ForegroundColor Red
+    Write-Host "[prod] $($EnvFiles[1]) not found. Create it with real secrets first." -ForegroundColor Red
     exit 1
 }
 $placeholders = Select-String -Path $envPath -Pattern 'CHANGE_ME' -SimpleMatch
 if ($placeholders) {
-    Write-Host "[prod] $EnvFile still contains CHANGE_ME placeholders:" -ForegroundColor Red
+    Write-Host "[prod] $($EnvFiles[1]) still contains CHANGE_ME placeholders:" -ForegroundColor Red
     $placeholders | ForEach-Object { Write-Host ("  L{0}: {1}" -f $_.LineNumber, $_.Line.Trim()) -ForegroundColor Red }
     Write-Host "[prod] Replace placeholders before production deployment." -ForegroundColor Red
     exit 1
 }
-$answer = Read-Host "[prod] Production deployment. Confirm .env.prod has real secrets. Type yes to continue"
+$answer = Read-Host "[prod] Production deployment. Confirm .env + .env.prod have real secrets. Type yes to continue"
 if ($answer -ne 'yes') {
     Write-Host "[prod] Deployment cancelled." -ForegroundColor Yellow
     exit 0
@@ -62,6 +62,6 @@ if ($Services.Count -gt 0 -and -not $PSBoundParameters.ContainsKey('Profile')) {
 $ServiceDesc = if ($Services.Count -gt 0) { ($Services -join ', ') } else { 'all' }
 $BuildDesc = if ($NoBuild) { 'no-build' } else { 'build' }
 
-Write-Host "[$Tag] env-file=$EnvFile, profile=$Profile, services=$ServiceDesc, mode=$BuildDesc starting..." -ForegroundColor $Color
-& (Join-Path $PSScriptRoot 'compose-up.ps1') -EnvFile $EnvFile -Profile $Profile -Services $Services -NoBuild:$NoBuild
-docker compose --env-file $EnvFile -f docker-compose.yml ps
+Write-Host "[$Tag] env-files=$($EnvFiles -join ', '), profile=$Profile, services=$ServiceDesc, mode=$BuildDesc starting..." -ForegroundColor $Color
+& (Join-Path $PSScriptRoot 'compose-up.ps1') -EnvFiles $EnvFiles -Profile $Profile -Services $Services -NoBuild:$NoBuild
+docker compose --env-file $($EnvFiles[0]) --env-file $($EnvFiles[1]) -f docker-compose.yml ps

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { usePlatformStore } from '@/stores/platform'
 
 const routes = [
   {
@@ -78,7 +79,7 @@ const routes = [
         path: 'registration-codes',
         name: 'RegistrationCodes',
         component: () => import('@/views/registration/RegistrationCodeList.vue'),
-        meta: { title: '注册码管理', icon: 'Key', requiresAdmin: true }
+        meta: { title: '分控注册码', icon: 'Tickets', requiresAdmin: true, requiresMaster: true }
       },
       {
         path: 'tasks',
@@ -137,13 +138,14 @@ router.onError((error) => {
  * 2. 验证用户角色是否有权限访问特定页面
  * 3. 更新页面标题
  */
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   // 更新页面标题
   document.title = to.meta.title
     ? `${to.meta.title} - ${import.meta.env.VITE_APP_TITLE || 'Bend Platform'}`
     : import.meta.env.VITE_APP_TITLE || 'Bend Platform'
 
   const authStore = useAuthStore()
+  const platformStore = usePlatformStore()
 
   // 如果页面需要登录但用户未登录，重定向到登录页
   if (to.meta.requiresAuth !== false && !authStore.isLoggedIn) {
@@ -162,6 +164,18 @@ router.beforeEach((to, from, next) => {
     ElMessage.warning('您没有权限访问该页面')
     next({ name: 'Dashboard' })
     return
+  }
+
+  // 总控专属页面（如分控安装注册码）
+  if (to.meta.requiresMaster) {
+    if (!platformStore.loaded) {
+      await platformStore.fetchConfig()
+    }
+    if (!platformStore.isMasterMode) {
+      ElMessage.warning('该功能仅在总控平台可用')
+      next({ name: 'Dashboard' })
+      return
+    }
   }
 
   // 任务管理等运营页面：商户管理员或操作员

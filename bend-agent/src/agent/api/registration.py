@@ -165,6 +165,57 @@ class RegistrationActivator:
             self.logger.error(f"Activation failed: {e}")
             raise
 
+    async def auto_register(self) -> AgentCredentials:
+        """
+        免注册码自动注册(分控架构)。
+
+        Agent 通过 UDP 广播发现局域网内分控地址后,直接调分控
+        /api/agents/auto-register 接口,分控创建/更新 agent_instance 并返回 merchantId。
+        无需注册码,商户无需在分控后台生成注册码。
+
+        返回:
+            含 agent_id、agent_secret、merchant_id 的 AgentCredentials
+        抛出:
+            分控不可达或注册失败时抛出 Exception
+        """
+        self.logger.info("Starting Agent auto-registration (no registration code)...")
+        assert_single_install()
+
+        agent_id = self._get_or_generate_agent_id()
+        agent_secret = self._generate_agent_secret()
+        system_info = self.get_system_info()
+
+        import aiohttp
+        base_url = config.backend_url
+        url = f"{base_url}/api/agents/auto-register"
+        payload = {
+            'agentId': agent_id,
+            'agentSecret': agent_secret,
+            'osType': system_info.os_type,
+            'osVersion': system_info.os_version,
+            'cpuCount': system_info.cpu_count,
+            'maxConcurrentTasks': system_info.max_concurrent_tasks,
+        }
+        self.logger.info(f"Sending auto-register request to {url}")
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload) as response:
+                result = await response.json()
+                if response.status == 200 and result.get('code') == 200:
+                    data = result.get('data', {})
+                    self._credentials = AgentCredentials(
+                        agent_id=agent_id,
+                        agent_secret=agent_secret,
+                        merchant_id=data.get('merchantId', ''),
+                        registration_code=''
+                    )
+                    self._save_credentials()
+                    machine_identity.mark_installed(str(get_agent_root()))
+                    self.logger.info(f"Agent auto-registered, Merchant ID: {data.get('merchantId')}")
+                    return self._credentials
+                else:
+                    raise Exception(result.get('message', 'Auto-register failed'))
+
     async def _send_activation_request(
         self,
         code: str,

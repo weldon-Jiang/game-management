@@ -138,7 +138,13 @@ class PlatformApiClient:
         return headers
 
     def _get_callback_url(self, endpoint: str) -> str:
-        return f"{self.base_url}/{self._api_version}/agent-callback/{endpoint}"
+        # 实时读 config:分控 IP 变动重新发现后,立即用新地址
+        try:
+            from agent.core.config import get_config
+            base = get_config().platform_api_url or self.base_url
+        except Exception:
+            base = self.base_url
+        return f"{base}/{self._api_version}/agent-callback/{endpoint}"
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:

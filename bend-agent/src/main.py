@@ -27,7 +27,9 @@ if not getattr(sys, 'frozen', False):
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.core.config import get_config, load_config, AgentConfig
+from agent.core.log_cleanup import cleanup_old_logs
 from agent.core.logger import get_logger
+from agent.core.paths import get_logs_dir
 from agent.core.install_guard import (
     assert_single_install,
     InstallGuardError,
@@ -47,38 +49,69 @@ class AgentRunner:
         self.logger = get_logger('runner')
 
     async def run_with_activation(self):
-        """需要时通过注册码激活后运行。"""
+        """首次运行自动发现分控并免注册码自动注册。"""
         credentials = self.activator.get_credentials()
 
         if credentials is None:
-            print("\n" + "=" * 50)
-            print("  Bend Agent 首次运行需要激活")
-            print("=" * 50)
-            print("\n请输入商户注册码进行激活：")
-            print("(注册码格式: AGENT-XXXX-XXXX-XXXX)")
-            print()
+            # 分控架构:UDP 自动发现局域网分控地址
+            from agent.core.config import get_config
+            from agent.core.tenant_discovery import is_backend_url_placeholder, discover, write_discovered_url
+            cfg = get_config()
+            need_discover = is_backend_url_placeholder(getattr(cfg, 'backend_url', ''))
 
-            while True:
-                code = input("注册码: ").strip()
+            if need_discover:
+                print("\n正在局域网内搜索分控服务(UDP 广播,最多8秒)...")
+                self.logger.info("backend.base_url 为占位,启动 UDP 分控发现...")
+                found = discover(timeout=8.0)
+                if not found:
+                    print("\n" + "=" * 50)
+                    print("  未发现分控服务,无法启动 Agent")
+                    print("=" * 50)
+                    print("请确认:")
+                    print("  1. 本机所在局域网已安装并启动分控平台服务")
+                    print("  2. 分控与本机在同一个局域网(同一网段)")
+                    print("  3. 若先装 Agent 后装分控,请先安装分控平台再启动 Agent")
+                    print("\nAgent 退出。请先安装分控平台服务后再运行 Agent。")
+                    return None
+                ip, port = found
+                # 回写 agent.yaml
+                reload_path = None
+                for p in [os.path.join(os.path.dirname(__file__), '..', 'configs', 'agent.yaml')]:
+                    p = os.path.normpath(p)
+                    if os.path.exists(p):
+                        reload_path = p
+                        break
+                if reload_path:
+                    write_discovered_url(reload_path, ip, port)
+                    from agent.core.config import load_config
+                    load_config(reload_path)
+                print(f"已发现分控服务: {ip}:{port}")
 
-                if not code:
-                    print("注册码不能为空，请重新输入")
-                    continue
-
-                try:
-                    credentials = await self.activator.activate(code)
-                    print("\n激活成功！")
-                    print(f"Agent ID: {credentials.agent_id}")
-                    print(f"Merchant ID: {credentials.merchant_id}")
-                    break
-                except Exception as e:
-                    print(f"\n激活失败: {e}")
-                    print("请重新输入注册码，或按 Ctrl+C 退出\n")
+            # 免注册码自动注册
+            print("\n正在向分控服务自动注册...")
+            try:
+                credentials = await self.activator.auto_register()
+                print("自动注册成功!")
+                print(f"Agent ID: {credentials.agent_id}")
+                print(f"Merchant ID: {credentials.merchant_id}")
+            except Exception as e:
+                print(f"\n自动注册失败: {e}")
+                print("请确认分控服务已正常启动且 license 校验通过。")
+                return None
 
         return credentials
 
     async def run(self, registration_code: str = None):
         """运行 Agent。"""
+        # 启动时清理超过 30 天的旧日志
+        try:
+            log_dir = get_logs_dir()
+            deleted = cleanup_old_logs(log_dir, max_age_days=30)
+            if deleted > 0:
+                print(f"已清理 {deleted} 个过期日志文件(保留 30 天)")
+        except Exception:
+            pass  # 清理失败不影响主流程
+
         self.logger.info("Initializing Bend Agent...")
 
         credentials = None

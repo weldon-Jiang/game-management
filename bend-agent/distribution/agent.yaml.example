@@ -7,9 +7,14 @@ aes:
   secret: "请与平台侧的 AES_SECRET 保持一致"
 
 backend:
-  base_url: "http://你的服务器地址:8060"
-  ws_url: "ws://你的服务器地址:8060/ws/agent"
+  # 分控架构下,这里指向【本机局域网内的分控服务地址】,不要填总控公网地址。
+  # 打包 Agent 包时由打包脚本自动写入(商户无需手填)。
+  base_url: "http://本机分控地址:8060"
+  ws_url: "ws://本机分控地址:8060/ws/agent"
   api_prefix: "/api"
+  # 分控架构下打包预置的注册码:Agent 首次启动用此码自动向本地分控激活,无需商户交互输入。
+  # 留空则回退到交互式输入(旧流程)。
+  registration_code: ""
 
 agent:
   heartbeat_interval: 30

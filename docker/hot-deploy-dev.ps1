@@ -17,7 +17,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location -Path $PSScriptRoot
 
-$EnvFile = '.env.dev'
+$EnvFile = '.env'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Tag = 'hot-deploy'
 $Color = 'Cyan'

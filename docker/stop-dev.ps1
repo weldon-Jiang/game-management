@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location -Path $PSScriptRoot
 
-$EnvFile = '.env.dev'
+$EnvFile = '.env'
 $Tag = 'dev'
 
 $DownArgs = @('down')

@@ -117,6 +117,7 @@ class HighConcurrencyTaskExecutor:
         执行单个任务
 
         工作流程：
+        0. 商户权限校验(如启用)
         1. 解析任务数据创建 Task 对象
         2. 获取信号量许可（阻塞直到获得）
         3. 创建取消事件
@@ -129,6 +130,30 @@ class HighConcurrencyTaskExecutor:
         返回：
         - 任务执行结果字典
         """
+        # 0. 商户权限校验开关
+        from agent.core.license_checker import should_check_license, check_license
+        if should_check_license():
+            try:
+                from agent.core.config import get_config
+                from agent.core.credentials_provider import get_credentials
+                cfg = get_config()
+                agent_id, agent_secret = get_credentials()
+                result = await check_license(
+                    platform_api_url=cfg.platform_api_url,
+                    agent_id=agent_id or "",
+                    agent_secret=agent_secret or "",
+                )
+                if not result.valid:
+                    error_msg = f"商户授权已失效,拒绝执行自动化: {result.reason}"
+                    self.logger.error(error_msg)
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "taskId": task_data.get("taskId"),
+                    }
+            except Exception as e:
+                self.logger.warning("License校验异常,放行执行: %s", e)
+
         params = task_data.get('params')
         if not isinstance(params, dict):
             params = {}
@@ -534,7 +559,7 @@ async def handle_template_match(params: Dict[str, Any], check_cancel: Callable) 
 
     from ..vision.template_matcher import TemplateMatcher
     from ..vision.frame_capture import VideoFrameCapture
-    from ..windows.stream_window import StreamWindow
+    from ..window.stream_window import StreamWindow
 
     template_name = params.get('template')
     threshold = params.get('threshold', 0.8)
@@ -617,7 +642,7 @@ async def handle_scene_detection(params: Dict[str, Any], check_cancel: Callable)
 
     from ..scene.scene_detector import SceneDetector
     from ..vision.frame_capture import VideoFrameCapture
-    from ..windows.stream_window import StreamWindow
+    from ..window.stream_window import StreamWindow
 
     target_scene = params.get('scene')
     timeout = params.get('timeout', 30)

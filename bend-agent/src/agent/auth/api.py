@@ -62,10 +62,8 @@ class AuthService:
         check_cancel: Optional[Callable[[], bool]] = None,
         report_progress: Optional[Callable] = None,
     ) -> StreamingCredentials:
-        from ..auth.step1_router import resolve_step1_execute_login
+        from ..automation.step1 import step1_execute_login
         from ..task.task_context import AgentTaskContext, TaskStepStatus
-
-        step1_execute_login = resolve_step1_execute_login()
 
         effective_task_id = task_id or f"auth_{streaming_account_id or email}"
         context = AgentTaskContext(

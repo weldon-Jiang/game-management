@@ -2,22 +2,17 @@
 Bend Agent 自动化模块
 ====================
 
-功能说明：
-- 负责执行自动化任务步骤（串流账号登录 -> Xbox串流 -> 游戏比赛）
-- 支持多并发任务执行，每个串流账号对应一个独立窗口
-- 实时同步任务状态到平台
+自动化四步骤，每步一个独立子包:
 
-模块结构：
-- step1_xblive_login: 步骤一：串流账号登录（xblive SISU，生产）
-- step1_stream_account_login: legacy MSAL（仅 debug）
-- step2_xsrp: 步骤二：GSSV 云端串流握手
-- step3_xsrp: 步骤三：串流环境初始化（SDL + WebRTC 帧）
-- step3_display_helpers: Step3 SDL/InputPump 辅助
-- step4_game_automation: 步骤四：游戏比赛自动化
+  step1/  — 串流账号认证（xblive SISU 全链路）
+  step2/  — 串流握手（GSSV 发现 + WebRTC 握手 / PlayStation）
+  step3/  — 串流环境初始化（SDL 窗口 + 帧捕获 + 输入通道）
+  step4/  — 游戏比赛自动化（FC 启动 + 转会/SQB/DR/WL）
+
+所有入口统一从子包导入: from .step1 import step1_execute_login 等。
 
 作者：技术团队
-版本：2.0
+版本：3.0
 """
 
-# 只导出步骤函数，不导入 task 模块以避免初始化问题
 __all__ = []

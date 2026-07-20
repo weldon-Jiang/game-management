@@ -29,10 +29,10 @@ from pathlib import Path
 from typing import Dict, Optional, List, Any, Callable
 
 from ..core.logger import get_logger
-from ..utils.crypto_util import decrypt_password
+from ..core.crypto_util import decrypt_password
 from .task_context import AgentTaskContext, GameAccountInfo, XboxInfo, AutomationResult, PauseMode
 from ..window.window_manager import StreamingWindowManager
-from ..orchestration.streaming_account_task import StreamingAccountTask
+from .streaming_account_task import StreamingAccountTask
 from ..runtime.task_registry import TaskRuntimeRegistry, StreamingAccountTaskRuntime
 from ..runtime.task_control_handler import TaskControlHandler  # noqa: F401 — 经 get_active_scheduler 再导出
 from ..runtime.input_focus import InputFocusManager
@@ -591,7 +591,7 @@ class AutomationScheduler:
         if context and getattr(context, "_user_close_terminating", False):
             return
 
-        from ..windows.sdl_window import confirm_window_close
+        from ..window.sdl_window import confirm_window_close
 
         title = str(config.get("window.close_confirm_title", "结束串流"))
         message = str(
@@ -642,7 +642,7 @@ class AutomationScheduler:
         if not context:
             return False
 
-        from ..automation.step3_display_helpers import step3_close_display
+        from ..automation.step3.display_helpers import step3_close_display
 
         await step3_close_display(context)
         runtime = self._registry.get(task_id)
@@ -658,7 +658,7 @@ class AutomationScheduler:
             self.logger.warning("ensure_display_window: no context for %s", task_id)
             return False
 
-        from ..automation.step3_display_helpers import step3_ensure_display
+        from ..automation.step3.display_helpers import step3_ensure_display
 
         ok = await step3_ensure_display(context)
         runtime = self._registry.get(task_id)
@@ -706,7 +706,7 @@ class AutomationScheduler:
             except Exception as exc:
                 self.logger.debug("clear keyboard mapping cache: %s", exc)
             try:
-                from ..xhome_stream.cleanup import close_media_context
+                from ..xbox.xhome_stream_cleanup import close_media_context
 
                 await close_media_context(context, self.logger)
             except Exception as exc:

@@ -2,10 +2,13 @@ package com.bend.platform.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bend.platform.config.MasterModeCondition;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.dto.MerchantRegistrationCodeDto;
 import com.bend.platform.dto.MerchantRegistrationCodePageRequest;
 import com.bend.platform.entity.MerchantRegistrationCode;
+import com.bend.platform.exception.BusinessException;
+import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.AgentInstanceService;
 import com.bend.platform.service.MerchantRegistrationCodeService;
 import com.bend.platform.service.MerchantService;
@@ -13,6 +16,7 @@ import com.bend.platform.service.MerchantRegistrationCodeService.ActivationResul
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -23,23 +27,16 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 商户注册码控制器
+ * 分控安装注册码控制器（总控侧）。
  *
- * 功能说明：
- * - 管理Agent注册码
- * - 用于Agent首次注册到系统
- *
- * 主要功能：
- * - 生成注册码
- * - 激活注册码
- * - 查询注册码列表（分页）
- * - 验证注册码
- * - 删除注册码
+ * <p>注册码由总控为商户签发，供分控平台安装激活时使用；
+ * Agent 已改为 UDP 自动发现注册，不再使用注册码。
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/registration-codes")
 @RequiredArgsConstructor
+@Conditional(MasterModeCondition.class)
 public class MerchantRegistrationCodeController {
 
     private final MerchantRegistrationCodeService registrationCodeService;
@@ -47,57 +44,52 @@ public class MerchantRegistrationCodeController {
     private final AgentInstanceService agentInstanceService;
 
     /**
-     * 生成注册码
-     * 平台管理员可指定商户，非平台管理员自动使用当前用户商户
+     * 生成分控安装注册码（兼容旧接口，等价于 {@link #generateInstallCode(Map)}）。
      *
-     * @param request 请求体（包含merchantId和count）
-     * @return 生成的注册码列表
+     * @deprecated 请使用 {@code POST /api/registration-codes/generate-install}。
      */
+    @Deprecated
     @PostMapping("/generate")
     public ApiResponse<List<String>> generateCodes(@RequestBody Map<String, Object> request) {
-        String merchantIdFromRequest = (String) request.get("merchantId");
-        Integer count = request.get("count") != null ? (Integer) request.get("count") : 1;
-
-        log.info("生成注册码请求: isPlatformAdmin={}, merchantIdFromRequest={}, count={}", 
-                UserContext.isPlatformAdmin(), merchantIdFromRequest, count);
-        
-        String merchantId;
-        if (UserContext.isPlatformAdmin()) {
-            if (merchantIdFromRequest == null || merchantIdFromRequest.isEmpty()) {
-                log.warn("平台管理员生成注册码未选择商户");
-                return ApiResponse.error(400, "管理员生成注册码必须选择商户");
-            }
-            merchantId = merchantIdFromRequest;
-        } else {
-            merchantId = UserContext.getMerchantId();
-            log.info("商户用户生成注册码，从UserContext获取到的merchantId={}", merchantId);
-            
-            if (merchantId == null || merchantId.isEmpty()) {
-                log.info("UserContext中merchantId为空，尝试使用请求中的merchantId: {}", merchantIdFromRequest);
-                if (merchantIdFromRequest != null && !merchantIdFromRequest.isEmpty()) {
-                    merchantId = merchantIdFromRequest;
-                    log.info("使用请求中的merchantId成功: {}", merchantId);
-                } else {
-                    log.error("商户用户生成注册码失败，merchantId为空，当前用户信息: userId={}, username={}, role={}", 
-                            UserContext.getUserId(), UserContext.getUsername(), UserContext.getRole());
-                    return ApiResponse.error(400, "无法获取用户商户信息，请重新登录");
-                }
-            }
+        if (!UserContext.isPlatformAdmin()) {
+            return ApiResponse.error(403, "仅平台管理员可生成安装注册码");
         }
-
-        log.info("开始生成注册码，merchantId={}, count={}", merchantId, count);
-        List<String> codes = registrationCodeService.generateCodes(merchantId, count);
-        log.info("注册码生成成功，数量={}", codes.size());
-        return ApiResponse.success("生成成功", codes);
+        String merchantId = (String) request.get("merchantId");
+        if (!StringUtils.hasText(merchantId)) {
+            return ApiResponse.error(400, "请选择商户");
+        }
+        String code = registrationCodeService.generateInstallCode(merchantId);
+        return ApiResponse.success("生成成功", List.of(code));
     }
 
     /**
-     * 激活注册码
-     * Agent注册时调用，验证注册码有效性
+     * 生成分控安装注册码（每商户一个未使用码，永久有效）。
+     * 仅总控平台管理员可操作。
      *
-     * @param request 请求体（包含code、agentId、agentSecret、systemInfo）
-     * @return 激活结果
+     * @param request 请求体（包含 merchantId）
+     * @return 注册码字符串（形如 BEND-INSTALL-XXXXXXXX）
      */
+    @PostMapping("/generate-install")
+    public ApiResponse<String> generateInstallCode(@RequestBody Map<String, Object> request) {
+        if (!UserContext.isPlatformAdmin()) {
+            throw new BusinessException(ResultCode.System.FORBIDDEN, "仅平台管理员可生成安装注册码");
+        }
+        String merchantId = (String) request.get("merchantId");
+        if (!StringUtils.hasText(merchantId)) {
+            throw new BusinessException(ResultCode.System.BAD_REQUEST, "请选择商户");
+        }
+        String code = registrationCodeService.generateInstallCode(merchantId);
+        return ApiResponse.success("生成成功", code);
+    }
+
+    /**
+     * 激活注册码（Agent 注册用，已废弃）
+     *
+     * @param request 请求体
+     * @return 激活结果
+     * @deprecated Agent 已改为 UDP 自动发现 + auto-register，不再使用注册码激活。
+     */
+    @Deprecated
     @PostMapping("/activate")
     public ApiResponse<ActivationResult> activate(@RequestBody Map<String, Object> request) {
         String code = (String) request.get("code");
@@ -146,11 +138,8 @@ public class MerchantRegistrationCodeController {
      */
     @GetMapping("/list")
     public ApiResponse<IPage<MerchantRegistrationCodeDto>> listCodes(MerchantRegistrationCodePageRequest request) {
-
-        String currentMerchantId = UserContext.getMerchantId();
-
         if (!UserContext.isPlatformAdmin()) {
-            request.setMerchantId(currentMerchantId);
+            throw new BusinessException(ResultCode.System.FORBIDDEN, "仅平台管理员可查看安装注册码");
         }
 
         IPage<MerchantRegistrationCode> page = registrationCodeService.findByMerchantId(

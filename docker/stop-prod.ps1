@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location -Path $PSScriptRoot
 
-$EnvFile = '.env.prod'
+$EnvFiles = @('.env', '.env.prod')
 $Tag = 'prod'
 
 # 生产停服二次确认；删数据卷需额外强确认
@@ -36,6 +36,6 @@ $DownArgs = @('down')
 if ($RemoveVolumes) { $DownArgs += '-v' }
 if ($RemoveImages)  { $DownArgs += @('--rmi', 'local') }
 
-Write-Host "[$Tag] env-file=$EnvFile, 执行 down $($DownArgs[1..($DownArgs.Count-1)] -join ' ') ..." -ForegroundColor Yellow
-docker compose --env-file $EnvFile -f docker-compose.yml @DownArgs
-docker compose --env-file $EnvFile -f docker-compose.yml ps
+Write-Host "[$Tag] env-files=$($EnvFiles -join ', '), 执行 down $($DownArgs[1..($DownArgs.Count-1)] -join ' ') ..." -ForegroundColor Yellow
+docker compose --env-file $($EnvFiles[0]) --env-file $($EnvFiles[1]) -f docker-compose.yml @DownArgs
+docker compose --env-file $($EnvFiles[0]) --env-file $($EnvFiles[1]) -f docker-compose.yml ps

@@ -4,7 +4,7 @@
 # ============================================
 param(
     [Parameter(Mandatory = $true)]
-    [string]$EnvFile,
+    [string[]]$EnvFiles,
     [Parameter(Mandatory = $true)]
     [string]$Profile,
     [string[]]$Services = @(),
@@ -28,9 +28,11 @@ function Normalize-ServiceList {
 
 $serviceList = Normalize-ServiceList -InputServices $Services
 
-$composeArgs = @(
-    'compose',
-    '--env-file', $EnvFile,
+$composeArgs = @('compose')
+foreach ($ef in $EnvFiles) {
+    $composeArgs += '--env-file', $ef
+}
+$composeArgs += @(
     '-f', 'docker-compose.yml',
     '--profile', $Profile,
     'up', '-d'

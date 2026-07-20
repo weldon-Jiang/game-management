@@ -6,18 +6,25 @@ import com.bend.platform.entity.MerchantRegistrationCode;
 import java.util.List;
 
 /**
- * 商户注册码服务接口
+ * 分控安装注册码服务接口。
+ *
+ * <p>总控签发 {@code BEND-INSTALL-*} 码，分控安装器激活时校验并消费。
  */
 public interface MerchantRegistrationCodeService {
 
     /**
-     * 生成注册码
+     * @deprecated 请使用 {@link #generateInstallCode(String)}。
+     */
+    @Deprecated
+    List<String> generateCodes(String merchantId, int count);
+
+    /**
+     * 生成分控安装注册码（每商户一个未使用码，永久有效）。
      *
      * @param merchantId 商户ID
-     * @param count 生成数量
-     * @return 注册码列表
+     * @return 注册码（形如 BEND-INSTALL-XXXXXXXX）
      */
-    List<String> generateCodes(String merchantId, int count);
+    String generateInstallCode(String merchantId);
 
     /**
      * 激活注册码（Agent激活时调用）

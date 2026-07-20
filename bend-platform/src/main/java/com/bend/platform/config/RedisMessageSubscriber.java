@@ -17,7 +17,7 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-// @ConditionalOnProperty(name = "spring.data.redis.enabled", havingValue = "true", matchIfMissing = false)
+@ConditionalOnProperty(name = "spring.data.redis.enabled", havingValue = "true", matchIfMissing = false)
 public class RedisMessageSubscriber implements MessageListener {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

@@ -39,6 +39,7 @@ public class AgentAuthFilterConfig {
             "/api/agents/status",
             "/api/agent-callback/*",
             "/api/v1/agent-callback/*",
+            "/api/license-status/agent",
             "/ws/agent"
         );
         registration.setName("agentAuthFilter");

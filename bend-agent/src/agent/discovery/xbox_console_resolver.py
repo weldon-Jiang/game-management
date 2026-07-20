@@ -17,9 +17,9 @@ class XboxConsoleResolveResult:
 
 
 def _resolve_xbox_step2_discover():
-    from ..auth.step2_router import resolve_step2_execute_streaming
+    from ..automation.step2 import step2_execute_xsrp_streaming
 
-    return resolve_step2_execute_streaming()
+    return step2_execute_xsrp_streaming
 
 
 async def resolve_xbox_console_target(

@@ -3,6 +3,7 @@ package com.bend.gateway.filter;
 import com.bend.gateway.config.BendGatewayProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -22,7 +23,10 @@ import java.time.Duration;
 /**
  * 网关 Redis 滑动窗口限流（order=-90）。
  * <p>
- * 按 clientId + path 计数，path 可配置独立 qps/burst；Redis 异常时降级放行。
+ * 按 clientId + path 计数，path 可配置独立 qps/burst；Redis 异常或不可用(Redis Bean 缺失)时降级放行。
+ * <p>
+ * 分控模式(不连 Redis)下 ReactiveStringRedisTemplate Bean 不存在,本过滤器自动放行;
+ * 分控部署在局域网单实例,限流非必需,如需限流由后端 RateLimitInterceptor(本地 fallback)兜底。
  */
 @Slf4j
 @Component
@@ -30,13 +34,19 @@ import java.time.Duration;
 public class RateLimitFilter implements GlobalFilter, Ordered {
 
     private final BendGatewayProperties gatewayProperties;
-    private final ReactiveStringRedisTemplate redisTemplate;
+    private final ObjectProvider<ReactiveStringRedisTemplate> redisTemplateProvider;
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         BendGatewayProperties.RateLimit rateLimit = gatewayProperties.getRateLimit();
 
         if (!rateLimit.isEnabled()) {
+            return chain.filter(exchange);
+        }
+
+        ReactiveStringRedisTemplate redisTemplate = redisTemplateProvider.getIfAvailable();
+        if (redisTemplate == null) {
+            // 分控无 Redis:直接放行,限流交由后端 RateLimitInterceptor 本地兜底
             return chain.filter(exchange);
         }
 

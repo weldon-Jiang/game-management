@@ -11,6 +11,7 @@ Bend Platform 是一个企业级 Xbox 云游戏自动化管理平台，采用多
 | 文档 | 说明 |
 |------|------|
 | [Docker 启动/打包部署指南](docker/README.md) | 一键启动、单服务打包部署、停服清理脚本用法（dev/sit/prod） |
+| [生产打包指南](BUILD.md) | 总控/分控/Agent 三包打包命令 + 前置准备 + 安装使用 |
 | [开发环境搭建](docs/development.md) | 环境要求、项目结构、启动调试、代码规范 |
 | [用户操作指南](docs/user-guide.md) | 商户注册、Agent管理、任务操作 |
 | [系统流程说明](docs/flow.md) | 业务流程、数据流向 |
@@ -273,6 +274,16 @@ python -m venv venv
 pip install -r requirements.txt
 python src/main.py --agent-id <ID> --agent-secret <SECRET> --registration-code <CODE>
 ```
+
+---
+
+## 生产打包
+
+生产环境采用三层架构：**总控**(公网) + **分控**(商户局域网) + **Agent**(挂机电脑)。同一套代码靠 `--spring.profiles.active=master/tenant` 切换。
+
+打三条命令出三个 `.exe` 安装包，发给商户的是分控包 + Agent 包两个。
+
+> 📦 完整打包步骤、前置准备、安装使用见 **[BUILD.md](BUILD.md)**
 
 ---
 

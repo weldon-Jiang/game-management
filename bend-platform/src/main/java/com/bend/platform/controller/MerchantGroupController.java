@@ -1,9 +1,11 @@
 package com.bend.platform.controller;
 
+import com.bend.platform.config.MasterModeCondition;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.MerchantGroup;
 import com.bend.platform.service.MerchantGroupService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -14,6 +16,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/merchant-groups")
 @RequiredArgsConstructor
+@Conditional(MasterModeCondition.class)
 public class MerchantGroupController {
 
     private final MerchantGroupService merchantGroupService;

@@ -1,6 +1,6 @@
 # Docker 启动 / 打包部署使用指南
 
-本目录提供按环境（dev / sit / prod）一键启动、单服务打包部署、停服清理的脚本，统一基于 `docker-compose.yml` 与各自的 `.env.<env>` 文件。
+本目录提供按环境（dev / sit / prod）一键启动、单服务打包部署、停服清理的脚本，统一基于 `docker-compose.yml`。环境变量采用**分层覆盖**：`docker/.env`（基础，默认 dev）+ `.env.sit` / `.env.prod`（环境差异变量覆盖）。
 
 > 在 PowerShell（Windows）中执行，工作目录无要求，脚本会自动切换到 `docker/` 目录。
 
@@ -11,7 +11,9 @@
 | 文件 | 作用 |
 |------|------|
 | `docker-compose.yml` | 服务编排定义 |
-| `.env.dev` / `.env.sit` / `.env.prod` | 各环境变量（含密钥、端口、Spring Profile）。**已被 `.gitignore` 忽略，请勿提交** |
+| `.env` / `.env.sit` / `.env.prod` | 环境变量：`.env` 为基础（dev 默认），`.env.sit/.env.prod` 为差异覆盖。**已被 `.gitignore` 忽略，请勿提交** |
+| `.env.example` | 环境变量模板（含完整注释，提交到仓库） |
+| `.env.tenant` | 分控 Docker 部署专用 |
 | `start-dev.ps1` / `start-sit.ps1` / `start-prod.ps1` | 启动 / 打包部署 |
 | `compose-up.ps1` | 启动脚本内部共用（正确组装 `docker compose up` 参数） |
 | `hot-deploy-dev.ps1` | Dev 热部署：本地编译 + `docker cp` + 重启（无需 `docker build`） |
@@ -127,13 +129,13 @@ cd docker
 
 ```powershell
 # 查看容器状态
-docker compose --env-file .env.sit -f docker-compose.yml ps
+docker compose --env-file .env -f docker-compose.yml ps
 
 # 跟踪某服务日志
-docker compose --env-file .env.sit -f docker-compose.yml logs -f backend
+docker compose --env-file .env -f docker-compose.yml logs -f backend
 
 # 等价的原生命令（脚本即对其封装）
-docker compose --env-file .env.sit -f docker-compose.yml --profile full up -d --build
+docker compose --env-file .env --env-file .env.prod -f docker-compose.yml --profile full up -d --build
 ```
 
 ---

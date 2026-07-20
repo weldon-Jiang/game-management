@@ -63,8 +63,8 @@ public class AutomationServiceImpl implements AutomationService {
             throw new BusinessException(400, "Agent已达到最大并发任务数，请稍后再试");
         }
 
-        if (!credentialTokenService.isRedisEnabled()) {
-            throw new BusinessException(503, "Redis未启用，无法启动自动化。请联系管理员启用Redis服务。");
+        if (!credentialTokenService.isReady()) {
+            throw new BusinessException(503, "凭证令牌服务不可用，无法启动自动化。");
         }
         agentInstanceService.requireAgentOwnedByMerchant(agentId, merchantId);
 

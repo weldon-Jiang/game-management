@@ -102,6 +102,26 @@ aes:
   secret: ${AES_SECRET:}
 
 # ----------------------------------------------
+# License(商户授权)配置
+#   sign-secret: HMAC-SHA256 签名密钥(>=32字符),总控与分控需一致(分控包打包时内嵌)
+#   master-url:  总控公网地址(仅分控使用,总控留空)
+#   mode:        master-总控 / tenant-分控
+# ----------------------------------------------
+license:
+  sign-secret: ${LICENSE_SIGN_SECRET:bend-platform-license-sign-secret-2026-please-change-in-prod}
+  master-url: ${LICENSE_MASTER_URL:}
+  mode: ${LICENSE_MODE:master}
+  verify-interval-minutes: ${LICENSE_VERIFY_INTERVAL_MINUTES:30}
+  verify-interval-ms: ${LICENSE_VERIFY_INTERVAL_MS:1800000}
+  metrics-interval-ms: ${LICENSE_METRICS_INTERVAL_MS:300000}
+  online-threshold-minutes: ${LICENSE_ONLINE_THRESHOLD_MINUTES:15}
+
+# 分控安装默认配置
+tenant:
+  # 分控 MySQL root 密码（总控管理员指定，安装激活时下发给分控）
+  db-password: ${TENANT_DB_PASSWORD:D@GAMECeKfidb}
+
+# ----------------------------------------------
 # 监控和管理端点配置
 # ----------------------------------------------
 management:

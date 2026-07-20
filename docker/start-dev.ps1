@@ -22,7 +22,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location -Path $PSScriptRoot
 
-$EnvFile = '.env.dev'
+$EnvFiles = @('.env')
 $Tag = 'dev'
 $Color = 'Cyan'
 
@@ -42,6 +42,6 @@ if ($Services.Count -gt 0 -and -not $PSBoundParameters.ContainsKey('Profile')) {
 $ServiceDesc = if ($Services.Count -gt 0) { ($Services -join ', ') } else { 'all' }
 $BuildDesc = if ($NoBuild) { 'no-build' } else { 'build' }
 
-Write-Host "[$Tag] env-file=$EnvFile, profile=$Profile, services=$ServiceDesc, mode=$BuildDesc starting..." -ForegroundColor $Color
-& (Join-Path $PSScriptRoot 'compose-up.ps1') -EnvFile $EnvFile -Profile $Profile -Services $Services -NoBuild:$NoBuild
-docker compose --env-file $EnvFile -f docker-compose.yml ps
+Write-Host "[$Tag] env-files=$($EnvFiles -join ', '), profile=$Profile, services=$ServiceDesc, mode=$BuildDesc starting..." -ForegroundColor $Color
+& (Join-Path $PSScriptRoot 'compose-up.ps1') -EnvFiles $EnvFiles -Profile $Profile -Services $Services -NoBuild:$NoBuild
+docker compose --env-file $($EnvFiles[0]) -f docker-compose.yml ps

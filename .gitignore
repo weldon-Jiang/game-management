@@ -2,15 +2,15 @@
 # Bend Platform Git 忽略配置
 # ============================================
 
-# 环境变量（敏感配置）
+# 环境变量（敏感配置 — 仅排除含真实密钥的文件，模板 .example 应提交）
 .env
 .env.local
-.env.dev
 .env.sit
 .env.prod
-.env.example
+.env.tenant
 
-# Docker（通配覆盖所有 env 变体：.env.dev / .env.sit / .env.prod / .env.tenant）
+# Docker 环境变量（通配覆盖所有 env 变体：.env / .env.sit / .env.prod / .env.tenant）
+# 注意：docker/.env.example 是模板，已通过 git 跟踪，不受此规则影响
 docker/.env*
 
 # 日志
@@ -35,11 +35,21 @@ logs/
 .DS_Store
 Thumbs.db
 
+# ============================================
 # 构建产物
+# ============================================
 bend-platform/target/
 bend-platform-web/dist/
 bend-agent/dist/
 .cursor/
+
+# 绿色生产包 —— 构建中间产物与输出（不入库）
+#   staging/     green 资源 (JRE/MySQL/Redis/nginx 二进制)
+#   */staging/   各包 staging 中间产物
+#   */Output/    ISCC 编译输出 (.exe 安装包)
+deploy/standalone/staging/
+deploy/standalone/*/staging/
+deploy/standalone/*/Output/
 
 # Python 缓存与测试缓存
 __pycache__/
@@ -54,3 +64,7 @@ bend-agent/tokens/
 docs/
 .claude/
 .trae/
+
+# 本地测试临时文件
+insert_license.sql
+merchant_data.sql

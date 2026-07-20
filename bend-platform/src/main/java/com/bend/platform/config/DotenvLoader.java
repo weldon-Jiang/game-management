@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
  * 功能说明：
  * - 在应用启动时加载 .env 文件
  * - 将 .env 中的变量注入到系统环境变量
- * - 支持多环境配置（.env.local, .env.dev, .env.prod）
+ * - 支持多环境配置（.env.local, .env, .env.prod）
  *
  * 使用方式：
  * 1. 复制 .env.example 为 .env

@@ -12,6 +12,7 @@ Agent 集中配置管理
 版本：1.0
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 
@@ -184,6 +185,14 @@ class AgentConfig:
     ws_url: str = 'ws://localhost:8060/ws/agent'
     platform_api_url: str = 'http://localhost:8060/api'
 
+    # 分控架构下,打包时预置的注册码(写在本机分控的 agent.yaml 的 backend.registration_code),
+    # Agent 首次启动若已有 credentials 直接用;否则用该注册码自动向本地分控激活,无需交互输入。
+    # 为空则回退到交互式输入注册码(兼容旧流程)。
+    registration_code: str = ''
+
+    # 商户权限校验开关: true=Agent 自动化前主动调分控确认授权有效
+    require_license_check: bool = False
+
     log_level: str = 'INFO'
     log_format: str = 'standard'
     raw_yaml: Dict[str, Any] = field(default_factory=dict)
@@ -257,6 +266,8 @@ class AgentConfig:
             backend_url=backend_url,
             ws_url=config.get('ws_url', backend_block.get('ws_url', 'ws://localhost:8060/ws/agent')),
             platform_api_url=platform_api_url,
+            registration_code=backend_block.get('registration_code', '') or os.environ.get('AGENT_REGISTRATION_CODE', ''),
+            require_license_check=config.get('license', {}).get('require_check', False),
             log_level=config.get('log_level', 'INFO'),
             log_format=config.get('log_format', 'standard'),
             raw_yaml=dict(config or {}),
@@ -350,6 +361,8 @@ class AgentConfig:
 
 GLOBAL_CONFIG: Optional[AgentConfig] = None
 GLOBAL_CONFIG_ACCESSOR: Optional['Config'] = None
+# 加载时的配置文件路径,供运行中回写(如分控IP变动后更新 agent.yaml)
+_LOADED_CONFIG_PATH: Optional[str] = None
 
 
 def get_config() -> AgentConfig:
@@ -400,8 +413,34 @@ def load_config(config_path: Optional[str] = None) -> AgentConfig:
     if errors:
         raise ValueError(f"Configuration validation failed: {errors}")
 
+    global _LOADED_CONFIG_PATH
+    _LOADED_CONFIG_PATH = config_path
+
     set_config(config_obj)
     return config_obj
+
+
+def update_tenant_url_in_memory(ip: str, port: int) -> str:
+    """
+    分控 IP 变动后,更新内存全局配置的 backend_url/ws_url/platform_api_url。
+    使 WS/HTTP 客户端下次读取即用新地址(它们实时读 get_config())。
+    不写文件(持久化由 tenant_discovery 负责)。
+    返回新的 base_url。
+    """
+    global GLOBAL_CONFIG_ACCESSOR
+    cfg = get_config()
+    base = f"http://{ip}:{port}"
+    cfg.backend_url = base
+    cfg.ws_url = f"ws://{ip}:{port}/ws/agent"
+    cfg.platform_api_url = f"http://{ip}:{port}/api"
+    # 失效代理缓存,下次 config.xxx 重建,读到新值
+    GLOBAL_CONFIG_ACCESSOR = None
+    return base
+
+
+def get_loaded_config_path() -> Optional[str]:
+    """返回最近一次 load_config 的文件路径(供回写)"""
+    return _LOADED_CONFIG_PATH
 
 
 def get_config_accessor() -> 'Config':

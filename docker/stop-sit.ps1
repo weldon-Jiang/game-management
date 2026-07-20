@@ -14,13 +14,13 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location -Path $PSScriptRoot
 
-$EnvFile = '.env.sit'
+$EnvFiles = @('.env', '.env.sit')
 $Tag = 'sit'
 
 $DownArgs = @('down')
 if ($RemoveVolumes) { $DownArgs += '-v' }
 if ($RemoveImages)  { $DownArgs += @('--rmi', 'local') }
 
-Write-Host "[$Tag] env-file=$EnvFile, 执行 down $($DownArgs[1..($DownArgs.Count-1)] -join ' ') ..." -ForegroundColor Cyan
-docker compose --env-file $EnvFile -f docker-compose.yml @DownArgs
-docker compose --env-file $EnvFile -f docker-compose.yml ps
+Write-Host "[$Tag] env-files=$($EnvFiles -join ', '), 执行 down $($DownArgs[1..($DownArgs.Count-1)] -join ' ') ..." -ForegroundColor Cyan
+docker compose --env-file $($EnvFiles[0]) --env-file $($EnvFiles[1]) -f docker-compose.yml @DownArgs
+docker compose --env-file $($EnvFiles[0]) --env-file $($EnvFiles[1]) -f docker-compose.yml ps

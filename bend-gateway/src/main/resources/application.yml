@@ -88,7 +88,12 @@ bend:
       allow-credentials: true
       max-age: 3600
     ip-filter:
-      enabled: true
+      # 总控: 保持 enabled=false 或空 whitelist(公网开放)。
+      # 分控(局域网隔离): enabled=true 且 whitelist 填局域网网段内的来源 IP,
+      #   阻止公网/外网访问分控后台。例如商户局域网 192.168.1.x:
+      #   whitelist: ["192.168.1.0/24" 暂不支持CIDR, 需填具体IP或留空改用网段绑定]
+      #   生产建议分控部署时通过打包脚本写入具体白名单 IP 列表。
+      enabled: ${IP_FILTER_ENABLED:false}
       blacklist: []
       whitelist: []
     circuit-breaker:

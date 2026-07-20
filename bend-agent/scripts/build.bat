@@ -57,17 +57,25 @@ cd /d "%BUILD_DIR%"
 REM Initialize PyArmor project for better protection
 pyarmor init --src "%BUILD_DIR%" --output "%BUILD_DIR%\obfuscated" 2>nul
 
-REM Generate obfuscated code (removed --protect to avoid entry point issues)
+REM Generate obfuscated code with maximum protection
+REM --advanced 2: 控制流扁平化 + 虚假分支注入
+REM --mix-str:    字符串常量加密
+REM --private:    禁止外部直接 import 混淆模块
+REM --restrict:   限制模块导入,防止动态反射破解
 pyarmor gen ^
     --output "%BUILD_DIR%\obfuscated" ^
     --recursive ^
+    --advanced 2 ^
+    --mix-str ^
+    --private ^
+    --restrict ^
     main.py agent
 
 if errorlevel 1 (
     echo.
-    echo [WARNING] PyArmor obfuscation failed, attempting alternative method...
-    REM Try alternative pyarmor command
-    pyarmor gen --output "%BUILD_DIR%\obfuscated" main.py agent
+    echo [WARNING] PyArmor advanced mode failed, retrying with basic mode...
+    REM Fallback: basic obfuscation without advanced options
+    pyarmor gen --output "%BUILD_DIR%\obfuscated" --recursive main.py agent
     if errorlevel 1 (
         echo [ERROR] PyArmor obfuscation failed completely
         echo Will use un-obfuscated code (NOT RECOMMENDED FOR PRODUCTION)
@@ -87,9 +95,11 @@ REM Run PyInstaller with maximum protection
 echo [7/9] Running PyInstaller...
 REM Use --console instead of --windowed to see errors during testing
 REM After testing passes, change to --windowed for production
+REM PyInstaller --key 对打包内容做 AES-256 加密,配合 PyArmor 双重保护
 pyinstaller --name "BendAgent" ^
     --onefile ^
     --console ^
+    --key "BendAgent2026!@#Secure" ^
     --add-data "%OBFUSCATED_DIR%\agent;agent" ^
     --hidden-import=asyncio ^
     --hidden-import=aiohttp ^

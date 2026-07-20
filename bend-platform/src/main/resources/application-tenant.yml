@@ -1,0 +1,39 @@
+# ================================================
+# 分控(Tenant)模式 profile
+# 启动方式: SPRING_PROFILES_ACTIVE=tenant  或  --spring.profiles.active=tenant
+# 配合 LICENSE_MODE=tenant 使用
+# ================================================
+# 分控模式下:
+#   - LicenseClientService / LicenseGateFilter / LicenseVerifyScheduler 装配(校验总控授权)
+#   - 商户管理 / VIP分组 / License签发 等总控专属 Controller 不装配(访问404)
+#   - 仅服务该商户自己的业务(商户数据在打包时已导入本地库)
+#   - 不依赖外部 Redis: 排除 Redis 自动配置,所有缓存/限流/幂等走本地 fallback
+
+license:
+  mode: tenant
+
+spring:
+  # 分控不连接 Redis: 排除 Redis 自动配置,不创建 RedisTemplate Bean。
+  # 代码中所有 RedisTemplate 均为 @Autowired(required=false),Bean 缺失时自动走本地 fallback
+  # (限流/幂等/缓存/租约/断线宽限/负载计数均已实现本地 ConcurrentHashMap 降级)。
+  # 分控为单实例部署,本地 fallback 与 Redis 语义等价。
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+  data:
+    redis:
+      enabled: false
+
+  # 数据库增量迁移（自建 migration_history 表，仅分控 tenant 模式启用）
+  # - 首次安装: schema.sql 已建全量表 → 所有迁移脚本 idempotent → 执行后记录
+  # - 版本升级: 新 JAR 含新迁移脚本 → 仅执行未跑过的
+  bend:
+    migration:
+      enabled: true
+
+logging:
+  level:
+    com.bend.platform.service.impl.LicenseClientServiceImpl: INFO
+    com.bend.platform.config.LicenseGateFilter: INFO
+    com.bend.platform.scheduler.LicenseVerifyScheduler: INFO

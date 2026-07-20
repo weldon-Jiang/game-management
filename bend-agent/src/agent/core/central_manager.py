@@ -30,7 +30,7 @@ from ..core.heartbeat_logger import get_heartbeat_logger
 from ..api.client import ApiClient
 from ..api.websocket import WSClient
 from ..core.update_manager import UpdateManager, UpdateStatus
-from ..windows.stream_window import StreamWindow, WindowState
+from ..window.stream_window import StreamWindow, WindowState
 from ..vision.frame_capture import VideoFrameCapture
 from ..vision.template_matcher import TemplateMatcher
 from ..input.input_controller import InputController
@@ -445,7 +445,7 @@ class CentralManager:
 
         # 清理所有窗口
         try:
-            from ..windows.task_window_manager import TaskWindowManager
+            from ..window.task_window_manager import TaskWindowManager
             window_manager = TaskWindowManager()
             await window_manager.close_all_windows()
             self.logger.info("All windows closed")

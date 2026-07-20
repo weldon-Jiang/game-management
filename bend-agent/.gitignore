@@ -42,10 +42,10 @@ Thumbs.db
 logs/
 *.log
 
-# Runtime data
+# Runtime data (sensitive — 含 Agent 注册凭证/Token)
 tokens/
 credentials/
-*.json
+credentials/*.json
 
 # Build artifacts
 obfuscated/

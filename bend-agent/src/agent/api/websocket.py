@@ -294,7 +294,13 @@ class WSClient:
                 current_ws_id = self._ws_id
 
             import websockets
-            url = f"{self.ws_url}/{self.agent_id}?agentSecret={self.agent_secret}"
+            # 实时读 config.ws_url:分控 IP 变动后重新发现更新过 config,重连即用新地址
+            try:
+                from agent.core.config import get_config
+                cur_ws_url = get_config().ws_url
+            except Exception:
+                cur_ws_url = self.ws_url
+            url = f"{cur_ws_url}/{self.agent_id}?agentSecret={self.agent_secret}"
             try:
                 ws = await websockets.connect(url, ping_interval=None)
 
@@ -313,6 +319,15 @@ class WSClient:
                 self.logger.warning(f"Reconnection attempt {attempt} failed: {e}")
                 async with self._connection_lock:
                     self._connection_state = ConnectionState.RECONNECTING
+                # 连续失败3次:可能分控IP变动,触发UDP重新发现并更新config
+                if attempt % 3 == 0:
+                    try:
+                        from agent.core.tenant_discovery import rediscover
+                        new_url = rediscover(timeout=8.0)
+                        if new_url:
+                            self.logger.info(f"分控地址重新发现并更新: {new_url}")
+                    except Exception as rd_err:
+                        self.logger.debug(f"rediscover skipped: {rd_err}")
 
             await asyncio.sleep(self._reconnect_delay * min(attempt, 5))
 

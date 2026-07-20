@@ -45,6 +45,14 @@
           <el-icon><Key /></el-icon>
           <template #title>激活码管理</template>
         </el-menu-item>
+        <el-menu-item
+          v-if="authStore.isPlatformAdmin && platformStore.isMasterMode"
+          index="RegistrationCodes"
+          @click="router.push('/registration-codes')"
+        >
+          <el-icon><Tickets /></el-icon>
+          <template #title>分控注册码</template>
+        </el-menu-item>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="AgentVersions" @click="router.push('/agent-versions')">
           <el-icon><Box /></el-icon>
           <template #title>Agent版本</template>
@@ -67,10 +75,6 @@
         <el-menu-item v-if="authStore.hasManagementPermission || authStore.isOperator" index="Agents" @click="router.push('/agents')">
           <el-icon><Cpu /></el-icon>
           <template #title>Agent管理</template>
-        </el-menu-item>
-        <el-menu-item v-if="authStore.isPlatformAdmin" index="RegistrationCodes" @click="router.push('/registration-codes')">
-          <el-icon><Key /></el-icon>
-          <template #title>注册码管理</template>
         </el-menu-item>
         <el-menu-item
           v-if="authStore.hasManagementPermission || authStore.isOperator"
@@ -145,10 +149,11 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { usePlatformStore } from '@/stores/platform'
 import {
   Odometer,
   OfficeBuilding,
@@ -172,6 +177,7 @@ import {
 
 const router = useRouter()
 const authStore = useAuthStore()
+const platformStore = usePlatformStore()
 
 const isCollapse = ref(false)
 
@@ -204,6 +210,12 @@ const handleUserCommand = (command) => {
     }).catch(() => {})
   }
 }
+
+onMounted(() => {
+  if (authStore.isLoggedIn && !platformStore.loaded) {
+    platformStore.fetchConfig()
+  }
+})
 </script>
 
 <style scoped>

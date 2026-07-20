@@ -7,7 +7,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 商户注册码：Agent 首次注册或商户自助开通时的一次性凭证。
+ * 分控安装注册码：总控为商户签发，分控安装激活时一次性消费。
  */
 @Data
 @TableName("merchant_registration_code")

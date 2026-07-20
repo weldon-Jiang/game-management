@@ -145,7 +145,57 @@
     </dependencies>
 
     <build>
+        <!-- 将 db/migration/*.sql 打包到 classpath，供 Flyway 自动迁移 -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>db/migration</directory>
+                <targetPath>db/migration</targetPath>
+                <includes>
+                    <include>**/*.sql</include>
+                </includes>
+            </resource>
+        </resources>
         <plugins>
+            <!-- ProGuard 代码混淆（生产打包时运行，IDE 编译不触发） -->
+            <plugin>
+                <groupId>com.github.wvengen</groupId>
+                <artifactId>proguard-maven-plugin</artifactId>
+                <version>2.6.1</version>
+                <executions>
+                    <execution>
+                        <id>proguard-obfuscate</id>
+                        <phase>process-classes</phase>
+                        <goals><goal>proguard</goal></goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <proguardInclude>${project.basedir}/proguard.conf</proguardInclude>
+                    <injar>classes</injar>
+                    <outjar>classes</outjar>
+                    <libs>
+                        <lib>${java.home}/jmods/java.base.jmod</lib>
+                        <lib>${java.home}/jmods/java.sql.jmod</lib>
+                        <lib>${java.home}/jmods/java.management.jmod</lib>
+                    </libs>
+                    <proguardVersion>7.4.2</proguardVersion>
+                    <options>
+                        <option>-ignorewarnings</option>
+                        <option>-dontwarn java.lang.management.**</option>
+                        <option>-dontwarn com.bend.platform.service.SystemMonitorService</option>
+                        <option>-dontwarn com.bend.platform.util.JvmInfoUtil</option>
+                    </options>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.guardsquare</groupId>
+                        <artifactId>proguard-base</artifactId>
+                        <version>7.4.2</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

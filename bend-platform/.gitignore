@@ -14,5 +14,5 @@
 # Environment files (contains sensitive data)
 .env
 .env.local
-.env.dev
+.env.sit
 .env.prod

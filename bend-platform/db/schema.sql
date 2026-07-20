@@ -875,5 +875,96 @@ INSERT INTO bend_platform.merchant_group (id, name, vip_level, amount_threshold,
 INSERT INTO merchant (id, phone, name, status, created_time, updated_time, deleted, is_system, total_amount, vip_level)
 VALUES ('f5d927c40f87f57ef0f4a484d8a823e9', '13800138000', '系统管理员', 'active', '2026-04-16 17:21:58', '2026-04-23 11:16:44', 0, 1, 0, 0);
 
+-- 默认账号：admin / 123456
+-- password_hash = 5f59b6ec6019c1a1499fc241b5f578b1 是 AES(123456) 的 hex 密文（key 见 docker/.env 或 .env.tenant 的 AES_SECRET）
+-- ⚠️ 修改本行前请确认：1) AES_SECRET 与 backend 启动时一致  2) hash 必须是 AES 加密后的 hex，**不是 MD5/BCrypt**
+-- 如忘记密钥可重新生成：用 AesUtil.encrypt("123456") 得到的新 hash 替换
 INSERT INTO merchant_user (id, merchant_id, username, phone, password_hash, role, status, total_recharged, last_login_time, created_time, deleted)
 VALUES ('f5d927c40f87f57ef0f4a484d8a823f9', 'f5d927c40f87f57ef0f4a484d8a823e9', 'admin', '13800138000', '5f59b6ec6019c1a1499fc241b5f578b1', 'platform_admin', 'active', 0, '2026-05-07 10:52:43', '2026-04-16 17:21:58', 0);
+
+-- ---------------------------------------------
+-- 商户授权(License)表 —— 总控签发,分控校验
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS `merchant_license` (
+    `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
+    `merchant_id` VARCHAR(64) NOT NULL COMMENT '所属商户ID',
+    `license_key` VARCHAR(128) NOT NULL COMMENT '授权密钥(分控校验时携带)',
+    `license_secret` VARCHAR(255) NOT NULL COMMENT '授权密钥哈希(服务端校验license_key用)',
+    `status` VARCHAR(20) NOT NULL DEFAULT 'active' COMMENT '状态: active, expired, revoked, pending',
+    `expire_at` DATETIME NOT NULL COMMENT '到期时间',
+    `max_agents` INT DEFAULT 5 COMMENT '最大Agent数量',
+    `max_tasks` INT DEFAULT 50 COMMENT '最大并发任务数',
+    `features` TEXT DEFAULT NULL COMMENT '功能特性(JSON)',
+    `bound_machine_fingerprint` VARCHAR(255) DEFAULT NULL COMMENT '绑定的机器指纹(首次激活写入)',
+    `activated_at` DATETIME DEFAULT NULL COMMENT '首次激活时间',
+    `last_verified_at` DATETIME DEFAULT NULL COMMENT '分控最近一次校验时间',
+    `last_verify_ip` VARCHAR(64) DEFAULT NULL COMMENT '分控最近一次校验来源IP',
+    `offline_grace_hours` INT DEFAULT 24 COMMENT '离线宽限小时数',
+    `revoked_at` DATETIME DEFAULT NULL COMMENT '吊销时间',
+    `revoke_reason` VARCHAR(512) DEFAULT NULL COMMENT '吊销原因',
+    `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_license_key` (`license_key`),
+    KEY `idx_merchant_id` (`merchant_id`),
+    KEY `idx_status` (`status`),
+    KEY `idx_expire_at` (`expire_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商户授权(License)表';
+
+-- ---------------------------------------------
+-- 分控License校验缓存 —— 离线宽限判断
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS `license_verify_cache` (
+    `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
+    `license_key` VARCHAR(128) NOT NULL COMMENT '授权密钥',
+    `merchant_id` VARCHAR(64) NOT NULL COMMENT '商户ID',
+    `valid` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '校验结果: 1-有效 0-无效',
+    `expire_at` DATETIME DEFAULT NULL COMMENT '授权到期时间',
+    `features` TEXT DEFAULT NULL COMMENT '功能特性JSON',
+    `verified_at` DATETIME NOT NULL COMMENT '本次校验时间(总控时间,签名内)',
+    `signature` VARCHAR(512) NOT NULL COMMENT '校验结果签名(防伪造)',
+    `raw_payload` TEXT DEFAULT NULL COMMENT '原始签名前JSON',
+    `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_license_key` (`license_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='分控License校验缓存';
+
+-- ---------------------------------------------
+-- 分控汇总指标表 —— 总控监控大盘(分控定时上报)
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS `tenant_metrics` (
+    `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
+    `merchant_id` VARCHAR(64) NOT NULL COMMENT '商户ID',
+    `license_key` VARCHAR(128) NOT NULL COMMENT '授权密钥',
+    `report_at` DATETIME NOT NULL COMMENT '分控上报时间',
+    `received_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '总控接收时间',
+    `online_agent_count` INT DEFAULT 0 COMMENT '在线Agent数',
+    `total_agent_count` INT DEFAULT 0 COMMENT 'Agent总数',
+    `today_task_count` INT DEFAULT 0 COMMENT '今日任务数',
+    `running_task_count` INT DEFAULT 0 COMMENT '执行中任务数',
+    `today_points_consumed` INT DEFAULT 0 COMMENT '今日已消费点数',
+    `balance` INT DEFAULT 0 COMMENT '当前点数余额',
+    `license_status` VARCHAR(32) DEFAULT NULL COMMENT '分控license状态',
+    `platform_version` VARCHAR(32) DEFAULT NULL COMMENT '分控版本号',
+    `extra` TEXT DEFAULT NULL COMMENT '扩展指标JSON',
+    `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_merchant_report` (`merchant_id`, `report_at`),
+    KEY `idx_merchant_id` (`merchant_id`),
+    KEY `idx_report_at` (`report_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='分控汇总指标表';
+
+-- ---------------------------------------------
+-- 数据库迁移历史（MigrationRunner 自动管理）
+-- 记录每条增量迁移脚本的执行情况，确保不重复执行
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS `migration_history` (
+    `filename` VARCHAR(255) NOT NULL COMMENT '迁移脚本文件名',
+    `executed_at` DATETIME NOT NULL COMMENT '执行时间',
+    `checksum` VARCHAR(64) DEFAULT NULL COMMENT '脚本内容 MD5',
+    `success` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否成功: 1-成功 0-失败',
+    `error_message` TEXT DEFAULT NULL COMMENT '失败原因',
+    PRIMARY KEY (`filename`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据库迁移历史';

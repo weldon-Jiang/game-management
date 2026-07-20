@@ -16,7 +16,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from ..core.logger import get_logger
-from ..lan.network_util import subnet_broadcast_from_ip
+from ..discovery.lan_network_util import subnet_broadcast_from_ip
 from .models import ChiakiDiscoveryHost
 
 logger = get_logger("chiaki_discovery")

@@ -15,6 +15,7 @@
 | 架构红线     | 新增控制接口/自动化入口必须遵循下方「架构红线」       |
 | 注释清晰     | 前端、后端、Agent 的接口、方法、字段、步骤与核心逻辑必须写清楚注释 |
 | 聚焦验证（P1） | 仅验证改动模块，不做全流程验证                |
+| 项目记忆（P0） | 记忆存读均使用项目根目录 `DEPLOYMENT_ISSUES.md`；不使用 Claude 个人记忆系统 |
 
 
 ---
@@ -42,7 +43,9 @@
 .\docker\start-dev.ps1 / start-sit.ps1 / start-prod.ps1
 
 # 手动命令（务必带 --env-file，否则容器内变量为空）
-docker compose --env-file docker/.env.dev -f docker/docker-compose.yml --profile full up -d --build
+# 开发环境：docker compose --env-file docker/.env -f docker/docker-compose.yml --profile full up -d --build
+# SIT/生产：叠加 profile 覆盖文件（--env-file 可多次指定，后者覆盖前者）
+# docker compose --env-file docker/.env --env-file docker/.env.prod -f docker/docker-compose.yml --profile full up -d --build
 docker compose -f docker/docker-compose.yml ps
 docker compose -f docker/docker-compose.yml logs -f backend
 ```
@@ -103,9 +106,18 @@ docker compose -f docker/docker-compose.yml logs -f backend
 - 限流：login 5/3、register 3/2、`/api/agents/**` 50/30、默认 100/50
 - Actuator：dev/sit `health,info,gateway`；prod 仅 `health,info`
 
-### Agent `bend-agent`（20 子包，Python 3.9 / asyncio）
+### Agent `bend-agent`（201 py 文件 / 24 子包，Python 3.9 / asyncio）
 
-`automation/` 四步骤（核心） · `api/` HTTP+WS · `auth/` MSAL/xblive 路由 · `core/` 中央管理/日志/路径 · `discovery/` Xbox 发现 · `game/` 账号切换 · `gssv/` GSSV API · `input/` 手柄/键盘 · `orchestration/` 两阶段编排 · `**runtime/` 并发原语**（task_registry/phase_fsm/input_gate/input_focus/task_control_handler） · `scene/` 场景检测 · `session/` `system/` `task/` 调度执行 · `utils/`（crypto） · `vision/` 模板/解码/捕获 · `window/` `windows/` SDL · `xbox/` GSSV 云端串流 + LAN 发现（SmartGlass UDP 仅发现/唤醒兜底） · `xhome_stream/`
+**自动化四步骤** `automation/step{1-4}/`（2026-07 重构为独立子包）:
+
+| 包 | 模块 | 入口 | 职责 |
+|---|---|---|---|
+| `automation/step1/` | `xblive_login.py` | `step1_execute_login` | xblive SISU 认证 + Xbox/GSSV Token |
+| `automation/step2/` | `router.py` `xsrp_streaming.py` `playstation_streaming.py` | `step2_execute_streaming` | 平台分发 → GSSV 云端发现 + play/WebRTC 握手 |
+| `automation/step3/` | `xsrp_init.py` `display_helpers.py` | `step3_execute_xsrp_init` | WebRTC 帧捕获 + SDL 窗口 + 输入通道就绪 |
+| `automation/step4/` | `orchestrator.py` + 10 模块 | `step4_execute_gaming` | FC 启动 / 转会 / SQB / DR / WL 全流程 |
+
+**核心支撑包**: `core/`(配置/日志/许可) · `api/`(HTTP+WS) · `task/`(调度/上下文) · `auth/`(xblive 认证) · `xbox/`(GSSV/WebRTC) · `gssv/`(GSSV 协议) · `vision/`(帧捕获/模板/OCR) · `scene/`(场景检测) · `input/`(手柄/键盘) · `game/`(账号切换) · `runtime/`(并发原语 FSM/InputGate) · `window/`+`windows/`(窗口管理) · `discovery/`(设备发现) · `playstation/`(PS 平台隔离)
 
 配置：`configs/agent.yaml` · `configs/scene_schemas.py` (SCENE_SCHEMAS 100 行 + SCENE_NAMES ID 1-204) · `configs/scene_transitions.py` · `templates/{场景}.{模板}.png`
 
@@ -371,7 +383,7 @@ task:
 | 限流   | 网关 Redis 滑动窗口（登录/注册严格、Agent 接口宽松）                             |
 | 后端测试 | 核心模块 ≥ 80% 覆盖；`test{MethodName}_{Scenario}_{Expected}`        |
 | 前端测试 | Vitest 单元 + MSW 集成；Playwright 已配置（待补 E2E）                     |
-| 环境   | `.env.dev` / `.env.sit` / `.env.prod`（位于 `docker/`）           |
+| 环境   | `docker/.env`（基础）+ `.env.sit` / `.env.prod`（覆盖，位于 `docker/`）           |
 | Prod | `start-prod.ps1` 强制校验 `CHANGE_ME_*` 占位符                       |
 | 健康检查 | 各服务 `healthcheck`；`depends_on: condition: service_healthy` 串联 |
 
@@ -383,8 +395,55 @@ task:
 
 ---
 
+## 🏭 总控/分控/Agent 生产打包与部署
+
+三层架构：**总控**(公网, master profile) + **分控**(商户局域网, tenant profile, 不连 Redis) + **Agent**(Python, UDP 发现分控自动注册)。backend/gateway 是同一 jar，靠 `--spring.profiles.active` 切换。
+
+### 打包前置（一次性，green 资源不入 git）
+
+放入 `deploy/standalone/staging/base/`：`jre/`(JRE21) · `mysql/`(MySQL8 green,含 my.ini) · `redis/`(Redis Windows green,仅总控) · `nginx/`(nginx green) · `nssm.exe`。
+Agent 额外放入 `deploy/standalone/staging/agent/`：`chromium/`(Playwright Chromium 目录,离线) · `vc_redist.x64.exe`(VC++ 2015-2022 x64) · `nssm.exe`。
+
+### 三包命令
+
+```powershell
+# 总控(公网,打一次)
+deploy\standalone\master\build-master-package.ps1
+# 分控(通用包,打一次; 安装时输入激活码实时签发License+拉取数据)
+deploy\standalone\tenant\build-tenant-package.ps1
+# Agent(通用包,打一次; 安装后UDP自动发现分控)
+deploy\standalone\agent\build-agent-package.ps1
+```
+
+### 打包规则（P0，必须遵守）
+
+| # | 规则 | 违反后果 |
+|---|---|---|
+| P1 | backend/gateway 同源 jar，靠 `--spring.profiles.active=master/tenant` 切换；不得为总控/分控维护两份代码 | 代码分叉、维护灾难 |
+| P2 | `license.sign-secret` 总控与分控必须一致（分控包打包时内嵌同一密钥） | 分控验签失败，license 校验全挂 |
+| P3 | `tenant.env` 的 `LICENSE_SECRET` 明文仅签发时返回一次，不入 git；打出的分控包需妥善保管 | 授权泄露 |
+| P4 | 商户数据导出走 `GET /api/merchants/{id}/export-data`（纯 JDBC 生成 INSERT IGNORE SQL），禁让打包机直连总控库 | 打包机暴露 DB 凭据 |
+| P5 | `.iss` 用 `{cmd}/c mysql.exe ... < schema.sql`、`{sys}\setx.exe /M`、`{sys}\netsh.exe advfirewall`，禁引入自定义 init-db.jar/set-env.exe 小工具 | 依赖未打包则安装失败 |
+| P6 | 分控 nginx.conf 必须 `listen 8090`（绑 0.0.0.0，非 127.0.0.1）+ 安装时 `netsh advfirewall` 放行 8090/8060 | 同局域网其他电脑/Agent 连不上 |
+| P7 | Agent 免注册码注册走 `POST /api/agents/auto-register`（分控侧，@Conditional tenant），UDP 47820 发现；不得回退到交互式注册码 | 商户需手动拿注册码，违背"零配置" |
+| P8 | green 资源（JRE/MySQL/Redis/nginx/Chromium/vc_redist）体积大，禁入 git；由打包者本地准备 | 仓库膨胀 |
+| P9 | 打包前 backend/gateway `mvn -DskipTests clean package`、前端 `npm run build`、Agent 跑 `bend-agent/scripts/build.bat` 产出 BendAgent.exe | 打入旧产物 |
+| P10 | 分控 `application-tenant.yml` 必须排除 `RedisAutoConfiguration`（分控不连 Redis，走本地 fallback） | 分控启动依赖外部 Redis，违背内嵌 |
+
+### 打包后验证清单
+
+- [ ] 总控：安装后 `curl http://公网:8060/actuator/health` UP，后台能登录
+- [ ] 分控：安装后 `http://localhost:8090` 可打开，`logs/bend-platform.log` 见 license 校验 `valid=true`
+- [ ] Agent：安装后服务 `BendAgent` Running，`logs/service_stdout.log` 见 "已发现分控"+"自动注册成功"
+- [ ] 三端时间戳/license 密钥一致
+
+详见 [BUILD.md](BUILD.md)（打包指南）· [deploy/standalone/README.md](deploy/standalone/README.md)（总览）· [deploy/standalone/master/README.md](deploy/standalone/master/README.md) · [deploy/standalone/tenant/README.md](deploy/standalone/tenant/README.md) · [deploy/standalone/agent/README.md](deploy/standalone/agent/README.md)
+
+---
+
 ## 📚 相关文档
 
+- [项目知识库（架构/修复/踩坑）](DEPLOYMENT_ISSUES.md) ← **所有会话的记忆文件，新增/更新/读取记忆均操作此文件**
 - [Step4 场景设计与新增手册](bend-agent/docs/STEP4_SCENE_DESIGN.md)
 - [架构合理性评审](docs/review/01_architecture_review.md)
 - [Agent 并发设计分析](docs/review/02_agent_concurrency.md)
@@ -419,13 +478,14 @@ task:
     {"id": "R010", "name": "Agent 并发隔离", "priority": "P0", "check": "step4 严禁模块级全局；引擎/切换器挂 context._xxx；单任务 finally 严禁 scheduler.close()", "location": ["bend-agent/src/agent/automation/step4_game_automation.py", "bend-agent/src/agent/task/task_executor.py"]},
     {"id": "R011", "name": "调度器获取方式", "priority": "P0", "check": "用 get_active_scheduler()；不得通过 task_executor.scheduler 取（属性不存在）", "location": ["bend-agent/src/agent/task/automation_scheduler.py"]},
     {"id": "R012", "name": "数据库迁移规范", "priority": "P0", "check": "新增 V{YYYYMMDD}_{NNN}_*.sql 必须声明 utf8mb4 字符集，避免中文 COMMENT 乱码；并同步更新 schema.sql 与 MIGRATION_INDEX.md；通过 run-migration 脚本手动应用", "location": ["bend-platform/db/migration/", "bend-platform/db/schema.sql"]},
-    {"id": "R013", "name": "Docker 启动规范", "priority": "P0", "check": "docker compose 必须带 --env-file docker/.env.{env}；优先用 docker/start-{env}.ps1", "location": ["docker/docker-compose.yml", "docker/start-dev.ps1"]},
+    {"id": "R013", "name": "Docker 启动规范", "priority": "P0", "check": "docker compose 必须带 --env-file docker/.env；SIT/Prod 叠加 --env-file docker/.env.{env}；优先用 docker/start-{env}.ps1", "location": ["docker/docker-compose.yml", "docker/start-dev.ps1"]},
     {"id": "R014", "name": "商户隔离强校验", "priority": "P0", "check": "商户写操作必须经 UserContext.getMerchantId() 显式传参 + DataSecurityUtil.validateMerchantAccess 校验", "location": ["bend-platform/src/main/java/com/bend/platform/util/UserContext.java", "bend-platform/src/main/java/com/bend/platform/util/DataSecurityUtil.java"]},
     {"id": "R015", "name": "前端单文件大小约束", "priority": "P1", "check": "单 .vue 不超过 800 行；超过应拆子组件 + composable；scoped 样式禁硬编码颜色（用 var(--*)）", "location": ["bend-platform-web/src/views/"]},
     {"id": "R016", "name": "后端注释规范", "priority": "P0", "check": "Controller / Service / Entity / DTO / Mapper 等新增或改动类必须补充类级 Javadoc；接口、公共方法、关键私有方法、重要字段、状态字段、复杂业务分支必须写清楚用途、约束、状态迁移与异常语义", "location": ["bend-platform/src/main/java/com/bend/platform/"]},
     {"id": "R017", "name": "前端注释规范", "priority": "P0", "check": "复杂函数、核心业务逻辑、关键状态计算、权限/计费/任务控制分支必须补充注释；禁止给简单赋值、显而易见表达式堆砌低价值注释", "location": ["bend-platform-web/src/"]},
     {"id": "R018", "name": "Agent 注释规范", "priority": "P0", "check": "自动化 Step1-4 每个步骤、任务状态流转、资源清理、异常保留/失败分支、输入控制、场景识别等核心环节必须写清楚注释；复杂 async 流程需说明等待条件与退出条件", "location": ["bend-agent/src/agent/automation/", "bend-agent/src/agent/runtime/", "bend-agent/src/agent/task/"]},
-    {"id": "R019", "name": "Git 红线", "priority": "P0", "check": "禁止提交 target/、__pycache__/、logs/、tokens/、docker/.env.*；调试埋点不得入库", "location": [".gitignore"]}
+    {"id": "R019", "name": "Git 红线", "priority": "P0", "check": "禁止提交 target/、__pycache__/、logs/、tokens/、docker/.env.*；调试埋点不得入库", "location": [".gitignore"]},
+    {"id": "R020", "name": "项目记忆管理", "priority": "P0", "check": "新增/更新项目记忆（架构决策、修复记录、踩坑、关键认知等）必须写入项目根目录 DEPLOYMENT_ISSUES.md；读取记忆也必须从 DEPLOYMENT_ISSUES.md 读取；不使用 Claude 个人记忆系统（C:\\Users\\...\\memory\\）", "location": ["DEPLOYMENT_ISSUES.md"]}
   ]
 }
 ```

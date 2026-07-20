@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ..core.config import config
 from ..core.logger import get_logger
-from ..lan.network_util import (
+from ..discovery.lan_network_util import (
     is_blocked_scan_ip,
     is_private_lan_ip,
     is_same_lan_segment,

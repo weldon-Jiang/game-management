@@ -360,10 +360,10 @@ async def _run_xsrp_step3_after_connect(
 
     平台仍分别收到 STEP2/STEP3 进度；SessionPhase.READY 门闩不变。
     """
-    from ..auth.step3_router import resolve_step3_streaming_init
+    from ..automation.step3 import step3_execute_xsrp_init
     from ..task.task_context import Step3Result
 
-    step3_init = resolve_step3_streaming_init()
+    step3_init = step3_execute_xsrp_init
     task_logger.info("xsrp Step2 握手完成，链接执行 Step3 串流环境初始化")
     stream_logger.info("xsrp Step2→Step3 执行层合并：开始串流环境初始化")
     result = await step3_init(context, check_cancel, report_progress)
