@@ -1,6 +1,9 @@
-> **架构勘误（2026-06-13）**：生产 Step2–3 为 **xblive/xsrp（GSSV 云端 + WebRTC）**，入口见 `bend-agent/src/agent/automation/step2_xsrp.py`、`step3_xsrp.py`。下文 SmartGlass LAN、`step2_xbox_streaming.py` 等为**历史方案**；SmartGlass UDP 仅作 LAN 发现/唤醒兜底。详见 [00_架构勘误_xsrp_step2.md](.trae/documents/00_架构勘误_xsrp_step2.md)。
+> ⚠ **历史文档（2026-06-13）**：本文档为开发完成时的成果总结。当前架构权威文档请参阅:
+> - [AGENTS.md](AGENTS.md) — AI 全局技能文档（架构红线、开发规范、协议矩阵）
+> - [DEPLOYMENT_ISSUES.md](DEPLOYMENT_ISSUES.md) — 项目知识库（架构/修复/踩坑）
+> - [bend-agent/ARCHITECTURE.md](bend-agent/ARCHITECTURE.md) — Agent 内部架构
 
-# Agent 自动化模块 - 完整成果总结
+# Agent 自动化模块 - 开发完成总结（历史存档）
 
 ## 📋 项目概述
 

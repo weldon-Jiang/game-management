@@ -48,75 +48,22 @@ from ..task.task_context import (
 )
 from ..input.controller_protocol import XboxButtonFlag
 
-VALID_TASK_TYPES = frozenset({
-    'auction_transfer',
-    'squad_battle',
-    'transfer_sqb_combo',
-    'divisions_rivals',
-    'weekend_league',
-})
+# 常量提取至 step4/constants.py，保持向后兼容
+from .step4.constants import (
+    VALID_TASK_TYPES,
+    MATCH_END_SCENE_IDS, UT_MENU_SCENE_IDS, SETTLEMENT_SCENE_IDS,
+    EXPECTED_SCREEN_SCENES,
+    NAVIGATION_CONFIG,
+    SQB_DIFFICULTY_MAP,
+    AUCTION_CONFIG,
+    DR_DIVISION_MAP,
+    WEEKEND_LEAGUE_REQUIREMENTS,
+)
 
-# 比赛结束 / 回到 UT 菜单的场景（本地模板 + streaming 对齐）
-MATCH_END_SCENE_IDS = [102, 193]
-UT_MENU_SCENE_IDS = [127, 147, 149]
-SETTLEMENT_SCENE_IDS = [184, 185, 186, 187, 188, 189, 193]
-# expected_screen -> Streaming 场景 ID（Xbox 系统 UI 1-9，足球 UT 菜单 100+）
-EXPECTED_SCREEN_SCENES: Dict[str, list] = {
-    'MAIN_MENU': [127, 149, 147, 101],
-    'MATCH_START': [168, 176],
-    'XBOX_SCENE_3': [3],
-    'XBOX_SCENE_5': [5],
-    'XBOX_SCENE_6': [6],
-}
 
-# 游戏模式导航配置
-NAVIGATION_CONFIG = {
-    # UT菜单导航超时配置
-    'ut_menu_timeout': 30,      # UT菜单检测超时(秒)
-    'matchmaking_timeout': 60,   # 匹配超时(秒)
-    'button_press_delay': 0.3,  # 按钮按下后等待时间(秒)
-}
-
-# SQB难度配置
-SQB_DIFFICULTY_MAP = {
-    'easy': 'World Class',
-    'normal': 'Professional',
-    'hard': 'Harder',
-    'ultimate': 'Ultimate',
-}
-
-# 拍卖行配置
-AUCTION_CONFIG = {
-    'buy': {
-        'min_price': 1000,
-        'max_price': 50000,
-        'max_bid_increase': 1000,
-        'retry_count': 3,
-    },
-    'sell': {
-        'starting_price_ratio': 0.8,
-        'buy_now_price_ratio': 1.0,
-        'duration_minutes': 60,
-    }
-}
-
-# DR段位配置
-DR_DIVISION_MAP = {
-    'champion': {'min_points': 2000, 'max_points': 9999, 'display': 'Champion'},
-    'elite': {'min_points': 1500, 'max_points': 1999, 'display': 'Elite'},
-    'gold': {'min_points': 1000, 'max_points': 1499, 'display': 'Gold'},
-    'silver': {'min_points': 500, 'max_points': 999, 'display': 'Silver'},
-    'bronze': {'min_points': 0, 'max_points': 499, 'display': 'Bronze'},
-}
-
-# 周赛资格配置
-WEEKEND_LEAGUE_REQUIREMENTS = {
-    'min_division': 'elite',  # 最低需要Elite段位
-    'min_dr_points': 1500,
-    'max_matches_per_day': 5,
-    'total_matches': 10,
-}
-
+# ========================================================================
+# 1️⃣ 模板校验与场景检测器 / FC 控制器初始化  (→ step4/setup.py 候选)
+# ========================================================================
 
 def _resolve_template_dir() -> str:
     from ..core.config import config as agent_config
@@ -387,6 +334,10 @@ async def _match_expected_screen(
     return False
 
 
+# ========================================================================
+# 2️⃣ 任务类型路由与计费  (→ step4/task_routing.py 候选)
+# ========================================================================
+
 def _normalize_game_action_type(game_action_type: Optional[str]) -> str:
     if game_action_type and game_action_type in VALID_TASK_TYPES:
         return game_action_type
@@ -537,6 +488,10 @@ async def _report_billable_event(
             exc,
         )
 
+
+# ========================================================================
+# 3️⃣ FC 启动 / 账号切换 / 失败上报  (→ step4/fc_launcher.py 候选)
+# ========================================================================
 
 async def _pause_for_manual_fc_launch(
     context: AgentTaskContext,
@@ -853,6 +808,10 @@ async def _report_input_channel_event(
     except Exception as exc:
         task_logger.warning("上报 DataChannel 恢复事件失败: %s", exc)
 
+
+# ========================================================================
+# 4️⃣ 主编排器 — 自动化主入口  (→ step4/orchestrator.py 候选)
+# ========================================================================
 
 async def step4_execute_gaming(
     context: AgentTaskContext,
@@ -1530,6 +1489,10 @@ async def step4_execute_gaming(
             )
 
 
+# ========================================================================
+# 5️⃣ 窗口管理与游戏自动化初始化
+# ========================================================================
+
 async def _close_task_window(window_manager, task_id: str, reason: str, task_logger):
     """
     关闭任务关联的窗口
@@ -1745,6 +1708,10 @@ async def _init_game_automation(
         return None, None
 
 
+# ========================================================================
+# 6️⃣ 转会阶段  (→ step4/transfer_phase.py 候选)
+# ========================================================================
+
 async def _run_transfer_phase_for_account(
     context: AgentTaskContext,
     game_account: GameAccountInfo,
@@ -1887,6 +1854,10 @@ async def _run_transfer_phase_for_account(
 
     return None, rounds_done
 
+
+# ========================================================================
+# 7️⃣ SQB 阶段  (→ step4/sqb_phase.py 候选)
+# ========================================================================
 
 async def _run_sqb_phase_for_account(
     context: AgentTaskContext,
@@ -2107,6 +2078,10 @@ async def _run_sqb_phase_for_account(
     return None, delta
 
 
+# ========================================================================
+# 8️⃣ 单场比赛执行
+# ========================================================================
+
 async def _execute_match_for_account(
     context: AgentTaskContext,
     game_account: GameAccountInfo,
@@ -2191,6 +2166,11 @@ async def _execute_match_for_account(
         game_logger.error(f"比赛执行异常: {e}")
         return False, "MATCH_ERROR", f"比赛执行异常: {str(e)}"
 
+
+# ========================================================================
+# 9️⃣ 游戏模式导航  (→ step4/navigator.py 候选)
+#    转会/SQB/DR/WL 的导航 + 转会轮次执行
+# ========================================================================
 
 async def _navigate_to_game_mode(
     context: AgentTaskContext,
@@ -2564,6 +2544,11 @@ async def _navigate_to_weekend_league(
         game_logger.error(f"[周赛] 导航异常: {e}")
 
 
+# ========================================================================
+# 🔟 比赛生命周期  (→ step4/match_lifecycle.py 候选)
+#    进入比赛 → 等待开始 → 进行中 → 完成
+# ========================================================================
+
 async def _enter_match(
     context: AgentTaskContext,
     game_account: GameAccountInfo,
@@ -2839,6 +2824,11 @@ async def _finish_match(
 
     await _skip_settlement(context, task_logger, game_logger)
 
+
+# ========================================================================
+# 1️⃣1️⃣ 赛后处理与资源清理  (→ step4/post_match.py 候选)
+#     手柄协议初始化 / 画面检测 / 结算跳过 / 资源清理
+# ========================================================================
 
 async def _init_gamepad_protocol(
     context: AgentTaskContext,

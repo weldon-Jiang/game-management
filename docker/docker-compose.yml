@@ -1,5 +1,8 @@
 # ============================================
-# Bend Platform Docker Compose 配置
+# Bend Platform Docker Compose 配置（总控 / 全栈模式）
+# ============================================
+# ⚠ 分控(Tenant)本地部署请使用: docker-compose-tenant.yml + .env.tenant
+#   分控模式不启动 MySQL/Redis 容器，直连宿主机 3306。
 # ============================================
 # 使用方式：
 #   1. 首次部署完整环境：docker compose -f docker-compose.yml up -d
@@ -156,6 +159,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       BACKEND_HOST: backend
       BACKEND_PORT: 8061
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3090}
       TZ: ${TZ}
     depends_on:
       backend:

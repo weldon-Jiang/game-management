@@ -10,11 +10,8 @@
 .env.prod
 .env.example
 
-# Docker
-docker/.env
-docker/.env.dev
-docker/.env.sit
-docker/.env.prod
+# Docker（通配覆盖所有 env 变体：.env.dev / .env.sit / .env.prod / .env.tenant）
+docker/.env*
 
 # 日志
 *.log
@@ -44,12 +41,16 @@ bend-platform-web/dist/
 bend-agent/dist/
 .cursor/
 
-# Python 缓存与运行产物
+# Python 缓存与测试缓存
 __pycache__/
 **/__pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+**/.pytest_cache/
 
 # Agent 运行时令牌（敏感）
 bend-agent/tokens/
 docs/
+.claude/
+.trae/
