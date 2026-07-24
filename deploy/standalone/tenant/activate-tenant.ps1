@@ -32,19 +32,28 @@ $mysqlBin = Join-Path $AppDir "mysql\bin\mysql.exe"
 function Log($msg) { Write-Host "[activate-tenant] $msg" }
 
 # ---------- 1. 收集机器指纹 ----------
-Log "收集机器指纹..."
-$mac = (Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | Select-Object -First 1).MacAddress
-if (-not $mac) {
-    $mac = (Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true } | Select-Object -First 1).MacAddress
+# 用 Windows 注册表 MachineGuid 作为指纹（与 backend 的 MachineFingerprintUtil 取同一值）
+# MachineGuid 由 OS 安装时生成：唯一、稳定（重装系统才变）、不可拷贝（本机注册表，防分控包互拷）
+Log "收集机器指纹(Windows MachineGuid)..."
+$machineFingerprint = $null
+try {
+    $machineFingerprint = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid -ErrorAction Stop).MachineGuid
+} catch {
+    Log "WARN: 读 MachineGuid 失败，退回 MAC+主机名+OS 哈希: $($_.Exception.Message)"
 }
-$hostname = [System.Environment]::MachineName
-$osVersion = (Get-WmiObject Win32_OperatingSystem).Caption
-
-# SHA-256 哈希
-$fingerprintRaw = "$mac|$hostname|$osVersion"
-$sha256 = [System.Security.Cryptography.SHA256]::Create()
-$fingerprintBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($fingerprintRaw))
-$machineFingerprint = [BitConverter]::ToString($fingerprintBytes) -replace '-', ''
+if (-not $machineFingerprint) {
+    # 退回：MAC + 主机名 + OS 的 SHA-256（非 Windows 或注册表读不到时）
+    $mac = (Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | Select-Object -First 1).MacAddress
+    if (-not $mac) {
+        $mac = (Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true } | Select-Object -First 1).MacAddress
+    }
+    $hostname = [System.Environment]::MachineName
+    $osVersion = (Get-WmiObject Win32_OperatingSystem).Caption
+    $fingerprintRaw = "$mac|$hostname|$osVersion"
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $fingerprintBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($fingerprintRaw))
+    $machineFingerprint = [BitConverter]::ToString($fingerprintBytes) -replace '-', ''
+}
 Log "机器指纹: $machineFingerprint"
 
 # ---------- 2. 调总控激活接口 ----------

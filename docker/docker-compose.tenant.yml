@@ -30,6 +30,8 @@ services:
     image: bend-tenant-backend:latest
     container_name: bend-tenant-backend
     restart: unless-stopped
+    # 固定 MAC 地址：License 机器指纹依赖网卡 MAC，固定后容器重建指纹不再漂移
+    mac_address: 02:42:ac:11:00:02
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -51,6 +53,8 @@ services:
       LICENSE_MASTER_URL: ${LICENSE_MASTER_URL}
       LICENSE_KEY: ${LICENSE_KEY}
       LICENSE_SECRET: ${LICENSE_SECRET}
+      # 机器指纹（本地容器 hostname/MAC 随重建变化，用固定 MACHINE_ID 让指纹稳定）
+      MACHINE_ID: ${MACHINE_ID}
       # CORS（分控前端跨域）
       CORS_ENABLED: "true"
       CORS_ALLOWED_ORIGINS: "http://localhost:8090"
