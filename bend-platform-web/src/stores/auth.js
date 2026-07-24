@@ -19,6 +19,7 @@ export const useAuthStore = defineStore('auth', {
     isPlatformAdmin: (state) => state.user?.role === 'platform_admin',
     isMerchantOwner: (state) => state.user?.role === 'merchant_owner',
     isOperator: (state) => state.user?.role === 'operator',
+    needChangePassword: (state) => state.user?.needChangePassword === true,
     hasManagementPermission: (state) => state.user?.role === 'platform_admin' || state.user?.role === 'merchant_owner',
     merchantId: (state) => state.user?.merchantId,
     userId: (state) => state.user?.userId,
@@ -54,7 +55,8 @@ export const useAuthStore = defineStore('auth', {
             userId: res.data.userId,
             username: res.data.username,
             merchantId: res.data.merchantId,
-            role: res.data.role
+            role: res.data.role,
+            needChangePassword: res.data.needChangePassword
           })
           return true
         }
@@ -76,7 +78,8 @@ export const useAuthStore = defineStore('auth', {
           userId: res.data.userId,
           username: res.data.username,
           merchantId: res.data.merchantId,
-          role: res.data.role
+          role: res.data.role,
+          needChangePassword: res.data.needChangePassword
         })
         return true
       } catch (error) {

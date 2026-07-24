@@ -883,18 +883,20 @@ INSERT INTO merchant_user (id, merchant_id, username, phone, password_hash, role
 VALUES ('f5d927c40f87f57ef0f4a484d8a823f9', 'f5d927c40f87f57ef0f4a484d8a823e9', 'admin', '13800138000', '5f59b6ec6019c1a1499fc241b5f578b1', 'platform_admin', 'active', 0, '2026-05-07 10:52:43', '2026-04-16 17:21:58', 0);
 
 -- ---------------------------------------------
--- 商户授权(License)表 —— 总控签发,分控校验
+-- 商户授权(License)表 —— 软件授权凭证(防拷贝/机器绑定)
+-- 注意: expire_at/max_agents/max_tasks/features 已迁移到 merchant_permission,
+--       此处保留列仅为兼容历史数据,代码层面不再读写。
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `merchant_license` (
     `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
     `merchant_id` VARCHAR(64) NOT NULL COMMENT '所属商户ID',
     `license_key` VARCHAR(128) NOT NULL COMMENT '授权密钥(分控校验时携带)',
     `license_secret` VARCHAR(255) NOT NULL COMMENT '授权密钥哈希(服务端校验license_key用)',
-    `status` VARCHAR(20) NOT NULL DEFAULT 'active' COMMENT '状态: active, expired, revoked, pending',
-    `expire_at` DATETIME NOT NULL COMMENT '到期时间',
-    `max_agents` INT DEFAULT 5 COMMENT '最大Agent数量',
-    `max_tasks` INT DEFAULT 50 COMMENT '最大并发任务数',
-    `features` TEXT DEFAULT NULL COMMENT '功能特性(JSON)',
+    `status` VARCHAR(20) NOT NULL DEFAULT 'active' COMMENT '状态: active, revoked, pending(到期已迁至permission)',
+    `expire_at` DATETIME NULL COMMENT '已废弃(迁移到 merchant_permission)',
+    `max_agents` INT DEFAULT NULL COMMENT '已废弃(迁移到 merchant_permission)',
+    `max_tasks` INT DEFAULT NULL COMMENT '已废弃(迁移到 merchant_permission)',
+    `features` TEXT DEFAULT NULL COMMENT '已废弃(迁移到 merchant_permission)',
     `bound_machine_fingerprint` VARCHAR(255) DEFAULT NULL COMMENT '绑定的机器指纹(首次激活写入)',
     `activated_at` DATETIME DEFAULT NULL COMMENT '首次激活时间',
     `last_verified_at` DATETIME DEFAULT NULL COMMENT '分控最近一次校验时间',
@@ -908,9 +910,31 @@ CREATE TABLE IF NOT EXISTS `merchant_license` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_license_key` (`license_key`),
     KEY `idx_merchant_id` (`merchant_id`),
+    KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商户授权(License)表';
+
+-- ---------------------------------------------
+-- 商户使用权限(Permission)表 —— 与 License 解耦
+-- License 控制软件合法性(终身), Permission 控制服务可用性(会到期)。
+-- 分控校验两步: License 有效 且 Permission 有效,任一失败即拒绝。
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS `merchant_permission` (
+    `id` VARCHAR(64) NOT NULL COMMENT '主键ID',
+    `merchant_id` VARCHAR(64) NOT NULL COMMENT '所属商户ID',
+    `status` VARCHAR(20) NOT NULL DEFAULT 'active' COMMENT '状态: active-有效, expired-已到期, suspended-已停用',
+    `expire_at` DATETIME NOT NULL COMMENT '到期时间',
+    `max_agents` INT DEFAULT 5 COMMENT '最大Agent数量',
+    `max_tasks` INT DEFAULT 50 COMMENT '最大并发任务数',
+    `features` TEXT DEFAULT NULL COMMENT '功能特性(JSON)',
+    `offline_grace_hours` INT DEFAULT 24 COMMENT '离线宽限小时数',
+    `created_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted` TINYINT(1) DEFAULT 0 COMMENT '逻辑删除标记',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_merchant_id` (`merchant_id`),
     KEY `idx_status` (`status`),
     KEY `idx_expire_at` (`expire_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商户授权(License)表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='商户使用权限(Permission)表';
 
 -- ---------------------------------------------
 -- 分控License校验缓存 —— 离线宽限判断

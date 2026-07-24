@@ -1038,8 +1038,21 @@ public class AgentCallbackServiceImpl implements AgentCallbackService {
         if (taskId == null || taskId.isBlank()) {
             throw new BusinessException(400, "taskId不能为空");
         }
-        Task task = requireTaskForAuthenticatedAgent(taskId);
-        return automationUsageService.recordBillableEvent(task, payload);
+        // ============================================================
+        // Step4 计费事件暂时关闭（2026-07-23）
+        // 原因：与 startStreaming 计费校验同步关闭。
+        // 定价策略确定后，启动校验、启动扣点、Step4 计费事件应同时恢复。
+        // ============================================================
+        // Task task = requireTaskForAuthenticatedAgent(taskId);
+        // return automationUsageService.recordBillableEvent(task, payload);
+        log.info("计费事件已关闭 - taskId: {}", taskId);
+        Map<String, Object> result = new HashMap<>();
+        result.put("recorded", true);
+        result.put("duplicate", false);
+        result.put("pointsDeducted", 0);
+        result.put("billingDisabled", true);
+        return result;
+        // ============================================================
     }
 
     @Override

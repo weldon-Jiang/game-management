@@ -25,7 +25,6 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Conditional(MasterModeCondition.class)
 public class MerchantDataExportService {
 
     private final JdbcTemplate jdbcTemplate;

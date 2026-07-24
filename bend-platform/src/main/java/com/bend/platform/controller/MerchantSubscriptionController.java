@@ -13,6 +13,9 @@ import com.bend.platform.service.SubscriptionService;
 import com.bend.platform.service.impl.VipLevelService;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
+import org.springframework.web.client.RestTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -68,6 +71,10 @@ public class MerchantSubscriptionController {
      */
     @GetMapping("/status")
     public ApiResponse<Map<String, Object>> getStatus() {
+        // 分控模式：代理到总控获取订阅状态（VIP/余额/订阅数据仅在总控维护）
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return callMasterGet("/api/tenant/status");
+        }
         String merchantId = UserContext.getMerchantId();
 
         if (UserContext.isPlatformAdmin()) {
@@ -120,7 +127,10 @@ public class MerchantSubscriptionController {
      * - 如果与现有订阅时间冲突会显示警告信息
      */
     @GetMapping("/preview")
-    public ApiResponse<Map<String, Object>> previewActivation(@RequestParam String code) {
+    public ApiResponse<Map<String, Object>> previewActivation(@RequestParam("code") String code) {
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return callMasterGet("/api/tenant/preview?code=" + code);
+        }
         String merchantId = UserContext.getMerchantId();
 
         ActivationCode activationCode = activationCodeService.getByCode(code);
@@ -189,8 +199,25 @@ public class MerchantSubscriptionController {
      * - 包月类型同一时间只能有一个生效，新激活会顺延
      * - 激活时不更新VIP等级（VIP在生成激活码时已更新）
      */
+    @Value("${license.mode:master}")
+    private String licenseMode;
+
+    @Value("${license.master-url:}")
+    private String masterUrl;
+
+    @Value("${license.key:${LICENSE_KEY:}}")
+    private String licenseKey;
+
+    @Value("${license.secret:${LICENSE_SECRET:}}")
+    private String licenseSecret;
+
     @PostMapping("/activate")
-    public ApiResponse<Map<String, Object>> activate(@RequestParam String code) {
+    public ApiResponse<Map<String, Object>> activate(@RequestParam("code") String code) {
+        // 分控模式：代理到总控执行激活
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return proxyActivateToMaster(code);
+        }
+
         String merchantId = UserContext.getMerchantId();
         String userId = UserContext.getUserId();
 
@@ -299,6 +326,10 @@ public class MerchantSubscriptionController {
      */
     @GetMapping("/active")
     public ApiResponse<List<Map<String, Object>>> getActiveSubscriptions() {
+        // 分控模式：代理到总控
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return callMasterGetList("/api/tenant/subscriptions/active");
+        }
         String merchantId = UserContext.getMerchantId();
         List<Subscription> subscriptions = subscriptionService.getActiveSubscriptions(merchantId);
 
@@ -326,15 +357,49 @@ public class MerchantSubscriptionController {
      * @param pageSize 每页数量
      * @param status   状态筛选
      * @return 订阅分页列表
+     *
+     * 说明：
+     * - 分控模式：代理到总控的 /api/tenant/subscriptions/list（返回 {records,total} 分页结构）
+     * - 平台管理员：查询所有商户的订阅，附带 merchantName 字段便于区分归属
+     * - 普通商户：仅查询当前商户的订阅
      */
     @GetMapping("/list")
     public ApiResponse<Map<String, Object>> listSubscriptions(
-            @RequestParam(defaultValue = "1") int pageNum,
-            @RequestParam(defaultValue = "10") int pageSize,
-            @RequestParam(required = false) String status) {
-        String merchantId = UserContext.getMerchantId();
+            @RequestParam(value = "pageNum", defaultValue = "1") int pageNum,
+            @RequestParam(value = "pageSize", defaultValue = "10") int pageSize,
+            @RequestParam(value = "status", required = false) String status) {
+        // 分控模式：代理到总控分页接口（非 /billing 概览接口）
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            String path = "/api/tenant/subscriptions/list?pageNum=" + pageNum + "&pageSize=" + pageSize;
+            if (status != null && !status.isEmpty()) {
+                path += "&status=" + status;
+            }
+            return callMasterGet(path);
+        }
 
-        var pageResult = subscriptionService.pageSubscriptions(merchantId, pageNum, pageSize, status);
+        // 平台管理员：查看所有商户订阅；普通商户：仅查自己
+        boolean isAdmin = UserContext.isPlatformAdmin();
+        com.baomidou.mybatisplus.core.metadata.IPage<Subscription> pageResult;
+        Map<String, String> merchantNameMap = Collections.emptyMap();
+
+        if (isAdmin) {
+            pageResult = subscriptionService.pageAllSubscriptions(pageNum, pageSize, status);
+            // 批量查询商户名，用于前端展示归属
+            if (!pageResult.getRecords().isEmpty()) {
+                java.util.Set<String> merchantIds = new java.util.HashSet<>();
+                for (Subscription sub : pageResult.getRecords()) {
+                    merchantIds.add(sub.getMerchantId());
+                }
+                List<Merchant> merchants = merchantService.findByIds(merchantIds);
+                merchantNameMap = new HashMap<>();
+                for (Merchant m : merchants) {
+                    merchantNameMap.put(m.getId(), m.getName());
+                }
+            }
+        } else {
+            String merchantId = UserContext.getMerchantId();
+            pageResult = subscriptionService.pageSubscriptions(merchantId, pageNum, pageSize, status);
+        }
 
         List<Map<String, Object>> records = new ArrayList<>();
         for (Subscription sub : pageResult.getRecords()) {
@@ -348,6 +413,11 @@ public class MerchantSubscriptionController {
             item.put("originalPrice", sub.getOriginalPrice());
             item.put("discountPrice", sub.getDiscountPrice());
             item.put("status", sub.getStatus());
+            // 平台管理员视角附带商户信息
+            if (isAdmin) {
+                item.put("merchantId", sub.getMerchantId());
+                item.put("merchantName", merchantNameMap.getOrDefault(sub.getMerchantId(), "未知商户"));
+            }
             records.add(item);
         }
 
@@ -368,6 +438,10 @@ public class MerchantSubscriptionController {
      */
     @PostMapping("/cancel/{subscriptionId}")
     public ApiResponse<Void> cancelSubscription(@PathVariable String subscriptionId) {
+        // 分控模式：代理到总控（订阅数据在总控，分控本地无记录）
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return callMasterPostVoid("/api/tenant/subscriptions/cancel/" + subscriptionId);
+        }
         subscriptionService.cancelSubscription(subscriptionId);
         return ApiResponse.success("订阅已取消", null);
     }
@@ -396,6 +470,9 @@ public class MerchantSubscriptionController {
      */
     @PostMapping("/validate-automation")
     public ApiResponse<Map<String, Object>> validateAutomation(@RequestBody Map<String, Object> request) {
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return callMasterPost("/api/tenant/billing/validate", request);
+        }
         String merchantId = UserContext.getMerchantId();
         String streamingAccountId = (String) request.get("streamingAccountId");
         @SuppressWarnings("unchecked")
@@ -466,6 +543,88 @@ public class MerchantSubscriptionController {
             result.put("canStart", false);
             result.put("errors", errors);
             return ApiResponse.success(result);
+        }
+    }
+
+    // ---- 分控代理到总控 ----
+
+    private HttpHeaders licenseHeaders() {
+        HttpHeaders h = new HttpHeaders();
+        h.set("X-License-Key", licenseKey);
+        h.set("X-License-Secret", licenseSecret);
+        return h;
+    }
+
+    @SuppressWarnings("unchecked")
+    private ApiResponse<Map<String, Object>> callMasterGet(String path) {
+        try {
+            String url = masterUrl.replaceAll("/+$", "") + path;
+            ResponseEntity<Map> resp = new RestTemplate().exchange(url, HttpMethod.GET,
+                    new HttpEntity<>(licenseHeaders()), Map.class);
+            Map<String, Object> body = resp.getBody();
+            if (body == null) return ApiResponse.error(500, "总控无响应");
+            int code = body.get("code") instanceof Number ? ((Number) body.get("code")).intValue() : 500;
+            if (code == 200) return ApiResponse.success((Map<String, Object>) body.get("data"));
+            return ApiResponse.error(code, String.valueOf(body.getOrDefault("message", "error")));
+        } catch (Exception e) {
+            return ApiResponse.error(500, "总控请求失败: " + e.getMessage());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private ApiResponse<Map<String, Object>> callMasterPost(String path, Map<String, Object> reqBody) {
+        try {
+            HttpHeaders h = licenseHeaders();
+            h.setContentType(MediaType.APPLICATION_JSON);
+            String url = masterUrl.replaceAll("/+$", "") + path;
+            ResponseEntity<Map> resp = new RestTemplate().postForEntity(url, new HttpEntity<>(reqBody, h), Map.class);
+            Map<String, Object> body = resp.getBody();
+            if (body == null) return ApiResponse.error(500, "总控无响应");
+            int code = body.get("code") instanceof Number ? ((Number) body.get("code")).intValue() : 500;
+            if (code == 200) return ApiResponse.success((Map<String, Object>) body.get("data"));
+            return ApiResponse.error(code, String.valueOf(body.getOrDefault("message", "error")));
+        } catch (Exception e) {
+            return ApiResponse.error(500, "总控请求失败: " + e.getMessage());
+        }
+    }
+
+    private ApiResponse<Map<String, Object>> proxyActivateToMaster(String code) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("code", code);
+        return callMasterPost("/api/tenant/activate", body);
+    }
+
+    /** GET 代理到总控（返回 List 结构） */
+    @SuppressWarnings("unchecked")
+    private <T> ApiResponse<T> callMasterGetList(String path) {
+        try {
+            String url = masterUrl.replaceAll("/+$", "") + path;
+            ResponseEntity<Map> resp = new RestTemplate().exchange(url, HttpMethod.GET,
+                    new HttpEntity<>(licenseHeaders()), Map.class);
+            Map<String, Object> body = resp.getBody();
+            if (body == null) return ApiResponse.error(500, "总控无响应");
+            int code = body.get("code") instanceof Number ? ((Number) body.get("code")).intValue() : 500;
+            if (code == 200) return ApiResponse.success((T) body.get("data"));
+            return ApiResponse.error(code, String.valueOf(body.getOrDefault("message", "error")));
+        } catch (Exception e) {
+            return ApiResponse.error(500, "总控请求失败: " + e.getMessage());
+        }
+    }
+
+    /** POST 代理到总控（无返回体） */
+    private ApiResponse<Void> callMasterPostVoid(String path) {
+        try {
+            HttpHeaders h = licenseHeaders();
+            h.setContentType(MediaType.APPLICATION_JSON);
+            String url = masterUrl.replaceAll("/+$", "") + path;
+            ResponseEntity<Map> resp = new RestTemplate().postForEntity(url, new HttpEntity<>(null, h), Map.class);
+            Map<String, Object> body = resp.getBody();
+            if (body == null) return ApiResponse.error(500, "总控无响应");
+            int code = body.get("code") instanceof Number ? ((Number) body.get("code")).intValue() : 500;
+            if (code == 200) return ApiResponse.success(String.valueOf(body.getOrDefault("message", "成功")), null);
+            return ApiResponse.error(code, String.valueOf(body.getOrDefault("message", "error")));
+        } catch (Exception e) {
+            return ApiResponse.error(500, "总控请求失败: " + e.getMessage());
         }
     }
 }

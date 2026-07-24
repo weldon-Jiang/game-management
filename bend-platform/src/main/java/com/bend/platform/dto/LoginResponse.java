@@ -18,4 +18,5 @@ public class LoginResponse {
     private String username;
     private String merchantId;
     private String role;
+    private Boolean needChangePassword;
 }

@@ -34,10 +34,7 @@ public interface LicenseService {
      */
     void revoke(String licenseId, String reason);
 
-    /**
-     * 续期(延长到期时间)。
-     */
-    void renew(String licenseId, java.time.LocalDateTime newExpireAt);
+    // renew() 已迁移到 PermissionService（License 不负责到期管理）
 
     /**
      * 查询商户的所有 license。

@@ -7,15 +7,15 @@ Step3 显示/输入 helper — SDL 窗口、InputPump、窗口生命周期。
 import asyncio
 from typing import Any, Callable, Dict, Optional
 
-from ..core.task_logger import get_task_logger
-from ..core.account_logger import get_stream_logger
-from ..task.task_context import AgentTaskContext
-from ..vision.frame_utils import frame_to_bgr_ndarray
+from ...core.task_logger import get_task_logger
+from ...core.account_logger import get_stream_logger
+from ...task.task_context import AgentTaskContext
+from ...vision.frame_utils import frame_to_bgr_ndarray
 
 
 def _load_window_settings() -> Dict[str, Any]:
     """读取 agent.yaml window.* 与 close_terminates_task 映射。"""
-    from ..core.config import config as app_config
+    from ...core.config import config as app_config
 
     close_terminates = bool(app_config.get("window.close_terminates_task", True))
     title_tpl = str(app_config.get("window.title_template", "{email}"))
@@ -54,7 +54,7 @@ async def _init_stream_window(
 ) -> Optional[Any]:
     """占位 StreamWindow（云端串流不依赖 Xbox App 窗口）。"""
     try:
-        from ..window.stream_window import StreamWindow
+        from ...window.stream_window import StreamWindow
 
         window = StreamWindow(window_title="Bend Stream")
         task_logger.info("云端串流跳过本机 Xbox App 窗口查找")
@@ -79,7 +79,7 @@ async def _start_sdl_display_pump(context: AgentTaskContext, task_logger) -> Non
         sdl.set_display_fps_max(win_settings["display_fps_max"])
 
     async def _pump():
-        from ..runtime.stream_runtime import get_or_create_stream_runtime
+        from ...runtime.stream_runtime import get_or_create_stream_runtime
 
         runtime = get_or_create_stream_runtime(context)
         task_logger.info(
@@ -140,7 +140,7 @@ async def _start_input_pump_if_ready(context: AgentTaskContext, task_logger) -> 
     protocol = getattr(context, "_controller_protocol", None)
     if protocol is None or getattr(context, "xbox_session", None) is None:
         return
-    from ..input.pump_scheduler import start_input_pump
+    from ...input.pump_scheduler import start_input_pump
 
     await start_input_pump(context, context.task_id, protocol)
     task_logger.info("InputPump 已绑定 task=%s", context.task_id)
@@ -197,7 +197,7 @@ def _wire_sdl_close_handler(context: AgentTaskContext) -> None:
 async def step3_close_display(context: AgentTaskContext) -> None:
     """销毁 SDL 窗口并停止显示泵；自动化/串流不受影响。"""
     task_logger = get_task_logger(context.task_id)
-    from ..input.pump_scheduler import stop_input_pump
+    from ...input.pump_scheduler import stop_input_pump
 
     await stop_input_pump(context)
     await _stop_sdl_display_pump(context)
@@ -292,7 +292,7 @@ async def _init_sdl_window(
 ) -> Optional[Any]:
     """初始化 SDL 自绘窗口。"""
     try:
-        from ..window.sdl_window import SDLStreamWindow, SDLWindowConfig, PYGAME_AVAILABLE
+        from ...window.sdl_window import SDLStreamWindow, SDLWindowConfig, PYGAME_AVAILABLE
 
         if not PYGAME_AVAILABLE:
             task_logger.warning("pygame不可用，SDL窗口功能不可用")
@@ -345,7 +345,7 @@ async def _ensure_controller_protocol(
     if getattr(context, "_controller_protocol", None):
         return
 
-    from ..input.controller_protocol import ControllerProtocol
+    from ...input.controller_protocol import ControllerProtocol
 
     protocol = ControllerProtocol()
     if context.xbox_session:
@@ -366,7 +366,7 @@ async def _init_gamepad_controller(
 ) -> Optional[Any]:
     """初始化物理手柄（InputPump 负责 DC 发送）。"""
     try:
-        from ..input.xbox_gamepad import XboxGamepadController
+        from ...input.xbox_gamepad import XboxGamepadController
 
         task_logger.info("正在初始化手柄控制器...")
         stream_logger.info("正在初始化手柄控制器...")
@@ -404,10 +404,10 @@ async def _init_keyboard_mapper(
 ) -> Optional[Any]:
     """初始化键盘映射器（overlay 经 InputPump 发送）。"""
     try:
-        from ..input.agent_keyboard_config import get_effective_keyboard_bindings
-        from ..input.keyboard_mapper import KeyboardMapper
-        from ..input.controller_protocol import ControllerSignal
-        from ..input.keyboard_mapper import KeyAction
+        from ...input.agent_keyboard_config import get_effective_keyboard_bindings
+        from ...input.keyboard_mapper import KeyboardMapper
+        from ...input.controller_protocol import ControllerSignal
+        from ...input.keyboard_mapper import KeyAction
 
         task_logger.info("正在初始化键盘映射器...")
         stream_logger.info("正在初始化键盘映射器...")
@@ -419,7 +419,7 @@ async def _init_keyboard_mapper(
 
         attach_manual_debug_controls(context, keyboard, task_logger)
 
-        from ..input.manual_nav import wire_manual_in_match_checker
+        from ...input.manual_nav import wire_manual_in_match_checker
 
         wire_manual_in_match_checker(context, keyboard)
 

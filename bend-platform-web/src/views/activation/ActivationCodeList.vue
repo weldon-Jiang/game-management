@@ -216,7 +216,7 @@
           <el-form-item label="绑定流媒体账号" prop="boundResourceIds">
             <el-select
               v-model="generateFormData.boundResourceIds"
-              placeholder="请选择流媒体账号（可多选）"
+              placeholder="不选=商户级包月（所有流媒体账号均享受包月）"
               multiple
               collapse-tags
               collapse-tags-tooltip
@@ -237,7 +237,7 @@
           <el-form-item label="绑定游戏账号" prop="boundResourceIds">
             <el-select
               v-model="generateFormData.boundResourceIds"
-              placeholder="请选择游戏账号（可多选）"
+              placeholder="不选=商户级包月（所有游戏账号均享受包月）"
               multiple
               collapse-tags
               collapse-tags-tooltip
@@ -258,7 +258,7 @@
           <el-form-item label="绑定Xbox主机" prop="boundResourceIds">
             <el-select
               v-model="generateFormData.boundResourceIds"
-              placeholder="请选择Xbox主机（可多选）"
+              placeholder="不选=商户级包月（所有Xbox主机均享受包月）"
               multiple
               collapse-tags
               collapse-tags-tooltip
@@ -442,7 +442,7 @@ const generateFormRules = computed(() => {
   }
   if (['window_account', 'account', 'host'].includes(generateFormData.subscriptionType)) {
     rules.boundResourceIds = [
-      { required: true, message: '请选择绑定的资源', trigger: 'change' }
+      { required: false, message: '不选则绑定商户级包月（该商户所有同类资源均享受包月）', trigger: 'change' }
     ]
   }
   if (generateFormData.subscriptionType === 'points') {

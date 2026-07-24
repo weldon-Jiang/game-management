@@ -57,6 +57,8 @@ public class MerchantUserServiceImpl implements MerchantUserService {
     private final MerchantService merchantService;
     private final AesUtil aesUtil;
     private final DataSecurityUtil dataSecurityUtil;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private TenantAccountSyncService accountSyncService;
 
     /**
      * 商户用户登录
@@ -139,6 +141,7 @@ public class MerchantUserServiceImpl implements MerchantUserService {
 
         merchantUserMapper.insert(user);
 
+        if (accountSyncService != null) accountSyncService.onAccountChanged(user, "create");
         log.info("注册用户成功 - 用户名: {}, 商户ID: {}, 角色: {}", username, merchantId, role);
         return user;
     }
@@ -231,7 +234,9 @@ public class MerchantUserServiceImpl implements MerchantUserService {
         }
 
         user.setPasswordHash(aesUtil.encrypt(newPassword));
+        user.setPasswordUpdatedAt(LocalDateTime.now());
         merchantUserMapper.updateById(user);
+        if (accountSyncService != null) accountSyncService.onAccountChanged(user, "update");
         log.info("重置用户密码 - ID: {}", id);
     }
 
@@ -248,6 +253,7 @@ public class MerchantUserServiceImpl implements MerchantUserService {
         }
 
         merchantUserMapper.deleteById(id);
+        if (accountSyncService != null) accountSyncService.onAccountChanged(user, "delete");
         log.info("删除用户 - ID: {}", id);
     }
 

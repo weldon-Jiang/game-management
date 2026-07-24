@@ -5,9 +5,9 @@ Step4 SQB 阶段
 - 单账号 SQB 比赛阶段编排
 """
 import asyncio
-from typing import Optional
+from typing import Any, Callable, Dict, Optional
 
-from ..task.task_context import AgentTaskContext, GameAccountInfo
+from ...task.task_context import AgentTaskContext, GameAccountInfo
 from .task_routing import _normalize_game_action_type, _requires_sqb_phase, _account_exit_fc_reason
 
 # 7️⃣ SQB 阶段  (→ step4/sqb_phase.py 候选)
@@ -58,7 +58,7 @@ async def _run_sqb_phase_for_account(
             )
 
         await context.wait_if_paused()
-        from ..runtime.pause_input_control import raise_if_resume_reanchor
+        from ...runtime.pause_input_control import raise_if_resume_reanchor
 
         raise_if_resume_reanchor(context)
 
@@ -108,7 +108,7 @@ async def _run_sqb_phase_for_account(
                 )
 
         if pause_after_match and pause_after_match():
-            from ..runtime.pause_input_control import release_automation_input
+            from ...runtime.pause_input_control import release_automation_input
 
             await release_automation_input(context, task_logger)
             context.pause()
@@ -120,7 +120,7 @@ async def _run_sqb_phase_for_account(
                 {"matchStatus": "PAUSE_AFTER_MATCH"},
             )
             await context.wait_if_paused()
-            from ..runtime.pause_input_control import raise_if_resume_reanchor
+            from ...runtime.pause_input_control import raise_if_resume_reanchor
 
             raise_if_resume_reanchor(context)
 

@@ -4,7 +4,7 @@ import threading
 from typing import Dict, Optional
 
 from ..core.logger import get_logger
-from .api import StreamingSession
+from .session import StreamingSession
 
 
 class SessionRegistry:

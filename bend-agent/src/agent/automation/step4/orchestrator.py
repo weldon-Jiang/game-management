@@ -35,18 +35,18 @@
 
 import asyncio
 import time
-from typing import Callable, Any, Optional
+from typing import Callable, Any, Dict, Optional
 
-from ..core.task_logger import get_task_logger
-from ..core.account_logger import get_game_logger, get_stream_logger
-from ..task.task_context import (
+from ...core.task_logger import get_task_logger
+from ...core.account_logger import get_game_logger, get_stream_logger
+from ...task.task_context import (
     AgentTaskContext,
     Step4Result,
     TaskStepStatus,
     TaskMainStatus,
     GameAccountInfo
 )
-from ..input.controller_protocol import XboxButtonFlag
+from ...input.controller_protocol import XboxButtonFlag
 
 # 常量提取至 step4/constants.py，保持向后兼容
 from .constants import (
@@ -193,12 +193,12 @@ async def step4_execute_gaming(
     context._automation_engine = engine
     context._account_switcher = switcher
 
-    from ..runtime.stream_runtime import get_or_create_stream_runtime
+    from ...runtime.stream_runtime import get_or_create_stream_runtime
 
     stream_runtime = get_or_create_stream_runtime(context)
 
     try:
-        from ..core.config import config as agent_config
+        from ...core.config import config as agent_config
 
         keyboard_mapper = getattr(context, "_keyboard_mapper", None)
         keep_keyboard = bool(agent_config.get("debug.manual_input_enabled", True))
@@ -261,7 +261,7 @@ async def step4_execute_gaming(
             detector = await _ensure_streaming_scene_detector(context, task_logger)
 
             async def _capture_for_provisioning():
-                from ..runtime.stream_runtime import capture_task_frame
+                from ...runtime.stream_runtime import capture_task_frame
 
                 return await capture_task_frame(context, timeout=0.8)
 
@@ -275,7 +275,7 @@ async def step4_execute_gaming(
                 task_context=context,
             )
 
-        from ..runtime.pause_input_control import (
+        from ...runtime.pause_input_control import (
             ResumeReanchor,
             account_has_remaining_work,
             checkpoint_resume_reanchor,
@@ -396,7 +396,7 @@ async def step4_execute_gaming(
                     continue
 
                 launch_ok = False
-                from ..core.config import config as app_config
+                from ...core.config import config as app_config
 
                 # Step4 账号门禁：先回 Xbox 主页，再 OCR 判断是否已是目标游戏账号
                 skip_switch = bool(app_config.get("step4.skip_account_switch", False))
@@ -446,7 +446,7 @@ async def step4_execute_gaming(
                         task_logger.warning(
                             "进 FC 失败，尝试重连 input DataChannel 后重试一次"
                         )
-                        from ..xbox.stream_recovery import (
+                        from ...xbox.stream_recovery import (
                             reconnect_input_channel,
                             rebind_stream_bindings,
                         )
@@ -772,7 +772,7 @@ async def step4_execute_gaming(
         await stream_runtime.stop_automation()
         task_logger.info("StreamRuntime 自动化循环已停止（capture/display 保留）")
         if keep_session_alive:
-            from ..xbox.stream_session_survival import (
+            from ...xbox.stream_session_survival import (
                 schedule_ensure_stream_subsystems_alive,
             )
 
@@ -825,10 +825,10 @@ async def _init_game_automation(
     - (automation_engine, account_switcher) 或 (None, None)
     """
     try:
-        from ..scene.game_automation_engine import GameAutomationEngine, ActionExecutor
-        from ..scene.scene_detector import SceneDetector, SceneState
-        from ..scene.optimized_scene_detector import OptimizedSceneDetector, SceneConfig
-        from ..game.account_switcher import AccountSwitcher
+        from ...scene.game_automation_engine import GameAutomationEngine, ActionExecutor
+        from ...scene.scene_detector import SceneDetector, SceneState
+        from ...scene.optimized_scene_detector import OptimizedSceneDetector, SceneConfig
+        from ...game.account_switcher import AccountSwitcher
 
         task_logger.info("初始化游戏自动化引擎...")
 
@@ -837,7 +837,7 @@ async def _init_game_automation(
 
         if hasattr(context, 'frame_capture') and context.frame_capture:
             try:
-                from ..vision.template_matcher import TemplateMatcher
+                from ...vision.template_matcher import TemplateMatcher
                 matcher = TemplateMatcher()
 
                 config = SceneConfig(
@@ -899,7 +899,7 @@ async def _init_game_automation(
             switcher.set_stream_session(context.xbox_session)
 
         async def _reconnect_input_and_rebind() -> bool:
-            from ..xbox.stream_recovery import install_task_input_recovery
+            from ...xbox.stream_recovery import install_task_input_recovery
 
             install_task_input_recovery(
                 context,
@@ -969,7 +969,7 @@ async def _init_game_automation(
                 switcher.set_scene_detector(streaming_detector)
 
                 async def _capture_for_switcher():
-                    from ..runtime.stream_runtime import capture_task_frame
+                    from ...runtime.stream_runtime import capture_task_frame
 
                     return await capture_task_frame(context, timeout=0.8)
 
@@ -1050,7 +1050,7 @@ async def _execute_match_for_account(
     task_logger.info(f"执行 SQB 比赛: {game_account.gamertag}")
     game_logger.info("执行 SQB 比赛")
 
-    from ..runtime.pause_input_control import ResumeReanchor
+    from ...runtime.pause_input_control import ResumeReanchor
 
     try:
         if not await _enter_match(
@@ -1125,3 +1125,4 @@ from .post_match import (
     _detect_match_ended,
     _skip_settlement,
     _cleanup_account_resources,
+)

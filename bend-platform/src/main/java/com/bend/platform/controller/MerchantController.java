@@ -37,7 +37,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/merchants")
 @RequiredArgsConstructor
-@Conditional(MasterModeCondition.class)
 public class MerchantController {
 
     private final MerchantService merchantService;

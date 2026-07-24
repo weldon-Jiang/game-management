@@ -9,8 +9,8 @@ Step4 游戏模式导航器
 import asyncio
 from typing import Callable, Optional, Dict
 
-from ..task.task_context import AgentTaskContext, GameAccountInfo
-from ..input.controller_protocol import XboxButtonFlag
+from ...task.task_context import AgentTaskContext, GameAccountInfo
+from ...input.controller_protocol import XboxButtonFlag
 from .constants import NAVIGATION_CONFIG, UT_MENU_SCENE_IDS
 from .post_match import _detect_screen_state
 

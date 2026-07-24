@@ -156,6 +156,17 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     }
 
     @Override
+    public IPage<Subscription> pageAllSubscriptions(int pageNum, int pageSize, String status) {
+        LambdaQueryWrapper<Subscription> wrapper = new LambdaQueryWrapper<>();
+        if (status != null && !status.isEmpty()) {
+            wrapper.eq(Subscription::getStatus, status);
+        }
+        wrapper.orderByDesc(Subscription::getCreatedTime);
+        Page<Subscription> page = new Page<>(pageNum, pageSize);
+        return subscriptionMapper.selectPage(page, wrapper);
+    }
+
+    @Override
     public List<String> validateStreamingAccountForAutomation(String merchantId, String streamingAccountId) {
         List<String> errors = new ArrayList<>();
         Subscription subscription = getCurrentActiveSubscription(merchantId);

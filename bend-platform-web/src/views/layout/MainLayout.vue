@@ -53,6 +53,22 @@
           <el-icon><Tickets /></el-icon>
           <template #title>分控注册码</template>
         </el-menu-item>
+        <el-menu-item
+          v-if="authStore.isPlatformAdmin && platformStore.isMasterMode"
+          index="Licenses"
+          @click="router.push('/licenses')"
+        >
+          <el-icon><Stamp /></el-icon>
+          <template #title>License管理</template>
+        </el-menu-item>
+        <el-menu-item
+          v-if="authStore.isPlatformAdmin && platformStore.isMasterMode"
+          index="Permissions"
+          @click="router.push('/permissions')"
+        >
+          <el-icon><Lock /></el-icon>
+          <template #title>权限管理</template>
+        </el-menu-item>
         <el-menu-item v-if="authStore.isPlatformAdmin" index="AgentVersions" @click="router.push('/agent-versions')">
           <el-icon><Box /></el-icon>
           <template #title>Agent版本</template>
@@ -172,7 +188,9 @@ import {
   Wallet,
   Tickets,
   Collection,
-  List
+  List,
+  Stamp,
+  Lock
 } from '@element-plus/icons-vue'
 
 const router = useRouter()

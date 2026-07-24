@@ -14,7 +14,7 @@ import asyncio
 import time
 from typing import Awaitable, Callable, List, Optional, Tuple
 
-from ..input.controller_protocol import ControllerProtocol, ControllerSignal, XboxButtonFlag
+from ...input.controller_protocol import ControllerProtocol, ControllerSignal, XboxButtonFlag
 
 # 左摇杆四方向（int16 量级，对齐 xCloud）
 _STICK_DIRS: List[Tuple[int, int]] = [
@@ -44,7 +44,7 @@ _PROGRESS_EVERY_TICKS = 35
 
 def _in_match_timing() -> Tuple[float, float, float]:
     try:
-        from ..core.config import config as app_config
+        from ...core.config import config as app_config
 
         stick = float(
             app_config.get("step4.in_match_stick_hold_sec", _DEFAULT_STICK_HOLD_SEC)
@@ -140,7 +140,7 @@ async def run_local_in_match_loop(
                 raise RuntimeError("比赛被取消")
             if getattr(context, "is_paused", lambda: False)():
                 await context.wait_if_paused()
-                from ..runtime.pause_input_control import raise_if_resume_reanchor
+                from ...runtime.pause_input_control import raise_if_resume_reanchor
 
                 raise_if_resume_reanchor(context)
             if await detect_match_ended():
@@ -165,7 +165,7 @@ async def run_local_in_match_loop(
             continue
         if getattr(context, "is_paused", lambda: False)():
             await context.wait_if_paused()
-            from ..runtime.pause_input_control import raise_if_resume_reanchor
+            from ...runtime.pause_input_control import raise_if_resume_reanchor
 
             raise_if_resume_reanchor(context)
         if await detect_match_ended():

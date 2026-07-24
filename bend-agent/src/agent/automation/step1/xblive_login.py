@@ -10,11 +10,11 @@ from __future__ import annotations
 import asyncio
 from typing import Callable
 
-from ..core.task_logger import get_task_logger
-from ..core.account_logger import get_stream_logger
-from ..task.task_context import AgentTaskContext, Step1Result, TaskStepStatus
-from ..auth.xblive import authenticate_account, error_code_name, ERRXS_OK
-from ..auth.xblive.models import XbliveCompatXboxTokens
+from ...core.task_logger import get_task_logger
+from ...core.account_logger import get_stream_logger
+from ...task.task_context import AgentTaskContext, Step1Result, TaskStepStatus
+from ...auth.xblive import authenticate_account, error_code_name, ERRXS_OK
+from ...auth.xblive.models import XbliveCompatXboxTokens
 
 
 async def step1_execute_login(
@@ -41,7 +41,7 @@ async def step1_execute_login(
         return Step1Result(success=False, error_code="CANCELLED", message="任务被取消")
 
     try:
-        from ..core.config import get_config
+        from ...core.config import get_config
 
         cfg = get_config()
         web_headless = bool(getattr(cfg.auth, "XBLIVE_WEB_HEADLESS", True))
@@ -83,7 +83,7 @@ async def step1_execute_login(
             else "",
         )
         context.xbox_tokens = compat
-        from ..xbox.streaming_credentials import attach_streaming_credentials
+        from ...xbox.streaming_credentials import attach_streaming_credentials
 
         attach_streaming_credentials(context)
 

@@ -124,11 +124,18 @@ public class TaskControlServiceImpl implements TaskControlService {
         }
 
         List<XboxHost> hostsForBilling = selectedHost != null ? List.of(selectedHost) : List.of();
-        Map<String, Object> billingValidation = automationUsageService.validateAndCalculatePoints(
-                merchantId, streamingAccountId, gameAccounts, hostsForBilling);
-        if (!Boolean.TRUE.equals(billingValidation.get("canStart"))) {
-            throw new BusinessException(400, String.valueOf(billingValidation.get("message")));
-        }
+
+        // ============================================================
+        // 计费校验暂时关闭（2026-07-22）
+        // 原因：merchant_group 的 window_discount_price=7000 直接当作点数，
+        // 商户余额不足导致无法启动串流。定价策略和扣点逻辑需重新设计后恢复。
+        // ============================================================
+        // Map<String, Object> billingValidation = automationUsageService.validateAndCalculatePoints(
+        //         merchantId, streamingAccountId, gameAccounts, hostsForBilling);
+        // if (!Boolean.TRUE.equals(billingValidation.get("canStart"))) {
+        //     throw new BusinessException(400, String.valueOf(billingValidation.get("message")));
+        // }
+        // ============================================================
 
         Map<String, Object> taskParams = buildStreamingTaskParams(
                 streamingAccount, gameAccounts, selectedHost, merchantId);
@@ -160,11 +167,16 @@ public class TaskControlServiceImpl implements TaskControlService {
 
         markStreamingAccountsBusy(streamingAccountId, agentId, gameAccounts);
 
-        // 每次启动串流都计费——新建或复用任务均产生新的自动化会话，应独立扣点
-        automationUsageService.deductPointsAndRecordUsage(
-                merchantId, userId, task.getId(),
-                streamingAccountId, streamingAccount.getDisplayLabel(),
-                gameAccounts.size(), hostsForBilling.size(), billingValidation);
+        // ============================================================
+        // 启动扣点暂时关闭（2026-07-22）
+        // 原因：计费校验已暂停，此处扣点也一并暂停，避免无校验直接扣点导致数据不一致。
+        // 定价策略确定后，上方校验和此处扣点应同时恢复。
+        // ============================================================
+        // automationUsageService.deductPointsAndRecordUsage(
+        //         merchantId, userId, task.getId(),
+        //         streamingAccountId, streamingAccount.getDisplayLabel(),
+        //         gameAccounts.size(), hostsForBilling.size(), billingValidation);
+        // ============================================================
 
         final Task taskToDispatch = task;
         taskWsDispatchService.dispatchAfterCommit(() -> taskExecutorService.executeTask(taskToDispatch));

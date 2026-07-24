@@ -5,10 +5,13 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.MerchantPageRequest;
 import com.bend.platform.entity.Merchant;
+import com.bend.platform.entity.MerchantUser;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.repository.MerchantMapper;
+import com.bend.platform.repository.MerchantUserMapper;
 import com.bend.platform.service.MerchantService;
+import com.bend.platform.util.AesUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 商户服务实现类
@@ -42,6 +46,8 @@ import java.util.List;
 public class MerchantServiceImpl implements MerchantService {
 
     private final MerchantMapper merchantMapper;
+    private final MerchantUserMapper merchantUserMapper;
+    private final AesUtil aesUtil;
 
     /**
      * 创建商户
@@ -71,8 +77,27 @@ public class MerchantServiceImpl implements MerchantService {
         merchant.setIsSystem(isSystem != null && isSystem);
         merchantMapper.insert(merchant);
 
+        // 自动创建商户管理员账号
+        String adminUsername = generateAdminUsername(merchant.getId());
+        MerchantUser adminUser = new MerchantUser();
+        adminUser.setMerchantId(merchant.getId());
+        adminUser.setUsername(adminUsername);
+        adminUser.setPhone(phone);
+        adminUser.setPasswordHash(aesUtil.encrypt("123456"));
+        adminUser.setRole("merchant_owner");
+        adminUser.setStatus("active");
+        adminUser.setCreatedTime(LocalDateTime.now());
+        merchantUserMapper.insert(adminUser);
+        log.info("商户管理员账号已创建 - username: {}, merchant: {}", adminUsername, name);
+
         log.info("创建商户成功 - ID: {}, 名称: {}, 系统商户: {}", merchant.getId(), name, merchant.getIsSystem());
         return merchant;
+    }
+
+    /** 生成全局唯一的商户管理员账号名，格式: m_{商户ID前8位}_admin，可反向追溯商户 */
+    private String generateAdminUsername(String merchantId) {
+        String idPrefix = merchantId.replace("-", "").substring(0, 8);
+        return "m_" + idPrefix + "_admin";
     }
 
     /**

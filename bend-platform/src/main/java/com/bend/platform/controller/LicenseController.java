@@ -25,11 +25,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * License(商户授权)Controller
+ * License(商户授权)Controller — 仅管理软件授权凭证(签发/吊销/查询)。
+ * 使用权限(到期/续期/配额)请用 {@link com.bend.platform.controller.PermissionController}。
  *
  * <p>总控后台管理接口(需 platform_admin): 签发 / 查询 / 吊销 / 续期。
  * <p>分控校验接口(公开,不走 JWT): POST /api/licenses/verify。
@@ -44,13 +44,14 @@ public class LicenseController {
 
     /**
      * 签发 license(打包分控包前调用)。仅平台管理员。
+     * expireAt/maxAgents/maxTasks/features 已迁移到 Permission，此处不再接收。
      */
     @PostMapping
     public ApiResponse<LicenseIssueResponse> issue(@RequestBody LicenseCreateRequest request) {
         if (!UserContext.isPlatformAdmin()) {
             throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
         }
-        if (request.getMerchantId() == null || request.getExpireAt() == null) {
+        if (request.getMerchantId() == null) {
             throw new BusinessException(ResultCode.System.BAD_REQUEST);
         }
         return ApiResponse.success("授权签发成功", licenseService.issueLicense(request));
@@ -108,19 +109,7 @@ public class LicenseController {
         return ApiResponse.success("吊销成功", null);
     }
 
-    /**
-     * 续期 license。仅平台管理员。
-     */
-    @PutMapping("/{id}/renew")
-    public ApiResponse<Void> renew(@PathVariable String id,
-                                   @RequestParam String expireAt) {
-        if (!UserContext.isPlatformAdmin()) {
-            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
-        }
-        LocalDateTime newExpire = LocalDateTime.parse(expireAt);
-        licenseService.renew(id, newExpire);
-        return ApiResponse.success("续期成功", null);
-    }
+    // renew() 已迁移到 PermissionController: PUT /api/permissions/{id}/renew
 
     /**
      * 查询单个 license。仅平台管理员。

@@ -88,19 +88,18 @@ public class MerchantUserController {
      */
     @PostMapping
     public ApiResponse<MerchantUser> create(@Valid @RequestBody MerchantUserCreateRequest request) {
-        String currentMerchantId = UserContext.getMerchantId();
+        // 只能给自己商户创建账号（platform_admin 也只能给系统管理员商户创建）
+        String merchantId = UserContext.getMerchantId();
 
-        String finalMerchantId;
-        if (UserContext.isPlatformAdmin()) {
-            finalMerchantId = request.getMerchantId();
-        } else {
-            finalMerchantId = currentMerchantId;
+        // 限制：每个商户只能有一个 merchant_owner，创建商户时已自动生成
+        if ("merchant_owner".equals(request.getRole())) {
+            return ApiResponse.error(400, "商户管理员账号由系统自动创建，不允许手动添加");
         }
 
         MerchantUser user = merchantUserService.register(
                 request.getUsername(),
                 request.getPassword(),
-                finalMerchantId,
+                merchantId,
                 request.getPhone(),
                 request.getRole()
         );

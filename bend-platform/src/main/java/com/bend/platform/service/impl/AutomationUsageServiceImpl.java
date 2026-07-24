@@ -16,13 +16,17 @@ import com.bend.platform.service.TaskGameAccountStatusService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +60,15 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
     private final TaskGameAccountStatusService taskGameAccountStatusService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @Value("${license.mode:master}")
+    private String licenseMode;
+    @Value("${license.master-url:}")
+    private String masterUrl;
+    @Value("${license.key:${LICENSE_KEY:}}")
+    private String licenseKey;
+    @Value("${license.secret:${LICENSE_SECRET:}}")
+    private String licenseSecret;
+
     /**
      * 校验自动化启动是否需要预留点数。
      *
@@ -65,6 +78,9 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
     @Override
     public Map<String, Object> validateAndCalculatePoints(String merchantId, String streamingAccountId,
                                                 List<GameAccount> gameAccounts, List<XboxHost> hosts) {
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return proxyValidateToMaster(merchantId, streamingAccountId, gameAccounts, hosts);
+        }
         Map<String, Object> result = new HashMap<>();
         int requiredPoints = 0;
         boolean canStart = true;
@@ -231,8 +247,15 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deductPointsAndRecordUsage(String merchantId, String userId, String taskId,
-                                       String streamingAccountId, String streamingAccountName,
-                                       int gameAccountsCount, int hostsCount, Map<String, Object> validationResult) {
+                                        String streamingAccountId, String streamingAccountName,
+                                        int gameAccountsCount, int hostsCount, Map<String, Object> validationResult) {
+        // 分控模式：整体代理到总控（扣点 + 写 automation_usage 都在总控执行）
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            proxyDeductAndUsageToMaster(merchantId, userId, taskId, streamingAccountId,
+                    streamingAccountName, gameAccountsCount, hostsCount, validationResult);
+            return;
+        }
+
         int totalPoints = (Integer) validationResult.get("totalPoints");
         String chargeType = (String) validationResult.get("chargeType");
 
@@ -334,6 +357,11 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> recordBillableEvent(Task task, Map<String, Object> payload) {
+        // 分控模式：整体代理到总控（写 billing_event + 扣点都在总控执行）
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return proxyBillableEventToMaster(task, payload);
+        }
+
         String gameAccountId = stringValue(payload.get("gameAccountId"));
         String sessionId = stringValue(payload.get("sessionId"));
         if (sessionId == null) {
@@ -487,13 +515,63 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         gameAccountMapper.updateById(account);
     }
 
+    /** 解析 JSON 数组字符串为 List<String> */
+    private List<String> parseJsonArray(String json) {
+        List<String> result = new ArrayList<>();
+        if (json == null || json.isEmpty()) {
+            return result;
+        }
+        try {
+            result = objectMapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {});
+        } catch (Exception e) {
+            log.warn("解析JSON数组失败: {}", json, e);
+        }
+        return result;
+    }
+
+    /**
+     * 检查订阅是否覆盖指定资源。
+     *
+     * <p>方案A（商户级包月）：激活码不绑定具体 resource ID，只要 subscription_type 匹配即返回 true。
+     * "full"（全功能包月）覆盖所有资源类型。
+     * 若 subscription 绑定了具体 resource ID（boundResourceIds 非空），则校验 targetId 是否在列表中。
+     *
+     * @param subscriptions 生效中的订阅列表
+     * @param type          资源类型简写："window"/"account"/"host"
+     * @param targetId      目标资源 ID
+     * @return true 表示有订阅覆盖该资源
+     */
     private boolean checkSubscription(List<Subscription> subscriptions, String type, String targetId) {
         if (subscriptions == null || targetId == null) {
             return false;
         }
+        // 资源类型简写 → DB subscription_type 映射
+        String dbType = switch (type) {
+            case "window" -> "window_account";
+            case "account" -> "account";
+            case "host" -> "host";
+            default -> type;
+        };
         for (Subscription sub : subscriptions) {
-            if (type.equals(sub.getSubscriptionType()) && targetId.equals(sub.getBoundResourceIds())) {
+            String subType = sub.getSubscriptionType();
+            // full（全功能包月）覆盖所有资源类型
+            if ("full".equals(subType)) {
                 return true;
+            }
+            if (dbType.equals(subType)) {
+                // 商户级包月：未绑定具体资源 → 该商户所有同类资源都享受包月
+                String boundIds = sub.getBoundResourceIds();
+                if (boundIds == null || boundIds.isEmpty()) {
+                    return true;
+                }
+                // 定向绑定：校验 targetId 是否在绑定列表中
+                List<String> ids = parseJsonArray(boundIds);
+                if (ids.isEmpty()) {
+                    return true;
+                }
+                if (ids.contains(targetId)) {
+                    return true;
+                }
             }
         }
         return false;
@@ -555,5 +633,196 @@ public class AutomationUsageServiceImpl implements AutomationUsageService {
         }
 
         return group;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> proxyValidateToMaster(String merchantId, String streamingAccountId,
+                                                        List<GameAccount> gameAccounts, List<XboxHost> hosts) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-License-Key", licenseKey);
+            headers.set("X-License-Secret", licenseSecret);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            Map<String, Object> body = new HashMap<>();
+            body.put("streamingAccountId", streamingAccountId);
+            if (gameAccounts != null) body.put("gameAccountIds", gameAccounts.stream().map(GameAccount::getId).toList());
+            // 分控的游戏账号/主机 ID 在总控库不存在，传数量让总控直接用于计费计算
+            body.put("accountCount", gameAccounts != null ? gameAccounts.size() : 0);
+            body.put("hostCount", hosts != null ? hosts.size() : 0);
+            String url = masterUrl.replaceAll("/+$", "") + "/api/tenant/billing/validate";
+            ResponseEntity<Map> resp = new RestTemplate().postForEntity(url, new HttpEntity<>(body, headers), Map.class);
+            Map<String, Object> result = resp.getBody();
+            if (result != null && Integer.valueOf(200).equals(result.get("code"))) {
+                return (Map<String, Object>) result.get("data");
+            }
+            return Map.of("canStart", false, "errors", List.of("总控校验失败"));
+        } catch (Exception e) {
+            return Map.of("canStart", false, "errors", List.of("总控请求失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 分控代理：启动用量 + 扣点 → 总控 /api/tenant/automation/usage。
+     *
+     * <p>方案A：计费全归总控。分控不写本地 automation_usage，全部由总控处理。
+     */
+    @SuppressWarnings("unchecked")
+    private void proxyDeductAndUsageToMaster(String merchantId, String userId, String taskId,
+                                              String streamingAccountId, String streamingAccountName,
+                                              int gameAccountsCount, int hostsCount,
+                                              Map<String, Object> validationResult) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-License-Key", licenseKey);
+            headers.set("X-License-Secret", licenseSecret);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("merchantId", merchantId);
+            body.put("userId", userId);
+            body.put("taskId", taskId);
+            body.put("streamingAccountId", streamingAccountId);
+            body.put("streamingAccountName", streamingAccountName);
+            body.put("gameAccountsCount", gameAccountsCount);
+            body.put("hostsCount", hostsCount);
+            body.put("totalPoints", validationResult.getOrDefault("totalPoints", 0));
+            body.put("chargeType", validationResult.getOrDefault("chargeType", ""));
+
+            // 计算资源类型/ID/名称/扣点模式（与总控模式逻辑一致）
+            String chargeType = (String) validationResult.getOrDefault("chargeType", "");
+            int accountCount = (Integer) validationResult.getOrDefault("accountCount", 0);
+            int hostCount = (Integer) validationResult.getOrDefault("hostCount", 0);
+            int accountPrice = (Integer) validationResult.getOrDefault("accountPrice", 5);
+            int hostPrice = (Integer) validationResult.getOrDefault("hostPrice", 20);
+            int windowPrice = (Integer) validationResult.getOrDefault("windowPrice", 10);
+
+            List<GameAccount> gameAccounts = (List<GameAccount>) validationResult.get("gameAccounts");
+            List<XboxHost> hosts = (List<XboxHost>) validationResult.get("hosts");
+
+            String resourceType;
+            String resourceId;
+            String resourceName;
+            String chargeMode;
+            int pointsDeducted;
+
+            if (chargeType.startsWith("subscription_") || chargeType.startsWith("monthly_")) {
+                if (chargeType.contains("window")) {
+                    resourceType = "window"; resourceId = streamingAccountId; resourceName = streamingAccountName;
+                } else if (chargeType.contains("account")) {
+                    resourceType = "account";
+                    resourceId = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getId() : null;
+                    resourceName = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getGameName() : null;
+                } else {
+                    resourceType = "host";
+                    resourceId = hosts != null && !hosts.isEmpty() ? hosts.get(0).getId() : null;
+                    resourceName = hosts != null && !hosts.isEmpty() ? hosts.get(0).getName() : null;
+                }
+                chargeMode = "monthly";
+                pointsDeducted = 0;
+            } else if (chargeType.contains("account")) {
+                resourceType = "account";
+                resourceId = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getId() : null;
+                resourceName = gameAccounts != null && !gameAccounts.isEmpty() ? gameAccounts.get(0).getGameName() : null;
+                chargeMode = "per_use";
+                pointsDeducted = accountPrice * accountCount;
+            } else if (chargeType.contains("host")) {
+                resourceType = "host";
+                resourceId = hosts != null && !hosts.isEmpty() ? hosts.get(0).getId() : null;
+                resourceName = hosts != null && !hosts.isEmpty() ? hosts.get(0).getName() : null;
+                chargeMode = "per_use";
+                pointsDeducted = hostPrice * hostCount;
+            } else {
+                resourceType = "window"; resourceId = streamingAccountId; resourceName = streamingAccountName;
+                chargeMode = "per_use"; pointsDeducted = windowPrice;
+            }
+
+            body.put("resourceType", resourceType);
+            body.put("resourceId", resourceId != null ? resourceId : "");
+            body.put("resourceName", resourceName != null ? resourceName : "");
+            body.put("chargeMode", chargeMode);
+            body.put("pointsDeducted", pointsDeducted);
+
+            String url = masterUrl.replaceAll("/+$", "") + "/api/tenant/automation/usage";
+            ResponseEntity<Map> resp = new RestTemplate().postForEntity(url, new HttpEntity<>(body, headers), Map.class);
+            Map<String, Object> result = resp.getBody();
+            if (result == null || !Integer.valueOf(200).equals(result.get("code"))) {
+                String msg = result != null ? String.valueOf(result.get("message")) : "总控无响应";
+                throw new BusinessException(500, "分控代理扣点失败: " + msg);
+            }
+            log.info("分控代理用量记录成功 - taskId: {}, points: {}", taskId, validationResult.get("totalPoints"));
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException(500, "分控代理用量记录失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 分控代理：Step4 计费事件 + 扣点 → 总控 /api/tenant/automation/billing-event。
+     *
+     * <p>方案A：计费全归总控。分控不写本地 billing_event，全部由总控处理。
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> proxyBillableEventToMaster(Task task, Map<String, Object> payload) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-License-Key", licenseKey);
+            headers.set("X-License-Secret", licenseSecret);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            // 构造与总控 recordBillableEvent 相同的参数
+            String gameAccountId = stringValue(payload.get("gameAccountId"));
+            String sessionId = stringValue(payload.get("sessionId"));
+            if (sessionId == null) {
+                sessionId = task.getSessionId();
+            }
+            String gameActionType = normalizeGameActionType(
+                    stringValue(payload.get("gameActionType")) != null
+                            ? stringValue(payload.get("gameActionType"))
+                            : task.getGameActionType());
+            String billingUnit = normalizeBillingUnit(gameActionType, stringValue(payload.get("billingUnit")));
+            Integer unitIndex = intValue(payload.get("unitIndex"));
+
+            String rawIdempotentKey = String.join(":",
+                    task.getId(),
+                    sessionId != null ? sessionId : "-",
+                    gameAccountId,
+                    gameActionType,
+                    billingUnit,
+                    String.valueOf(unitIndex));
+            String idempotentKey = "bill:" + java.util.UUID.nameUUIDFromBytes(
+                    rawIdempotentKey.getBytes(StandardCharsets.UTF_8));
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("merchantId", task.getMerchantId());
+            body.put("taskId", task.getId());
+            body.put("sessionId", sessionId != null ? sessionId : "");
+            body.put("streamingAccountId", task.getStreamingAccountId() != null ? task.getStreamingAccountId() : "");
+            body.put("gameAccountId", gameAccountId != null ? gameAccountId : "");
+            body.put("gameActionType", gameActionType);
+            body.put("billingUnit", billingUnit);
+            body.put("unitIndex", unitIndex != null ? unitIndex : 0);
+            body.put("idempotentKey", idempotentKey);
+            body.put("pointsDeducted", resolveEventPoints(gameActionType, billingUnit));
+            body.put("coinsDelta", intValue(payload.get("coinsDelta")) != null ? intValue(payload.get("coinsDelta")) : 0);
+            try {
+                body.put("payload", objectMapper.writeValueAsString(payload));
+            } catch (Exception e) {
+                body.put("payload", "{}");
+            }
+
+            String url = masterUrl.replaceAll("/+$", "") + "/api/tenant/automation/billing-event";
+            ResponseEntity<Map> resp = new RestTemplate().postForEntity(url, new HttpEntity<>(body, headers), Map.class);
+            Map<String, Object> result = resp.getBody();
+            if (result != null && Integer.valueOf(200).equals(result.get("code"))) {
+                return (Map<String, Object>) result.get("data");
+            }
+            String msg = result != null ? String.valueOf(result.get("message")) : "总控无响应";
+            throw new BusinessException(500, "分控代理计费事件失败: " + msg);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException(500, "分控代理计费事件失败: " + e.getMessage());
+        }
     }
 }

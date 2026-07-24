@@ -8,7 +8,7 @@ Step4 任务类型路由与计费
 """
 from typing import Optional, Dict, Any
 
-from ..task.task_context import AgentTaskContext, GameAccountInfo
+from ...task.task_context import AgentTaskContext, GameAccountInfo
 from .constants import VALID_TASK_TYPES
 
 

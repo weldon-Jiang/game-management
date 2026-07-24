@@ -178,21 +178,26 @@ public class AutomationServiceImpl implements AutomationService {
                 continue;
             }
 
-            Map<String, Object> validationResult = automationUsageService.validateAndCalculatePoints(
-                    merchantId, streamingAccountId, gameAccounts, xboxHostsForBilling);
-
-            if (!Boolean.TRUE.equals(validationResult.get("canStart"))) {
-                String message = (String) validationResult.get("message");
-                Map<String, Object> errorResult = new HashMap<>();
-                errorResult.put("streamingAccountId", streamingAccountId);
-                errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
-                errorResult.put("success", false);
-                errorResult.put("message", message);
-                results.add(errorResult);
-                log.warn("自动化启动失败 - merchantId: {}, account: {}, reason: {}",
-                        merchantId, streamingAccount.getDisplayLabel(), message);
-                continue;
-            }
+            // ============================================================
+            // 计费校验暂时关闭（2026-07-22）
+            // 原因：merchant_group 的 window_discount_price=7000 直接当作点数，
+            // 商户余额不足导致无法启动。定价策略确定后恢复。
+            // ============================================================
+            // Map<String, Object> validationResult = automationUsageService.validateAndCalculatePoints(
+            //         merchantId, streamingAccountId, gameAccounts, xboxHostsForBilling);
+            // if (!Boolean.TRUE.equals(validationResult.get("canStart"))) {
+            //     String message = (String) validationResult.get("message");
+            //     Map<String, Object> errorResult = new HashMap<>();
+            //     errorResult.put("streamingAccountId", streamingAccountId);
+            //     errorResult.put("streamingAccountName", streamingAccount.getDisplayLabel());
+            //     errorResult.put("success", false);
+            //     errorResult.put("message", message);
+            //     results.add(errorResult);
+            //     log.warn("自动化启动失败 - merchantId: {}, account: {}, reason: {}",
+            //             merchantId, streamingAccount.getDisplayLabel(), message);
+            //     continue;
+            // }
+            // ============================================================
 
             // 构建任务参数（支持选择特定游戏账号）
             List<GameAccount> selectedGameAccounts = gameAccounts;
@@ -252,10 +257,16 @@ public class AutomationServiceImpl implements AutomationService {
             Task created = taskService.create(task);
             createdTaskIds.add(created.getId());
 
-            automationUsageService.deductPointsAndRecordUsage(
-                    merchantId, userId, created.getId(),
-                    streamingAccountId, streamingAccount.getDisplayLabel(),
-                    selectedGameAccounts.size(), xboxHostsForBilling.size(), validationResult);
+            // ============================================================
+            // 启动扣点暂时关闭（2026-07-22）
+            // 原因：计费校验已暂停，此处扣点也一并暂停，避免无校验直接扣点。
+            // 定价策略确定后，上方校验和此处扣点应同时恢复。
+            // ============================================================
+            // automationUsageService.deductPointsAndRecordUsage(
+            //         merchantId, userId, created.getId(),
+            //         streamingAccountId, streamingAccount.getDisplayLabel(),
+            //         selectedGameAccounts.size(), xboxHostsForBilling.size(), validationResult);
+            // ============================================================
 
             // 更新流媒体账号状态为忙碌
             streamingAccountService.updateTaskStatus(streamingAccountId, AccountStatusEnum.BUSY.getCode());
@@ -276,11 +287,11 @@ public class AutomationServiceImpl implements AutomationService {
             result.put("taskId", created.getId());
             result.put("gameAccountsCount", selectedGameAccounts.size());
             result.put("success", true);
-            result.put("pointsDeducted", validationResult.get("totalPoints"));
+            result.put("pointsDeducted", 0); // 计费暂关，始终为 0
             results.add(result);
 
-            log.info("创建自动化任务成功 - 流媒体账号: {}, Agent: {}, TaskId: {}, Points: {}",
-                streamingAccount.getDisplayLabel(), agentId, created.getId(), validationResult.get("totalPoints"));
+            log.info("创建自动化任务成功 - 流媒体账号: {}, Agent: {}, TaskId: {}, Points: 0(计费暂关)",
+                streamingAccount.getDisplayLabel(), agentId, created.getId());
         }
 
         Map<String, Object> response = new HashMap<>();

@@ -11,7 +11,7 @@ import asyncio
 import time
 from typing import Callable, Optional, Dict
 
-from ..task.task_context import AgentTaskContext, GameAccountInfo
+from ...task.task_context import AgentTaskContext, GameAccountInfo
 from .constants import NAVIGATION_CONFIG
 from .task_routing import _normalize_game_action_type
 from .setup import _fc_init_match_session, _fc_terminate_match_session
@@ -201,7 +201,7 @@ async def _play_match(
     if getattr(context, "_fc_remote_play", False):
         runtime = getattr(context, "_stream_runtime", None)
         if runtime:
-            from ..runtime.pause_input_control import raise_if_resume_reanchor
+            from ...runtime.pause_input_control import raise_if_resume_reanchor
 
             task_logger.info("[比赛进行] FC PLAY loop 已接管（StreamRuntime play 20Hz）")
             deadline = time.monotonic() + match_duration

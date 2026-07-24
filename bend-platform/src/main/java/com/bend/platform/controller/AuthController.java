@@ -92,6 +92,7 @@ public class AuthController {
                 .username(user.getUsername())
                 .merchantId(user.getMerchantId())
                 .role(user.getRole())
+                .needChangePassword(user.getPasswordUpdatedAt() == null)
                 .build();
 
         return ApiResponse.success("登录成功", response);

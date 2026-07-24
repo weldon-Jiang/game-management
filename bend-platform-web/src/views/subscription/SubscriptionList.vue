@@ -114,6 +114,17 @@
           class="data-table"
           stripe
         >
+          <!-- 平台管理员视角：显示商户名称列 -->
+          <el-table-column
+            v-if="authStore.isPlatformAdmin"
+            prop="merchantName"
+            label="商户"
+            width="140"
+          >
+            <template #default="{ row }">
+              <span class="merchant-name">{{ row.merchantName || '-' }}</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="subscriptionType" label="订阅类型" width="150">
             <template #default="{ row }">
               <div class="type-cell">
@@ -183,7 +194,9 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Tickets, Refresh } from '@element-plus/icons-vue'
 import { subscriptionApi, billingApi, activationApi } from '@/api'
+import { useAuthStore } from '@/stores/auth'
 
+const authStore = useAuthStore()
 const loading = ref(false)
 const activationCode = ref('')
 const activating = ref(false)
@@ -605,6 +618,12 @@ onMounted(() => {
 .type-cell {
   display: flex;
   align-items: center;
+}
+
+.merchant-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 .resource-names {

@@ -1,6 +1,7 @@
 package com.bend.platform.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bend.platform.dto.ApiResponse;
 import com.bend.platform.entity.*;
 import com.bend.platform.exception.BusinessException;
@@ -8,7 +9,11 @@ import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.*;
 import com.bend.platform.util.UserContext;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -27,7 +32,11 @@ import java.util.Map;
  * 注意：
  * - 推荐使用激活码方式管理订阅（本控制器中的订阅方法是为兼容旧流程保留）
  * - 新流程：通过 MerchantSubscriptionController 使用激活码激活订阅
+ *
+ * 分控模式说明：
+ * - /balance 接口在分控模式下代理到总控 /api/tenant/balance（VIP/余额数据仅在总控维护）
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/billing")
 @RequiredArgsConstructor
@@ -38,13 +47,34 @@ public class BillingController {
     private final RechargeCardService rechargeCardService;
     private final MerchantService merchantService;
 
+    /** License 模式：master（总控）/ tenant（分控） */
+    @Value("${license.mode:master}")
+    private String licenseMode;
+
+    @Value("${license.master-url:}")
+    private String masterUrl;
+
+    @Value("${license.key:${LICENSE_KEY:}}")
+    private String licenseKey;
+
+    @Value("${license.secret:${LICENSE_SECRET:}}")
+    private String licenseSecret;
+
     /**
      * 获取商户余额信息
      *
      * @return 商户余额（包含累计充值、当前余额、累计消耗、VIP等级）
+     *
+     * 说明：
+     * - 分控模式：代理到总控 /api/tenant/balance（VIP/余额数据仅在总控维护）
+     * - 总控模式：直接查本地库
      */
     @GetMapping("/balance")
     public ApiResponse<Map<String, Object>> getBalance() {
+        // 分控模式：代理到总控获取余额+VIP
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return callMasterGet("/api/tenant/balance");
+        }
         String merchantId = UserContext.getMerchantId();
         MerchantBalance balance = balanceService.getByMerchantId(merchantId);
 
@@ -66,6 +96,58 @@ public class BillingController {
         }
 
         return ApiResponse.success(result);
+    }
+
+    // ---- 分控代理到总控 ----
+
+    /** GET 代理到总控（返回 List<Subscription>） */
+    @SuppressWarnings("unchecked")
+    private ApiResponse<List<Subscription>> callMasterGetListActive(String path) {
+        try {
+            String url = masterUrl.replaceAll("/+$", "") + path;
+            ResponseEntity<Map> resp = new RestTemplate().exchange(url, HttpMethod.GET,
+                    new HttpEntity<>(licenseHeaders()), Map.class);
+            Map<String, Object> body = resp.getBody();
+            if (body == null) return ApiResponse.error(500, "总控无响应");
+            int code = body.get("code") instanceof Number ? ((Number) body.get("code")).intValue() : 500;
+            if (code == 200) {
+                Object data = body.get("data");
+                if (data instanceof List) {
+                    return ApiResponse.success((List<Subscription>) data);
+                }
+                return ApiResponse.success(List.of());
+            }
+            return ApiResponse.error(code, String.valueOf(body.getOrDefault("message", "error")));
+        } catch (Exception e) {
+            log.error("分控代理总控失败 - path: {}, error: {}", path, e.getMessage());
+            return ApiResponse.error(500, "总控请求失败: " + e.getMessage());
+        }
+    }
+
+    /** 构建 License 鉴权请求头 */
+    private HttpHeaders licenseHeaders() {
+        HttpHeaders h = new HttpHeaders();
+        h.set("X-License-Key", licenseKey);
+        h.set("X-License-Secret", licenseSecret);
+        return h;
+    }
+
+    /** GET 代理到总控 */
+    @SuppressWarnings("unchecked")
+    private ApiResponse<Map<String, Object>> callMasterGet(String path) {
+        try {
+            String url = masterUrl.replaceAll("/+$", "") + path;
+            ResponseEntity<Map> resp = new RestTemplate().exchange(url, HttpMethod.GET,
+                    new HttpEntity<>(licenseHeaders()), Map.class);
+            Map<String, Object> body = resp.getBody();
+            if (body == null) return ApiResponse.error(500, "总控无响应");
+            int code = body.get("code") instanceof Number ? ((Number) body.get("code")).intValue() : 500;
+            if (code == 200) return ApiResponse.success((Map<String, Object>) body.get("data"));
+            return ApiResponse.error(code, String.valueOf(body.getOrDefault("message", "error")));
+        } catch (Exception e) {
+            log.error("分控代理总控失败 - path: {}, error: {}", path, e.getMessage());
+            return ApiResponse.error(500, "总控请求失败: " + e.getMessage());
+        }
     }
 
     /**
@@ -161,6 +243,10 @@ public class BillingController {
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
             @RequestParam(required = false) String status) {
+        // 分控模式：订阅数据在总控，分控本地为陈旧快照，直接返回空（前端用 /api/merchant-subscription/list 代理查询）
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return ApiResponse.success(new Page<>(pageNum, pageSize, 0));
+        }
         String merchantId = UserContext.getMerchantId();
         IPage<Subscription> page = subscriptionService.pageSubscriptions(merchantId, pageNum, pageSize, status);
         return ApiResponse.success(page);
@@ -173,6 +259,10 @@ public class BillingController {
      */
     @GetMapping("/subscriptions/active")
     public ApiResponse<List<Subscription>> listActiveSubscriptions() {
+        // 分控模式：代理到总控
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return callMasterGetListActive("/api/tenant/subscriptions/active");
+        }
         String merchantId = UserContext.getMerchantId();
         List<Subscription> subscriptions = subscriptionService.getActiveSubscriptions(merchantId);
         return ApiResponse.success(subscriptions);

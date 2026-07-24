@@ -11,6 +11,12 @@ const routes = [
     meta: { title: '用户登录', requiresAuth: false }
   },
   {
+    path: '/change-password',
+    name: 'ChangePassword',
+    component: () => import('@/views/login/ChangePasswordView.vue'),
+    meta: { title: '修改密码', requiresAuth: true }
+  },
+  {
     path: '/register',
     name: 'Register',
     component: () => import('@/views/login/RegisterView.vue'),
@@ -80,6 +86,18 @@ const routes = [
         name: 'RegistrationCodes',
         component: () => import('@/views/registration/RegistrationCodeList.vue'),
         meta: { title: '分控注册码', icon: 'Tickets', requiresAdmin: true, requiresMaster: true }
+      },
+      {
+        path: 'licenses',
+        name: 'Licenses',
+        component: () => import('@/views/license/LicenseList.vue'),
+        meta: { title: 'License管理', icon: 'Stamp', requiresAdmin: true, requiresMaster: true }
+      },
+      {
+        path: 'permissions',
+        name: 'Permissions',
+        component: () => import('@/views/permission/PermissionList.vue'),
+        meta: { title: '权限管理', icon: 'Lock', requiresAdmin: true, requiresMaster: true }
       },
       {
         path: 'tasks',
@@ -156,6 +174,12 @@ router.beforeEach(async (to, from, next) => {
   // 如果用户已登录，访问登录页则重定向到首页
   if (to.name === 'Login' && authStore.isLoggedIn) {
     next({ name: 'Dashboard' })
+    return
+  }
+
+  // 首次登录强制改密（跳过改密页本身）
+  if (authStore.isLoggedIn && authStore.needChangePassword && to.name !== 'ChangePassword') {
+    next({ name: 'ChangePassword' })
     return
   }
 

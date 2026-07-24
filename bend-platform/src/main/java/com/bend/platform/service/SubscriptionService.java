@@ -52,9 +52,19 @@ public interface SubscriptionService {
     void cancelSubscription(String subscriptionId);
 
     /**
-     * 分页查询订阅
+     * 分页查询订阅（按商户隔离）
      */
     IPage<Subscription> pageSubscriptions(String merchantId, int pageNum, int pageSize, String status);
+
+    /**
+     * 分页查询所有商户的订阅（平台管理员用，不按商户过滤）
+     *
+     * @param pageNum  页码
+     * @param pageSize 每页数量
+     * @param status   状态筛选（可为 null）
+     * @return 订阅分页列表
+     */
+    IPage<Subscription> pageAllSubscriptions(int pageNum, int pageSize, String status);
 
     /**
      * 校验流媒体账号是否可以用于启动自动化

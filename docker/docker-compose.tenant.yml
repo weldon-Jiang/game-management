@@ -1,22 +1,21 @@
 # ============================================
-# Bend Platform 分控(Tenant) Docker Compose
+# Bend Platform — 分控 (Tenant) Docker Compose
 # ============================================
-# ⚠ 总控(Master)全栈部署请使用: docker-compose.yml + .env.{dev/sit/prod}
-#   总控模式包含 MySQL + Redis 容器，支持 data/core/app/full profile。
+# 包含: 后端 + 网关 + 前端（不含 MySQL/Redis 容器）
+# 用途: 商户局域网部署分控平台
+#
+# 启动:  docker compose --env-file .env.tenant -f docker-compose.tenant.yml up -d --build
+# 停止:  docker compose --env-file .env.tenant -f docker-compose.tenant.yml down
+# 日志:  docker compose --env-file .env.tenant -f docker-compose.tenant.yml logs -f [service]
+#
+# ⚠ 总控部署请用: docker-compose.master.yml + .env
+#   (总控包含 MySQL + Redis 容器)
+#
+# 分控特点:
+#   - 不依赖 Redis（tenant profile 自动排除 RedisAutoConfiguration）
+#   - MySQL 直连宿主机 3306（不另起容器）
+#   - 前端 8090 / 网关 8060
 # ============================================
-# 使用方式：
-#   启动：docker compose --env-file .env.tenant -f docker-compose-tenant.yml up -d --build
-#   停止：docker compose --env-file .env.tenant -f docker-compose-tenant.yml down
-#   日志：docker compose --env-file .env.tenant -f docker-compose-tenant.yml logs -f [service]
-# ============================================
-# 分控模式特点：
-#   - MySQL 复用宿主机本机 3306（不另起容器，总控 Docker MySQL 已用 3307）
-#   - 不依赖 Redis（tenant profile 自动排除，走本地 ConcurrentHashMap fallback）
-#   - 前端端口 8090（nginx listen 0.0.0.0:8090，同局域网可访问）
-#   - 网关端口 8060（Agent 通过局域网 IP 连接）
-# ============================================
-
-version: '3.8'
 
 name: bend-platform-tenant
 

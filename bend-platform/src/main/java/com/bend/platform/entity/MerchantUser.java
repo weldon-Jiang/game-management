@@ -21,6 +21,7 @@ public class MerchantUser {
     private String role;
     private String status;
     private LocalDateTime lastLoginTime;
+    private LocalDateTime passwordUpdatedAt;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdTime;
 

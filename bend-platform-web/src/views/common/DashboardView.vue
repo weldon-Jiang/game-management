@@ -83,6 +83,10 @@
               <span class="info-value role-tag">{{ roleText }}</span>
             </div>
             <div class="info-item">
+              <span class="info-label">商户</span>
+              <span class="info-value merchant-id">{{ merchantName || '--' }}</span>
+            </div>
+            <div class="info-item">
               <span class="info-label">商户ID</span>
               <span class="info-value merchant-id">{{ authStore.merchantId || '无' }}</span>
             </div>
@@ -105,10 +109,12 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { OfficeBuilding, User, VideoPlay, Monitor, Coin, Key, CreditCard, Cpu, Trophy, Box, Wallet, Tickets } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { dashboardApi } from '@/api'
+import { dashboardApi, merchantApi } from '@/api'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+const merchantName = ref('')
 
 const stats = ref({
   merchantCount: 0,
@@ -160,10 +166,21 @@ const loadStats = async () => {
   }
 }
 
+const loadMerchantName = async () => {
+  if (!authStore.merchantId) return
+  try {
+    const res = await merchantApi.getById(authStore.merchantId)
+    if ((res.code === 0 || res.code === 200) && res.data) {
+      merchantName.value = res.data.name || ''
+    }
+  } catch (e) { /* ignore */ }
+}
+
 onMounted(() => {
   updateTime()
   timer = setInterval(updateTime, 1000)
   loadStats()
+  loadMerchantName()
 })
 
 onUnmounted(() => {

@@ -11,7 +11,7 @@ import asyncio
 import time
 from typing import Callable, Optional
 
-from ..task.task_context import AgentTaskContext, GameAccountInfo, TaskMainStatus
+from ...task.task_context import AgentTaskContext, GameAccountInfo, TaskMainStatus
 
 async def _pause_for_manual_fc_launch(
     context: AgentTaskContext,
@@ -30,8 +30,8 @@ async def _pause_for_manual_fc_launch(
     保持串流/窗口不关闭，会话标记为 paused 以便用户操作 Xbox 窗口。
     仅在等待期间任务被取消时返回 False。
     """
-    from ..runtime.phase_fsm import SessionPhase
-    from ..runtime.pause_input_control import release_automation_input
+    from ...runtime.phase_fsm import SessionPhase
+    from ...runtime.pause_input_control import release_automation_input
 
     await release_automation_input(context, task_logger)
     context.pause()
@@ -74,7 +74,7 @@ async def _pause_for_manual_fc_launch(
             return False
         await asyncio.sleep(0.3)
 
-    from ..runtime.pause_input_control import raise_if_resume_reanchor
+    from ...runtime.pause_input_control import raise_if_resume_reanchor
 
     raise_if_resume_reanchor(context)
 
@@ -106,8 +106,8 @@ async def _launch_fc_with_manual_pause(
     advance safely. Pausing avoids closing Step1-3 resources and lets the user
     correct the screen before Step4 retries.
     """
-    from ..game.account_switcher import ManualInterventionRequired
-    from ..runtime.pause_input_control import ResumeReanchor
+    from ...game.account_switcher import ManualInterventionRequired
+    from ...runtime.pause_input_control import ResumeReanchor
 
     while True:
         try:
@@ -224,7 +224,7 @@ async def _report_step4_failure(
                 "windowState": window_state,
             },
         )
-        from ..xbox.stream_session_survival import (
+        from ...xbox.stream_session_survival import (
             schedule_ensure_stream_subsystems_alive,
         )
 
@@ -240,7 +240,7 @@ async def _ensure_input_for_step4(context: AgentTaskContext, task_logger) -> boo
     """
     Step4 自动化前确认 input DataChannel 为 open；closed 时同步触发重连回调。
     """
-    from ..xbox.stream_keepalive import is_input_channel_open
+    from ...xbox.stream_keepalive import is_input_channel_open
 
     session = getattr(context, "xbox_session", None)
     if session is not None and is_input_channel_open(session):
@@ -280,7 +280,7 @@ async def _switch_to_next_game_account_on_skip(
         return False
 
     next_ga = context.game_accounts[next_index]
-    from ..core.config import config as app_config
+    from ...core.config import config as app_config
 
     skip_switch = bool(app_config.get("step4.skip_account_switch", False))
     if skip_switch:

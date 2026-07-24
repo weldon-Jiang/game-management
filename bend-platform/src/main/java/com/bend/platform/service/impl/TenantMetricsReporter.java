@@ -105,6 +105,8 @@ public class TenantMetricsReporter {
         }
 
         // 业务指标:通过 merchantId(来自 license 校验缓存)查本地库
+        // 注意：方案A（计费全归总控）后，分控本地的 merchant_balance 和 automation_billing_event 不再有新数据。
+        // balance 和 todayPointsConsumed 由总控库权威维护，分控上报时留空（-1），总控大盘直接从总控库查。
         try {
             LicenseVerifyCache cache = verifyCacheMapper.selectByLicenseKey(licenseKey);
             if (cache != null && cache.getMerchantId() != null) {
@@ -113,14 +115,11 @@ public class TenantMetricsReporter {
                         "SELECT COUNT(*) FROM task WHERE merchant_id=? AND DATE(created_time)=CURDATE()", mid);
                 Integer runningTasks = queryInt(
                         "SELECT COUNT(*) FROM task WHERE merchant_id=? AND status='running'", mid);
-                Integer todayPoints = queryInt(
-                        "SELECT COALESCE(SUM(points_deducted),0) FROM automation_billing_event WHERE merchant_id=? AND DATE(created_time)=CURDATE()", mid);
-                Integer balance = queryInt(
-                        "SELECT COALESCE(balance,0) FROM merchant_balance WHERE merchant_id=?", mid);
                 r.setTodayTaskCount(todayTasks);
                 r.setRunningTaskCount(runningTasks);
-                r.setTodayPointsConsumed(todayPoints);
-                r.setBalance(balance);
+                // balance/todayPointsConsumed 留空（-1 表示未采集），总控大盘从总控库查
+                r.setBalance(-1);
+                r.setTodayPointsConsumed(-1);
             }
         } catch (Exception e) {
             log.debug("采集业务指标失败: {}", e.getMessage());

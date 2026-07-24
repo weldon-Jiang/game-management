@@ -49,6 +49,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/api/agent/credentials/**",
                         "/api/licenses/verify",
                         "/api/tenant-metrics/report",
+                        "/api/tenant/**",
                         "/api/install/**",
                         "/api/platform/config"
                 );

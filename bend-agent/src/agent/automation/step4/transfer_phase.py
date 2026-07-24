@@ -5,9 +5,9 @@ Step4 转会阶段
 - 单账号转会阶段编排
 """
 import asyncio
-from typing import Optional, Dict
+from typing import Any, Callable, Dict, Optional
 
-from ..task.task_context import AgentTaskContext, GameAccountInfo
+from ...task.task_context import AgentTaskContext, GameAccountInfo
 from .task_routing import _normalize_game_action_type, _transfer_rounds_target, _account_needs_transfer_phase
 from .navigator import _navigate_to_auction, _execute_transfer_round
 from .post_match import _detect_screen_state
@@ -57,7 +57,7 @@ async def _run_transfer_phase_for_account(
             )
 
         await context.wait_if_paused()
-        from ..runtime.pause_input_control import raise_if_resume_reanchor
+        from ...runtime.pause_input_control import raise_if_resume_reanchor
 
         raise_if_resume_reanchor(context)
 

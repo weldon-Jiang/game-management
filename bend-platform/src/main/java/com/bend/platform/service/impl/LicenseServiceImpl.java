@@ -11,7 +11,9 @@ import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.MerchantLicense;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
+import com.bend.platform.entity.MerchantPermission;
 import com.bend.platform.repository.MerchantLicenseMapper;
+import com.bend.platform.repository.MerchantPermissionMapper;
 import com.bend.platform.service.LicenseService;
 import com.bend.platform.service.MerchantService;
 import com.bend.platform.util.LicenseSignUtil;
@@ -40,6 +42,7 @@ import java.util.Map;
 public class LicenseServiceImpl implements LicenseService {
 
     private final MerchantLicenseMapper licenseMapper;
+    private final MerchantPermissionMapper permissionMapper;
     private final MerchantService merchantService;
     private final LicenseSignUtil signUtil;
     private final ObjectMapper objectMapper;
@@ -60,11 +63,9 @@ public class LicenseServiceImpl implements LicenseService {
         license.setMerchantId(request.getMerchantId());
         license.setLicenseKey(licenseKey);
         license.setLicenseSecret(signUtil.hashSecret(licenseSecret));
+        // License 不再承载 expireAt/maxAgents/maxTasks/features
+        // 这些字段已迁移到 merchant_permission 表
         license.setStatus(request.getMachineFingerprint() != null ? "active" : "pending");
-        license.setExpireAt(request.getExpireAt());
-        license.setMaxAgents(request.getMaxAgents() != null ? request.getMaxAgents() : 5);
-        license.setMaxTasks(request.getMaxTasks() != null ? request.getMaxTasks() : 50);
-        license.setFeatures(request.getFeatures());
         license.setOfflineGraceHours(request.getOfflineGraceHours() != null ? request.getOfflineGraceHours() : 24);
         if (request.getMachineFingerprint() != null) {
             license.setBoundMachineFingerprint(request.getMachineFingerprint());
@@ -72,7 +73,7 @@ public class LicenseServiceImpl implements LicenseService {
         }
         licenseMapper.insert(license);
 
-        log.info("签发License成功 - ID: {}, 商户: {}, 到期: {}", license.getId(), request.getMerchantId(), request.getExpireAt());
+        log.info("签发License成功 - ID: {}, 商户: {}, 状态: {}", license.getId(), request.getMerchantId(), license.getStatus());
 
         LicenseIssueResponse resp = new LicenseIssueResponse();
         resp.setId(license.getId());
@@ -81,10 +82,10 @@ public class LicenseServiceImpl implements LicenseService {
         resp.setLicenseKey(licenseKey);
         resp.setLicenseSecret(licenseSecret);
         resp.setStatus(license.getStatus());
-        resp.setExpireAt(formatTime(license.getExpireAt()));
-        resp.setMaxAgents(license.getMaxAgents());
-        resp.setMaxTasks(license.getMaxTasks());
-        resp.setFeatures(license.getFeatures());
+        resp.setExpireAt(null);
+        resp.setMaxAgents(null);
+        resp.setMaxTasks(null);
+        resp.setFeatures(null);
         resp.setOfflineGraceHours(license.getOfflineGraceHours());
         return resp;
     }
@@ -94,25 +95,41 @@ public class LicenseServiceImpl implements LicenseService {
     public LicenseVerifyResponse verify(LicenseVerifyRequest request, String clientIp) {
         MerchantLicense license = licenseMapper.selectByLicenseKey(request.getLicenseKey());
         if (license == null) {
-            return buildInvalid(null, "授权不存在", "LICENSE_NOT_FOUND");
+            return buildInvalid(null, null, "授权不存在", "LICENSE_NOT_FOUND");
         }
 
         // 校验 secret 明文
         if (!signUtil.verifySecret(request.getLicenseSecret(), license.getLicenseSecret())) {
             log.warn("License校验失败-密钥不匹配 licenseKey={}", request.getLicenseKey());
-            return buildInvalid(license, "授权密钥不匹配", "SECRET_MISMATCH");
+            return buildInvalid(license, null, "授权密钥不匹配", "SECRET_MISMATCH");
         }
 
-        // 状态校验
+        // 状态校验: License 本身不判断到期，只判断是否吊销
         if ("revoked".equals(license.getStatus())) {
-            return buildInvalid(license, "授权已吊销", "REVOKED");
+            return buildInvalid(license, null, "授权已吊销", "REVOKED");
         }
-        // 到期校验
-        if (license.getExpireAt() != null && LocalDateTime.now().isAfter(license.getExpireAt())) {
-            if (!"expired".equals(license.getStatus())) {
-                license.setStatus("expired");
-            }
-            return buildInvalid(license, "授权已到期", "EXPIRED");
+
+        // 使用权限(Permission)校验: 到期/停用
+        MerchantPermission permission = permissionMapper.selectByMerchantId(license.getMerchantId());
+        if (permission == null) {
+            return buildInvalid(license, null, "商户未配置使用权限", "NO_PERMISSION");
+        }
+        if ("suspended".equals(permission.getStatus())) {
+            return buildInvalid(license, permission, "商户使用权限已停用", "SUSPENDED");
+        }
+        if ("expired".equals(permission.getStatus())) {
+            return buildInvalid(license, permission, "商户使用权限已到期", "EXPIRED");
+        }
+        if (permission.getExpireAt() != null && LocalDateTime.now().isAfter(permission.getExpireAt())) {
+            // 自动标记 permission 为 expired
+            permission.setStatus("expired");
+            permissionMapper.updateById(permission);
+            return buildInvalid(license, permission, "商户使用权限已到期", "EXPIRED");
+        }
+        // 确保 permission 为 active（之前可能是 expired 但被续期了）
+        if (!"active".equals(permission.getStatus())) {
+            permission.setStatus("active");
+            permissionMapper.updateById(permission);
         }
 
         // 机器指纹绑定(首次激活)/一致性校验
@@ -123,7 +140,7 @@ public class LicenseServiceImpl implements LicenseService {
                 log.info("License首次激活绑定机器 licenseKey={} fingerprint={}", request.getLicenseKey(), request.getMachineFingerprint());
             } else if (!license.getBoundMachineFingerprint().equals(request.getMachineFingerprint())) {
                 log.warn("License机器指纹不匹配 licenseKey={} bound={} current={}", request.getLicenseKey(), license.getBoundMachineFingerprint(), request.getMachineFingerprint());
-                return buildInvalid(license, "授权与当前机器不匹配", "MACHINE_MISMATCH");
+                return buildInvalid(license, permission, "授权与当前机器不匹配", "MACHINE_MISMATCH");
             }
         }
 
@@ -133,18 +150,18 @@ public class LicenseServiceImpl implements LicenseService {
         license.setLastVerifyIp(clientIp);
         licenseMapper.updateById(license);
 
-        // 构造有效响应并签名
+        // 构造有效响应并签名（使用 Permission 的能力字段）
         Merchant merchant = merchantService.findById(license.getMerchantId());
         LicenseVerifyResponse resp = new LicenseVerifyResponse();
         resp.setValid(true);
         resp.setMerchantId(license.getMerchantId());
         resp.setMerchantName(merchant != null ? merchant.getName() : null);
-        resp.setStatus(license.getStatus());
-        resp.setExpireAt(license.getExpireAt());
-        resp.setMaxAgents(license.getMaxAgents());
-        resp.setMaxTasks(license.getMaxTasks());
-        resp.setFeatures(license.getFeatures());
-        resp.setOfflineGraceHours(license.getOfflineGraceHours());
+        resp.setStatus("active");
+        resp.setExpireAt(permission.getExpireAt());
+        resp.setMaxAgents(permission.getMaxAgents());
+        resp.setMaxTasks(permission.getMaxTasks());
+        resp.setFeatures(permission.getFeatures());
+        resp.setOfflineGraceHours(permission.getOfflineGraceHours() != null ? permission.getOfflineGraceHours() : 24);
         resp.setVerifiedAt(LocalDateTime.now());
         resp.setInvalidReason(null);
         signResponse(resp);
@@ -168,20 +185,7 @@ public class LicenseServiceImpl implements LicenseService {
         log.info("吊销License - ID: {}, 原因: {}", licenseId, reason);
     }
 
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void renew(String licenseId, LocalDateTime newExpireAt) {
-        MerchantLicense license = licenseMapper.selectById(licenseId);
-        if (license == null) {
-            throw new BusinessException(ResultCode.License.NOT_FOUND);
-        }
-        license.setExpireAt(newExpireAt);
-        if ("expired".equals(license.getStatus())) {
-            license.setStatus("active");
-        }
-        licenseMapper.updateById(license);
-        log.info("续期License - ID: {}, 新到期: {}", licenseId, newExpireAt);
-    }
+    // renew() 已迁移到 PermissionService（License 不负责到期管理）
 
     @Override
     public List<MerchantLicense> listByMerchant(String merchantId) {
@@ -211,8 +215,9 @@ public class LicenseServiceImpl implements LicenseService {
 
     // ---------------- 内部方法 ----------------
 
-    /** 构造无效响应(不写 last_verified_at,避免被无效请求刷时间) */
-    private LicenseVerifyResponse buildInvalid(MerchantLicense license, String reason, String code) {
+    /** 构造无效响应 */
+    private LicenseVerifyResponse buildInvalid(MerchantLicense license, MerchantPermission permission,
+                                                String reason, String code) {
         LicenseVerifyResponse resp = new LicenseVerifyResponse();
         resp.setValid(false);
         resp.setInvalidReason(code + ":" + reason);
@@ -220,8 +225,16 @@ public class LicenseServiceImpl implements LicenseService {
         if (license != null) {
             resp.setMerchantId(license.getMerchantId());
             resp.setStatus(license.getStatus());
-            resp.setExpireAt(license.getExpireAt());
             resp.setOfflineGraceHours(license.getOfflineGraceHours());
+        }
+        if (permission != null) {
+            resp.setExpireAt(permission.getExpireAt());
+            resp.setMaxAgents(permission.getMaxAgents());
+            resp.setMaxTasks(permission.getMaxTasks());
+            resp.setFeatures(permission.getFeatures());
+            if (permission.getOfflineGraceHours() != null) {
+                resp.setOfflineGraceHours(permission.getOfflineGraceHours());
+            }
         }
         signResponse(resp);
         return resp;

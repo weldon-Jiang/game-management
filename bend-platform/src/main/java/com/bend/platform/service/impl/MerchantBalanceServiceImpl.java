@@ -13,10 +13,15 @@ import com.bend.platform.repository.MerchantMapper;
 import com.bend.platform.service.MerchantBalanceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * 商户点数账户：余额查询、扣减/充值及 point_transaction 流水。
@@ -30,6 +35,15 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
     private final PointTransactionMapper transactionMapper;
     private final MerchantMapper merchantMapper;
     private final VipLevelService vipLevelService;
+
+    @Value("${license.mode:master}")
+    private String licenseMode;
+    @Value("${license.master-url:}")
+    private String masterUrl;
+    @Value("${license.key:${LICENSE_KEY:}}")
+    private String licenseKey;
+    @Value("${license.secret:${LICENSE_SECRET:}}")
+    private String licenseSecret;
 
     @Override
     public MerchantBalance getByMerchantId(String merchantId) {
@@ -134,6 +148,9 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean deductPoints(String merchantId, int points, String userId, String type, String refId, String description) {
+        if ("tenant".equalsIgnoreCase(licenseMode)) {
+            return proxyDeductToMaster(merchantId, points, refId);
+        }
         MerchantBalance balance = getByMerchantId(merchantId);
         int oldBalance = balance.getBalance();
 
@@ -236,5 +253,23 @@ public class MerchantBalanceServiceImpl implements MerchantBalanceService {
     public boolean hasEnoughBalance(String merchantId, int points) {
         MerchantBalance balance = getByMerchantId(merchantId);
         return balance.getBalance() >= points;
+    }
+
+    private boolean proxyDeductToMaster(String merchantId, int points, String taskId) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-License-Key", licenseKey);
+            headers.set("X-License-Secret", licenseSecret);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            Map<String, Object> body = new HashMap<>();
+            body.put("points", points);
+            body.put("taskId", taskId != null ? taskId : "");
+            String url = masterUrl.replaceAll("/+$", "") + "/api/tenant/billing/deduct";
+            ResponseEntity<Map> resp = new RestTemplate().postForEntity(url, new HttpEntity<>(body, headers), Map.class);
+            return resp.getBody() != null && Integer.valueOf(200).equals(resp.getBody().get("code"));
+        } catch (Exception e) {
+            log.warn("分控代理扣点失败", e);
+            return false;
+        }
     }
 }

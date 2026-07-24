@@ -28,7 +28,7 @@ RUN ls -la /root/.m2/repository/org/projectlombok/lombok || echo "Lombok not fou
 COPY src ./src
 
 # 编译并打包
-RUN mvn clean compile -DskipTests && mvn package -DskipTests -Dmaven.test.skip=true
+RUN mvn clean package -DskipTests -Dmaven.test.skip=true
 
 # 运行阶段
 FROM eclipse-temurin:17-jre

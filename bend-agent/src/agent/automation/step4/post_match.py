@@ -11,7 +11,7 @@ Step4 赛后处理与资源清理
 import asyncio
 from typing import Optional, Any
 
-from ..task.task_context import AgentTaskContext, GameAccountInfo
+from ...task.task_context import AgentTaskContext, GameAccountInfo
 from .constants import MATCH_END_SCENE_IDS, UT_MENU_SCENE_IDS, SETTLEMENT_SCENE_IDS
 from .setup import _match_expected_screen
 
@@ -40,7 +40,7 @@ async def _init_gamepad_protocol(
     - bool: 是否成功
     """
     try:
-        from ..input.controller_protocol import ControllerProtocol
+        from ...input.controller_protocol import ControllerProtocol
 
         if not context.xbox_session:
             task_logger.warning("Xbox会话不可用，手柄协议初始化失败")
@@ -99,7 +99,7 @@ async def _detect_screen_state(
             game_logger.warning("[场景检测] 画面捕获器不可用")
             return False
 
-        from ..runtime.stream_runtime import capture_task_frame
+        from ...runtime.stream_runtime import capture_task_frame
 
         frame = await capture_task_frame(context)
         if frame is None:
@@ -160,7 +160,7 @@ async def _wait_for_match_started(
                 game_logger.info("[场景: MATCH_START] scene=%s", hit)
                 return True
 
-        from ..runtime.stream_runtime import capture_task_frame
+        from ...runtime.stream_runtime import capture_task_frame
 
         for _ in range(10):
             frame = await capture_task_frame(context, timeout=0.8)
@@ -211,7 +211,7 @@ async def _detect_match_ended(
 
         detector = getattr(context, "_streaming_scene_detector", None)
         if detector:
-            from ..runtime.stream_runtime import capture_task_frame
+            from ...runtime.stream_runtime import capture_task_frame
 
             frame = await capture_task_frame(context, timeout=0.5)
             if frame is not None:
@@ -251,7 +251,7 @@ async def _skip_settlement(
     跳过结算：按 A 穿过 UT 赛后弹窗直至回到主菜单（127/147/149）。
     """
     try:
-        from ..game.account_switcher import FC_UT_TARGET_SCENES
+        from ...game.account_switcher import FC_UT_TARGET_SCENES
 
         task_logger.info("跳过结算画面...")
         game_logger.info("跳过结算画面")

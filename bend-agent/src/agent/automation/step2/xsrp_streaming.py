@@ -7,10 +7,10 @@
 import asyncio
 from typing import Callable
 
-from ..core.account_logger import get_stream_logger
-from ..core.task_logger import get_task_logger
-from ..task.task_context import AgentTaskContext, Step2Result, TaskStepStatus
-from ..xbox.step2_xsrp_connect import discover_and_connect_xsrp
+from ...core.account_logger import get_stream_logger
+from ...core.task_logger import get_task_logger
+from ...task.task_context import AgentTaskContext, Step2Result, TaskStepStatus
+from ...xbox.step2_xsrp_connect import discover_and_connect_xsrp
 
 
 async def step2_execute_xsrp_streaming(

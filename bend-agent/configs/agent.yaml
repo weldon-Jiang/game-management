@@ -15,8 +15,8 @@ aes:
 # 后端服务器配置
 # ----------------------------------------------
 backend:
-  base_url: "http://localhost:8060"
-  ws_url: "ws://localhost:8060/ws/agent"
+  base_url: "http://localhost:8062"
+  ws_url: "ws://localhost:8062/ws/agent"
   api_prefix: "/api"
 
 # Platform 回调 API 默认由 backend.base_url + api_prefix 推导，与 ApiClient 共用网关地址

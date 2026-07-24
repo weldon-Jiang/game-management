@@ -10,17 +10,17 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable, Dict, Optional
 
-from ..core.account_logger import get_stream_logger
-from ..core.task_logger import get_task_logger
-from ..task.task_context import AgentTaskContext, Step3Result, TaskStepStatus
-from ..xbox.xsrp_frame_capture import XsrpFrameCapture
-from ..xbox.xsrp_pipeline_diagnostic import pipeline_diagnostic_from_context
-from ..xbox.stream_recovery import install_task_input_recovery
-from ..xbox.xsrp_access_input_loop import (
+from ...core.account_logger import get_stream_logger
+from ...core.task_logger import get_task_logger
+from ...task.task_context import AgentTaskContext, Step3Result, TaskStepStatus
+from ...xbox.xsrp_frame_capture import XsrpFrameCapture
+from ...xbox.xsrp_pipeline_diagnostic import pipeline_diagnostic_from_context
+from ...xbox.stream_recovery import install_task_input_recovery
+from ...xbox.xsrp_access_input_loop import (
     reset_controller_write_stats,
     start_xsrp_access_input_loop,
 )
-from ..xbox.xsrp_stream_keepalive import stop_xsrp_idle_keepalive
+from ...xbox.xsrp_stream_keepalive import stop_xsrp_idle_keepalive
 
 # 复用旧 Step3 的窗口/输入/S DL 泵实现，避免重复维护
 from .display_helpers import (
@@ -100,7 +100,7 @@ async def step3_execute_xsrp_init(
         task_logger.info("xsrp 首帧: %sx%s", frame.width, frame.height)
         stream_logger.info(f"xsrp 首帧: {frame.width}x{frame.height}")
 
-        from ..runtime.stream_runtime import get_or_create_stream_runtime
+        from ...runtime.stream_runtime import get_or_create_stream_runtime
 
         stream_runtime = get_or_create_stream_runtime(context)
         stream_runtime.seed_latest_frame(frame)
@@ -136,7 +136,7 @@ async def step3_execute_xsrp_init(
         install_task_input_recovery(context, task_logger)
         _bind_xsrp_input_close_handler(context, task_logger)
         await start_xsrp_access_input_loop(context, task_logger)
-        from ..xbox.stream_liveness_monitor import start_stream_liveness_monitor
+        from ...xbox.stream_liveness_monitor import start_stream_liveness_monitor
 
         await start_stream_liveness_monitor(context, task_logger)
         await _start_input_pump_if_ready(context, task_logger)
@@ -179,16 +179,16 @@ def is_xsrp_stream_media_ready(context: AgentTaskContext) -> bool:
 
 
 def _bind_xsrp_input_close_handler(context: AgentTaskContext, task_logger) -> None:
-    from ..xbox.stream_recovery import bind_stream_health_handlers
+    from ...xbox.stream_recovery import bind_stream_health_handlers
 
     bind_stream_health_handlers(context, task_logger)
 
 
 async def _validate_xsrp_stream_readiness(context, task_logger, stream_logger) -> tuple:
     """验证 WebRTC 帧与 DataChannel 输入（无 LAN 重连）。"""
-    from ..runtime.stream_runtime import capture_task_frame
-    from ..xbox.stream_keepalive import is_input_channel_open
-    from ..xbox.stream_recovery import kick_input_recovery
+    from ...runtime.stream_runtime import capture_task_frame
+    from ...xbox.stream_keepalive import is_input_channel_open
+    from ...xbox.stream_recovery import kick_input_recovery
 
     async def _check_frames() -> tuple:
         if context.frame_capture is None:
@@ -205,7 +205,7 @@ async def _validate_xsrp_stream_readiness(context, task_logger, stream_logger) -
         return True, f"WebRTC 帧稳定 {sizes[0][0]}x{sizes[0][1]}"
 
     async def _check_input() -> tuple:
-        from ..xbox.controller_write import send_stream_keepalive
+        from ...xbox.controller_write import send_stream_keepalive
 
         session = getattr(context, "xbox_session", None)
         if session is None:

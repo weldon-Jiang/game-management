@@ -355,16 +355,16 @@ class CentralManager:
             # 连接API服务器
             await self.api.connect()
 
-            # 检查注册码
-            if not self.registration_code:
-                self.logger.error("No registration code provided")
-                return False
-
-            # 注册Agent
-            registered = await self.register()
-            if not registered:
-                self.logger.error("Failed to register agent")
-                return False
+            # 注册Agent：有注册码走传统注册，自动注册(无码)直接连接WebSocket
+            if self.registration_code:
+                registered = await self.register()
+                if not registered:
+                    self.logger.error("Failed to register agent")
+                    return False
+            else:
+                # 自动注册已完成(AgentAutoRegisterController)，跳过 /agents/register
+                self._agent_info.status = 'online'
+                self.logger.info("Agent auto-registered, skipping register call")
 
             # 设置WebSocket事件处理器
             self.ws.on('task', self._handle_task)            # 任务处理
