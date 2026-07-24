@@ -7,6 +7,7 @@ import com.bend.platform.dto.LicenseIssueResponse;
 import com.bend.platform.dto.PermissionCreateRequest;
 import com.bend.platform.entity.MerchantPermission;
 import com.bend.platform.config.MasterModeCondition;
+import com.bend.platform.config.PermissionDefaults;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.impl.MerchantDataExportService;
@@ -40,6 +41,7 @@ public class InstallActivateService {
     private final LicenseService licenseService;
     private final PermissionService permissionService;
     private final MerchantDataExportService dataExportService;
+    private final PermissionDefaults permissionDefaults;
 
     @Value("${tenant.db-password:D$U@GAMECeKfidb}")
     private String tenantDbPassword;
@@ -68,14 +70,12 @@ public class InstallActivateService {
         log.info("[安装激活] License签发成功 licenseKey={} merchantId={}",
                 licenseResp.getLicenseKey(), merchantId);
 
-        // 3. 创建使用权限（默认1年有效）
-        java.time.LocalDateTime expireAt = java.time.LocalDateTime.now().plusYears(1);
+        // 3. 创建使用权限（用全局默认值：年限/Agent数/任务数，见 bend.permission.* 配置）
         PermissionCreateRequest permReq = new PermissionCreateRequest();
         permReq.setMerchantId(merchantId);
-        permReq.setExpireAt(expireAt);
-        permReq.setMaxAgents(5);
-        permReq.setMaxTasks(50);
+        // duration/expireAt/maxAgents/maxTasks 都空 → createOrRenew 用 PermissionDefaults 兜底
         MerchantPermission perm = permissionService.createOrRenew(permReq);
+        java.time.LocalDateTime expireAt = perm.getExpireAt();
         log.info("[安装激活] 使用权限创建成功 merchantId={} expireAt={}", merchantId, expireAt);
 
         // 4. 导出商户数据

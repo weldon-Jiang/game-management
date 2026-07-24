@@ -10,8 +10,11 @@ export const permissionApi = {
   /** 创建/激活权限 */
   create: (data) => request.post('/api/permissions', data),
 
-  /** 续期。expireAt 格式: yyyy-MM-dd HH:mm:ss */
+  /** 续期：自定义到期日期。expireAt 格式: yyyy-MM-dd HH:mm:ss */
   renew: (id, expireAt) => request.put(`/api/permissions/${id}/renew`, null, { params: { expireAt } }),
+
+  /** 续期：按套餐时长（DAYS_30/DAYS_90/YEAR_1），从当前到期日往后加 */
+  renewByDuration: (id, duration) => request.put(`/api/permissions/${id}/renew-duration`, null, { params: { duration } }),
 
   /** 停用 */
   suspend: (id) => request.put(`/api/permissions/${id}/suspend`),

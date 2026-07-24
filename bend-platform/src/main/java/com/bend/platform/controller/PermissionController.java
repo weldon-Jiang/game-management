@@ -46,7 +46,7 @@ public class PermissionController {
         return ApiResponse.success("创建成功", permissionService.createOrRenew(request));
     }
 
-    /** 续期 */
+    /** 续期：自定义到期日期（兜底） */
     @PutMapping("/{id}/renew")
     public ApiResponse<Void> renew(@PathVariable String id, @RequestParam String expireAt) {
         if (!UserContext.isPlatformAdmin()) {
@@ -54,6 +54,16 @@ public class PermissionController {
         }
         LocalDateTime newExpire = LocalDateTime.parse(expireAt, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         permissionService.renew(id, newExpire);
+        return ApiResponse.success("续期成功", null);
+    }
+
+    /** 续期：按套餐时长（30天/90天/1年），从当前到期日往后加 */
+    @PutMapping("/{id}/renew-duration")
+    public ApiResponse<Void> renewByDuration(@PathVariable String id, @RequestParam String duration) {
+        if (!UserContext.isPlatformAdmin()) {
+            throw new BusinessException(ResultCode.Auth.PERMISSION_DENIED);
+        }
+        permissionService.renewByDuration(id, duration);
         return ApiResponse.success("续期成功", null);
     }
 

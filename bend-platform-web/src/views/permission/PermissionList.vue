@@ -90,7 +90,19 @@
         <el-form-item v-if="dialogType === 'renew'" label="当前到期">
           <span class="info-text">{{ formatDate(renewTarget?.expireAt) }}</span>
         </el-form-item>
-        <el-form-item label="到期时间" prop="expireAt">
+        <el-form-item label="有效期方式">
+          <el-radio-group v-model="form.expireMode">
+            <el-radio-button value="duration">套餐时长</el-radio-button>
+            <el-radio-button value="custom">自定义日期</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="form.expireMode === 'duration'" label="套餐时长" prop="duration">
+          <el-select v-model="form.duration" placeholder="请选择套餐" style="width: 100%">
+            <el-option v-for="d in durationOptions" :key="d.value" :label="d.label" :value="d.value" />
+          </el-select>
+          <div v-if="dialogType === 'renew'" class="form-hint">续期从当前到期日往后加（已过期则从今天起算）</div>
+        </el-form-item>
+        <el-form-item v-if="form.expireMode === 'custom'" label="到期时间" prop="expireAt">
           <el-date-picker
             v-model="form.expireAt" type="datetime" placeholder="选择到期时间"
             format="YYYY-MM-DD HH:mm:ss" value-format="YYYY-MM-DD HH:mm:ss" style="width: 100%"
@@ -131,14 +143,22 @@ const pagination = reactive({ pageNum: 1, pageSize: 10, total: 0 })
 const filterMerchantId = ref('')
 const filterStatus = ref('')
 
+// 套餐时长选项（与后端 PermissionDuration 枚举对齐）
+const durationOptions = [
+  { value: 'DAYS_30', label: '30天' },
+  { value: 'DAYS_90', label: '90天' },
+  { value: 'YEAR_1', label: '1年' }
+]
+
 // 对话框
 const dialogVisible = ref(false)
 const dialogType = ref('create') // 'create' | 'renew'
 const submitLoading = ref(false)
 const formRef = ref(null)
-const form = reactive({ merchantId: '', expireAt: '', maxAgents: 5, maxTasks: 50 })
+const form = reactive({ merchantId: '', expireMode: 'duration', duration: 'YEAR_1', expireAt: '', maxAgents: 5, maxTasks: 50 })
 const formRules = {
   merchantId: [{ required: true, message: '请选择商户', trigger: 'change' }],
+  duration: [{ required: true, message: '请选择套餐', trigger: 'change' }],
   expireAt: [{ required: true, message: '请选择到期时间', trigger: 'change' }]
 }
 const renewTarget = ref(null)
@@ -178,6 +198,8 @@ const getMerchantName = (id) => {
 const showCreateDialog = () => {
   dialogType.value = 'create'
   form.merchantId = ''
+  form.expireMode = 'duration'
+  form.duration = 'YEAR_1'
   form.expireAt = ''
   form.maxAgents = 5
   form.maxTasks = 50
@@ -188,13 +210,20 @@ const showCreateDialog = () => {
 const showRenewDialog = (row) => {
   dialogType.value = 'renew'
   renewTarget.value = row
+  form.expireMode = 'duration'
+  form.duration = 'YEAR_1'
   form.expireAt = ''
   form.merchantId = '' // not used for renew
   dialogVisible.value = true
 }
 
 const handleSubmit = async () => {
-  if (!form.expireAt) { ElMessage.warning('请选择到期时间'); return }
+  // 按有效期方式校验
+  if (form.expireMode === 'duration') {
+    if (!form.duration) { ElMessage.warning('请选择套餐时长'); return }
+  } else {
+    if (!form.expireAt) { ElMessage.warning('请选择到期时间'); return }
+  }
   if (dialogType.value === 'create') {
     const valid = await formRef.value?.validate().catch(() => false)
     if (!valid) return
@@ -202,15 +231,18 @@ const handleSubmit = async () => {
   submitLoading.value = true
   try {
     if (dialogType.value === 'create') {
-      await permissionApi.create({
-        merchantId: form.merchantId,
-        expireAt: form.expireAt,
-        maxAgents: form.maxAgents,
-        maxTasks: form.maxTasks
-      })
+      const payload = { merchantId: form.merchantId, maxAgents: form.maxAgents, maxTasks: form.maxTasks }
+      if (form.expireMode === 'duration') payload.duration = form.duration
+      else payload.expireAt = form.expireAt
+      await permissionApi.create(payload)
       ElMessage.success('权限创建成功')
     } else {
-      await permissionApi.renew(renewTarget.value.id, form.expireAt)
+      // 续期: 套餐 → renewByDuration(从当前到期日加); 自定义 → renew(精确日期)
+      if (form.expireMode === 'duration') {
+        await permissionApi.renewByDuration(renewTarget.value.id, form.duration)
+      } else {
+        await permissionApi.renew(renewTarget.value.id, form.expireAt)
+      }
       ElMessage.success('续期成功')
     }
     dialogVisible.value = false
@@ -257,6 +289,7 @@ onMounted(() => { loadMerchants(); loadData() })
 .expired-text { color: var(--danger); font-weight: 500; }
 .text-muted { color: var(--text-muted); font-size: 13px; }
 .info-text { font-size: 14px; color: var(--text-primary); }
+.form-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 .table-container { padding: var(--spacing-lg); }
 .data-table { width: 100%; }
 :deep(.el-table__body-wrapper .el-table__row:hover td.el-table__cell) { background-color: #1a1a2e !important; }

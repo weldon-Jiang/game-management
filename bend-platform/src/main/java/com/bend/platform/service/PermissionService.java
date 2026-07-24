@@ -14,8 +14,14 @@ public interface PermissionService {
     /** 为商户创建/激活使用权限（安装激活时调用，或总控管理员手动创建） */
     MerchantPermission createOrRenew(PermissionCreateRequest request);
 
-    /** 续期（延长到期时间，expired → active） */
+    /** 续期：指定精确到期时间（自定义日期兜底，expired → active） */
     void renew(String permissionId, java.time.LocalDateTime newExpireAt);
+
+    /**
+     * 续期：按套餐时长，从当前到期日(已过期则从当前时间)往后加。
+     * @param durationCode 套餐码，见 {@link com.bend.platform.dto.PermissionDuration}
+     */
+    void renewByDuration(String permissionId, String durationCode);
 
     /** 停用（暂停商户使用，active → suspended） */
     void suspend(String permissionId);

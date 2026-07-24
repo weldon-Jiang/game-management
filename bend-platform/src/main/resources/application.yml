@@ -121,6 +121,15 @@ tenant:
   # 分控 MySQL root 密码（总控管理员指定，安装激活时下发给分控）
   db-password: ${TENANT_DB_PASSWORD:D@GAMECeKfidb}
 
+# 商户使用权限(Permission)默认值 —— 全局唯一来源，管理员未指定时兜底
+# 散落的硬编码(1年/5Agent/50任务/24h)统一收敛到此
+bend:
+  permission:
+    default-expire-years: ${PERMISSION_DEFAULT_EXPIRE_YEARS:1}
+    default-max-agents: ${PERMISSION_DEFAULT_MAX_AGENTS:5}
+    default-max-tasks: ${PERMISSION_DEFAULT_MAX_TASKS:50}
+    default-offline-grace-hours: ${PERMISSION_DEFAULT_OFFLINE_GRACE_HOURS:24}
+
 # ----------------------------------------------
 # 监控和管理端点配置
 # ----------------------------------------------

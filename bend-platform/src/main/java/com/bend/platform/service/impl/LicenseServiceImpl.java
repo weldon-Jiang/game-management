@@ -12,6 +12,7 @@ import com.bend.platform.entity.MerchantLicense;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.entity.MerchantPermission;
+import com.bend.platform.config.PermissionDefaults;
 import com.bend.platform.repository.MerchantLicenseMapper;
 import com.bend.platform.repository.MerchantPermissionMapper;
 import com.bend.platform.service.LicenseService;
@@ -46,6 +47,7 @@ public class LicenseServiceImpl implements LicenseService {
     private final MerchantService merchantService;
     private final LicenseSignUtil signUtil;
     private final ObjectMapper objectMapper;
+    private final PermissionDefaults defaults;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -66,7 +68,7 @@ public class LicenseServiceImpl implements LicenseService {
         // License 不再承载 expireAt/maxAgents/maxTasks/features
         // 这些字段已迁移到 merchant_permission 表
         license.setStatus(request.getMachineFingerprint() != null ? "active" : "pending");
-        license.setOfflineGraceHours(request.getOfflineGraceHours() != null ? request.getOfflineGraceHours() : 24);
+        license.setOfflineGraceHours(request.getOfflineGraceHours() != null ? request.getOfflineGraceHours() : defaults.getDefaultOfflineGraceHours());
         if (request.getMachineFingerprint() != null) {
             license.setBoundMachineFingerprint(request.getMachineFingerprint());
             license.setActivatedAt(LocalDateTime.now());
@@ -161,7 +163,7 @@ public class LicenseServiceImpl implements LicenseService {
         resp.setMaxAgents(permission.getMaxAgents());
         resp.setMaxTasks(permission.getMaxTasks());
         resp.setFeatures(permission.getFeatures());
-        resp.setOfflineGraceHours(permission.getOfflineGraceHours() != null ? permission.getOfflineGraceHours() : 24);
+        resp.setOfflineGraceHours(permission.getOfflineGraceHours() != null ? permission.getOfflineGraceHours() : defaults.getDefaultOfflineGraceHours());
         resp.setVerifiedAt(LocalDateTime.now());
         resp.setInvalidReason(null);
         signResponse(resp);
@@ -265,9 +267,5 @@ public class LicenseServiceImpl implements LicenseService {
             log.error("License响应签名失败", e);
             throw new BusinessException(ResultCode.License.UPDATE_FAILED);
         }
-    }
-
-    private String formatTime(LocalDateTime time) {
-        return time != null ? time.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) : null;
     }
 }

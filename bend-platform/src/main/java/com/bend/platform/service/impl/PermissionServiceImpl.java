@@ -3,7 +3,9 @@ package com.bend.platform.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bend.platform.config.PermissionDefaults;
 import com.bend.platform.dto.PermissionCreateRequest;
+import com.bend.platform.dto.PermissionDuration;
 import com.bend.platform.entity.Merchant;
 import com.bend.platform.entity.MerchantPermission;
 import com.bend.platform.exception.BusinessException;
@@ -28,11 +30,26 @@ public class PermissionServiceImpl implements PermissionService {
 
     private final MerchantPermissionMapper permissionMapper;
     private final MerchantService merchantService;
+    private final PermissionDefaults defaults;
+
+    /**
+     * 计算到期时间：duration 优先 → expireAt → 默认年限兜底。
+     */
+    private LocalDateTime resolveExpireAt(PermissionCreateRequest request) {
+        PermissionDuration dur = PermissionDuration.fromCode(request.getDuration());
+        if (dur != null) {
+            return dur.plusFrom(LocalDateTime.now());
+        }
+        if (request.getExpireAt() != null) {
+            return request.getExpireAt();
+        }
+        return LocalDateTime.now().plusYears(defaults.getDefaultExpireYears());
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MerchantPermission createOrRenew(PermissionCreateRequest request) {
-        if (request.getExpireAt() == null) {
+        if (request.getMerchantId() == null) {
             throw new BusinessException(ResultCode.System.BAD_REQUEST);
         }
         Merchant merchant = merchantService.findById(request.getMerchantId());
@@ -40,10 +57,11 @@ public class PermissionServiceImpl implements PermissionService {
             throw new BusinessException(ResultCode.Merchant.NOT_FOUND);
         }
 
+        LocalDateTime expireAt = resolveExpireAt(request);
         MerchantPermission existing = permissionMapper.selectByMerchantId(request.getMerchantId());
         if (existing != null) {
             // 续期/更新: 覆盖到期时间和配额
-            existing.setExpireAt(request.getExpireAt());
+            existing.setExpireAt(expireAt);
             existing.setMaxAgents(request.getMaxAgents() != null ? request.getMaxAgents() : existing.getMaxAgents());
             existing.setMaxTasks(request.getMaxTasks() != null ? request.getMaxTasks() : existing.getMaxTasks());
             if (request.getFeatures() != null) {
@@ -54,20 +72,20 @@ public class PermissionServiceImpl implements PermissionService {
             }
             existing.setStatus("active");
             permissionMapper.updateById(existing);
-            log.info("更新商户使用权限 merchantId={} expireAt={}", request.getMerchantId(), request.getExpireAt());
+            log.info("更新商户使用权限 merchantId={} expireAt={}", request.getMerchantId(), expireAt);
             return existing;
         } else {
             // 新建
             MerchantPermission perm = new MerchantPermission();
             perm.setMerchantId(request.getMerchantId());
             perm.setStatus("active");
-            perm.setExpireAt(request.getExpireAt());
-            perm.setMaxAgents(request.getMaxAgents() != null ? request.getMaxAgents() : 5);
-            perm.setMaxTasks(request.getMaxTasks() != null ? request.getMaxTasks() : 50);
+            perm.setExpireAt(expireAt);
+            perm.setMaxAgents(request.getMaxAgents() != null ? request.getMaxAgents() : defaults.getDefaultMaxAgents());
+            perm.setMaxTasks(request.getMaxTasks() != null ? request.getMaxTasks() : defaults.getDefaultMaxTasks());
             perm.setFeatures(request.getFeatures());
-            perm.setOfflineGraceHours(request.getOfflineGraceHours() != null ? request.getOfflineGraceHours() : 24);
+            perm.setOfflineGraceHours(request.getOfflineGraceHours() != null ? request.getOfflineGraceHours() : defaults.getDefaultOfflineGraceHours());
             permissionMapper.insert(perm);
-            log.info("创建商户使用权限 merchantId={} expireAt={}", request.getMerchantId(), request.getExpireAt());
+            log.info("创建商户使用权限 merchantId={} expireAt={}", request.getMerchantId(), expireAt);
             return perm;
         }
     }
@@ -86,6 +104,29 @@ public class PermissionServiceImpl implements PermissionService {
         }
         permissionMapper.updateById(perm);
         log.info("续期商户使用权限 permissionId={} newExpireAt={} status={}", permissionId, newExpireAt, perm.getStatus());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void renewByDuration(String permissionId, String durationCode) {
+        PermissionDuration dur = PermissionDuration.fromCode(durationCode);
+        if (dur == null) {
+            throw new BusinessException(ResultCode.System.BAD_REQUEST);
+        }
+        MerchantPermission perm = permissionMapper.selectById(permissionId);
+        if (perm == null) {
+            throw new BusinessException(ResultCode.License.NOT_FOUND);
+        }
+        // 续期基准: 当前到期日仍在未来则从到期日往后加，否则从当前时间往后加
+        LocalDateTime base = (perm.getExpireAt() != null && perm.getExpireAt().isAfter(LocalDateTime.now()))
+                ? perm.getExpireAt() : LocalDateTime.now();
+        LocalDateTime newExpire = dur.plusFrom(base);
+        perm.setExpireAt(newExpire);
+        if ("expired".equals(perm.getStatus())) {
+            perm.setStatus("active");
+        }
+        permissionMapper.updateById(perm);
+        log.info("按套餐续期商户使用权限 permissionId={} duration={} newExpireAt={}", permissionId, durationCode, newExpire);
     }
 
     @Override

@@ -6,10 +6,12 @@ import com.bend.platform.dto.LicenseCreateRequest;
 import com.bend.platform.dto.LicenseIssueResponse;
 import com.bend.platform.dto.LicenseVerifyRequest;
 import com.bend.platform.dto.LicenseVerifyResponse;
+import com.bend.platform.dto.PermissionCreateRequest;
 import com.bend.platform.entity.MerchantLicense;
 import com.bend.platform.exception.BusinessException;
 import com.bend.platform.exception.ResultCode;
 import com.bend.platform.service.LicenseService;
+import com.bend.platform.service.PermissionService;
 import com.bend.platform.util.UserContext;
 import com.bend.platform.config.MasterModeCondition;
 import jakarta.servlet.http.HttpServletRequest;
@@ -41,10 +43,14 @@ import java.util.List;
 public class LicenseController {
 
     private final LicenseService licenseService;
+    private final PermissionService permissionService;
 
     /**
      * 签发 license(打包分控包前调用)。仅平台管理员。
      * expireAt/maxAgents/maxTasks/features 已迁移到 Permission，此处不再接收。
+     *
+     * <p>ensure 语义: 若商户尚无使用权限，用默认值建一条（1年/5Agent/50任务）；
+     * 已有则不动（保护换机重绑等场景不被覆盖）。管理员事后可在「权限管理」页随时调整。
      */
     @PostMapping
     public ApiResponse<LicenseIssueResponse> issue(@RequestBody LicenseCreateRequest request) {
@@ -54,7 +60,16 @@ public class LicenseController {
         if (request.getMerchantId() == null) {
             throw new BusinessException(ResultCode.System.BAD_REQUEST);
         }
-        return ApiResponse.success("授权签发成功", licenseService.issueLicense(request));
+        LicenseIssueResponse resp = licenseService.issueLicense(request);
+
+        // ensure: 无 Permission 才建默认，有则原样保留
+        if (permissionService.findByMerchantId(request.getMerchantId()) == null) {
+            PermissionCreateRequest permReq = new PermissionCreateRequest();
+            permReq.setMerchantId(request.getMerchantId());
+            // duration/expireAt 都空 → createOrRenew 用 bend.permission.default-expire-years 兜底
+            permissionService.createOrRenew(permReq);
+        }
+        return ApiResponse.success("授权签发成功", resp);
     }
 
     /**
